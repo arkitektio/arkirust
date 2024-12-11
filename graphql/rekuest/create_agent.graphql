@@ -1,0 +1,8 @@
+mutation EnsureAgent($input: AgentInput!) {
+  ensureAgent(input: $input) {
+    id
+    instanceId
+    extensions
+    name
+  }
+}

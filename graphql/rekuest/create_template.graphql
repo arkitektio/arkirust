@@ -1,0 +1,5 @@
+mutation CreateTemplate($input: CreateTemplateInput!) {
+  createTemplate(input: $input) {
+    id
+  }
+}

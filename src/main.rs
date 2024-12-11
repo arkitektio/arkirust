@@ -1,15 +1,19 @@
 use std::any::Any;
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 
 use anyhow;
+use arkirust::json_types;
 use futures::{SinkExt, StreamExt};
+use graphql_client::GraphQLQuery;
+use graphql_client::Response;
 use oauth2::basic::BasicClient;
 use oauth2::http::{request, response};
 use oauth2::reqwest::async_http_client; // Use the provided async HTTP client function
 use oauth2::{AuthUrl, ClientId, ClientSecret, Scope, TokenResponse, TokenUrl};
-use reqwest;
 use serde::{Deserialize, Serialize};
-
+use tokio::pin;
 #[derive(Serialize)]
 struct Requirement {
     key: String,
@@ -100,6 +104,16 @@ struct InitialAgentMessage {
 }
 
 #[derive(Deserialize, Serialize, Debug)]
+struct AssignationEventMessage {
+    #[serde(rename = "type")]
+    type_: String,
+    assignation: i64,
+    kind: String,
+    message: Option<String>,
+    returns: Option<HashMap<String, serde_json::Value>>,
+}
+
+#[derive(Deserialize, Serialize, Debug)]
 struct HeartbeatResponseMessage {
     #[serde(rename = "type")]
     type_: String,
@@ -129,7 +143,17 @@ enum AgentMessage {
         inquiries: Vec<Inquiry>,
     },
     #[serde(rename = "ASSIGN")]
-    Assign { assignment_id: String },
+    Assign {
+        assignation: i64,
+        args: HashMap<String, serde_json::Value>,
+        provision: i64,
+    },
+    #[serde(rename = "PROVIDE")]
+    Provide { provision: i64 },
+    #[serde(rename = "UNPROVIDE")]
+    Unprovide {},
+    #[serde(rename = "ERROR")]
+    Error { code: i64 },
 }
 
 async fn get_saved_token() -> Result<Option<String>, Box<dyn std::error::Error>> {
@@ -298,6 +322,8 @@ async fn get_auth_token(config: UnlokFakt) -> Result<String, Box<dyn std::error:
 async fn loop_forever(
     config: RekuestFakt,
     token: String,
+    registry: FunctionRegistry,
+    client: reqwest::Client,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let (ws_stream, _) = tokio_tungstenite::connect_async(config.agent.endpoint_url).await?;
     let (write, read) = ws_stream.split();
@@ -366,8 +392,77 @@ async fn loop_forever(
                             println!("Received initial message: {} ", instance_id);
                         }
 
-                        AgentMessage::Assign { assignment_id } => {
-                            println!("Received assignment: {}", assignment_id);
+                        AgentMessage::Assign {
+                            provision,
+                            args,
+                            assignation,
+                            ..
+                        } => {
+                            println!("Received assignment: {}", provision);
+
+                            let get_provision =
+                                GetProvision::build_query(get_provision::Variables {
+                                    id: provision.to_string(),
+                                });
+
+                            let mut res = client
+                                .post(config.endpoint_url.clone())
+                                .json(&get_provision)
+                                .send()
+                                .await;
+
+                            let response_body: Response<get_provision::ResponseData> =
+                                res.unwrap().json().await.unwrap();
+
+                            let template = response_body.data.unwrap().provision.template.id;
+                            match registry.get_function(template.as_str()) {
+                                Some(func) => {
+                                    let returns = func(serde_json::to_string(&args).unwrap());
+                                    pin!(returns);
+
+                                    let x = returns.await;
+
+                                    let event = AssignationEventMessage {
+                                        type_: "ASSIGNATION_EVENT".to_string(),
+                                        assignation: assignation,
+                                        kind: "YIELD".to_string(),
+                                        message: None,
+                                        returns: Some(serde_json::from_str(&x).unwrap()),
+                                    };
+                                    msg_tx
+                                        .send(serde_json::to_string(&event).unwrap())
+                                        .await
+                                        .unwrap();
+
+                                    let event = AssignationEventMessage {
+                                        type_: "ASSIGNATION_EVENT".to_string(),
+                                        assignation: assignation,
+                                        kind: "DONE".to_string(),
+                                        message: None,
+                                        returns: None,
+                                    };
+
+                                    msg_tx
+                                        .send(serde_json::to_string(&event).unwrap())
+                                        .await
+                                        .unwrap();
+                                }
+                                None => {
+                                    println!("Function not found: {}", template);
+                                }
+                            };
+                        }
+
+                        AgentMessage::Provide { provision } => {
+                            println!("Received provision: {}", provision);
+                        }
+
+                        AgentMessage::Unprovide {} => {
+                            println!("Received unprovide");
+                        }
+
+                        AgentMessage::Error { code } => {
+                            println!("Received error: {}", code);
                         }
                     }
                 }
@@ -384,9 +479,113 @@ async fn loop_forever(
     Ok("Connection closed".to_string())
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+struct ExampleFuncArgs {
+    port: i64,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct ExampleFuncReturns {
+    port: i64,
+}
+
+async fn example_func(args: String) -> String {
+    let args = serde_json::from_str::<ExampleFuncArgs>(&args).unwrap();
+
+    let returns = ExampleFuncReturns {
+        port: args.port + 1,
+    };
+    serde_json::to_string(&returns).unwrap()
+}
+
+type InstanceId = String;
+type SearchQuery = String;
+type ValidatorFunction = String;
+type AnyDefault = String;
+type NodeHash = String;
+type Identifier = String;
+
+// The paths are relative to the directory where your `Cargo.toml` is located.
+// Both json and the GraphQL schema language are supported as sources for the schema
+#[derive(GraphQLQuery)]
+#[graphql(
+    schema_path = "graphql/rekuest/schema.graphql",
+    query_path = "graphql/rekuest/create_agent.graphql",
+    response_derives = "Debug,Clone"
+)]
+pub struct EnsureAgent;
+
+#[derive(GraphQLQuery)]
+#[graphql(
+    schema_path = "graphql/rekuest/schema.graphql",
+    query_path = "graphql/rekuest/create_template.graphql",
+    response_derives = "Debug,Clone",
+    variables_derives = "Clone",
+    derives = "Clone"
+)]
+pub struct CreateTemplate;
+
+#[derive(GraphQLQuery)]
+#[graphql(
+    schema_path = "graphql/rekuest/schema.graphql",
+    query_path = "graphql/rekuest/get_provision.graphql",
+    response_derives = "Debug,Clone",
+    variables_derives = "Clone",
+    derives = "Clone"
+)]
+pub struct GetProvision;
+
+struct FunctionRegistry {
+    functions: HashMap<
+        String,
+        Box<dyn Fn(String) -> Pin<Box<dyn Future<Output = String> + Send>> + Send + Sync>,
+    >,
+    templates: HashMap<String, create_template::TemplateInput>,
+}
+
+impl FunctionRegistry {
+    fn new() -> Self {
+        Self {
+            functions: HashMap::new(),
+            templates: HashMap::new(),
+        }
+    }
+
+    fn register<F, Fut>(
+        &mut self,
+        name: &str,
+        function: F,
+        template: create_template::TemplateInput,
+    ) where
+        F: Fn(String) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = String> + Send + 'static,
+    {
+        // Wrap the given function into one returning a boxed, pinned future
+        let wrapped = move |input: String| -> Pin<Box<dyn Future<Output = String> + Send>> {
+            Box::pin(function(input))
+        };
+
+        self.functions.insert(name.to_string(), Box::new(wrapped));
+        self.templates.insert(name.to_string(), template);
+    }
+
+    fn get_function(
+        &self,
+        name: &str,
+    ) -> Option<&Box<dyn Fn(String) -> Pin<Box<dyn Future<Output = String> + Send>> + Send + Sync>>
+    {
+        self.functions.get(name)
+    }
+
+    fn get_template(&self, name: &str) -> Option<&create_template::TemplateInput> {
+        self.templates.get(name)
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // fakts
+
     let fakts = register_client().await?;
     println!("Response from register_client: {:?}", fakts);
 
@@ -394,7 +593,121 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let token = get_auth_token(fakts.unlok).await?;
     println!("Access token: {:?}", token);
 
-    let _ = loop_forever(fakts.rekuest, token).await?;
+    let request = EnsureAgent::build_query(ensure_agent::Variables {
+        input: ensure_agent::AgentInput {
+            instance_id: "default".to_string(),
+            name: Some("my-agent".to_string()),
+            extensions: Some(Vec::new()),
+        },
+    });
+
+    let client = reqwest::Client::builder()
+        .user_agent("graphql-rust/0.10.0")
+        .default_headers(
+            std::iter::once((
+                reqwest::header::AUTHORIZATION,
+                reqwest::header::HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
+            ))
+            .collect(),
+        )
+        .build()?;
+
+    let mut res = client
+        .post(fakts.rekuest.endpoint_url.clone())
+        .json(&request)
+        .send()
+        .await?;
+
+    let template_input = create_template::TemplateInput {
+        definition: create_template::DefinitionInput {
+            description: Some("My template".to_string()),
+            name: "my-template".to_string(),
+            args: vec![create_template::PortInput {
+                key: "port".to_string(),
+                default: None,
+                scope: create_template::PortScope::GLOBAL,
+                kind: create_template::PortKind::INT,
+                children: Some(vec![]),
+                description: Some("Port number".to_string()),
+                groups: Some(vec!["default".to_string()]),
+                effects: Some(vec![]),
+                label: Some("Port".to_string()),
+                assign_widget: Box::new(None),
+                identifier: None,
+                nullable: false,
+                return_widget: None,
+                validators: Some(vec![]),
+            }],
+            kind: create_template::NodeKind::FUNCTION,
+            port_groups: vec![],
+            stateful: false,
+            is_dev: false,
+            is_test_for: vec![],
+            interfaces: vec![],
+            returns: vec![create_template::PortInput {
+                key: "port".to_string(),
+                default: None,
+                scope: create_template::PortScope::GLOBAL,
+                kind: create_template::PortKind::INT,
+                children: Some(vec![]),
+                description: Some("Port number".to_string()),
+                groups: Some(vec!["default".to_string()]),
+                effects: Some(vec![]),
+                label: Some("Port".to_string()),
+                assign_widget: Box::new(None),
+                identifier: None,
+                nullable: false,
+                return_widget: None,
+                validators: Some(vec![]),
+            }],
+            collections: vec![],
+        },
+        interface: "my-agent".to_string(),
+        dependencies: Vec::new(),
+        logo: None,
+        params: None,
+        dynamic: false,
+    };
+
+    let tmp_copy = template_input.clone();
+
+    let create_template_input = create_template::CreateTemplateInput {
+        template: template_input,
+        extension: "default".to_string(),
+        instance_id: "default".to_string(),
+    };
+
+    let create_first_template = CreateTemplate::build_query(create_template::Variables {
+        input: create_template_input,
+    });
+
+    let response_body: Response<ensure_agent::ResponseData> = res.json().await?;
+    println!("{:#?}", response_body);
+
+    let mut res = client
+        .post(fakts.rekuest.endpoint_url.clone())
+        .json(&create_first_template)
+        .send()
+        .await?;
+
+    let mut registry = FunctionRegistry::new();
+
+    let response_body: Response<create_template::ResponseData> = res.json().await?;
+
+    registry.register(
+        response_body
+            .data
+            .clone()
+            .unwrap()
+            .create_template
+            .id
+            .as_str(),
+        example_func,
+        tmp_copy,
+    );
+    println!("{:#?}", response_body);
+
+    let _ = loop_forever(fakts.rekuest, token, registry, client).await?;
 
     Ok(())
 }
