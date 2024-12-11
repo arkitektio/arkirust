@@ -492,6 +492,7 @@ struct ExampleFuncReturns {
 async fn example_func(args: String) -> String {
     let args = serde_json::from_str::<ExampleFuncArgs>(&args).unwrap();
 
+    println!("Received args: {:?}", args);
     let returns = ExampleFuncReturns {
         port: args.port + 1,
     };
