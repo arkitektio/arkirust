@@ -1,0 +1,29 @@
+mutation FromArrayLike($input: FromArrayLikeInput!) {
+  fromArrayLike(input: $input) {
+    id
+    name
+  }
+}
+
+mutation RequestUpload($input: RequestUploadInput!) {
+  requestUpload(input: $input) {
+    accessKey
+    status
+    secretKey
+    bucket
+    key
+    sessionToken
+    store
+  }
+}
+
+mutation RequestAccess($input: RequestAccessInput!) {
+  requestAccess(input: $input) {
+    accessKey
+    secretKey
+    bucket
+    key
+    sessionToken
+    path
+  }
+}
