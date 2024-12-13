@@ -2,17 +2,17 @@ use anyhow::Error;
 use graphql_client::QueryBody;
 use reqwest::Client;
 
-use super::fakt::RekuestFakt;
+use super::fakt::MikroFakt;
 
-pub type RekuestClientFunc = reqwest::RequestBuilder;
+pub type MikroClientFunc = reqwest::RequestBuilder;
 
-pub struct RekuestClient {
+pub struct MikroClient {
     client: Client,
     endpoint_url: String,
 }
 
-impl RekuestClient {
-    pub fn new(fakt: RekuestFakt, token: &str) -> Result<Self, Error> {
+impl MikroClient {
+    pub fn new(fakt: MikroFakt, token: &str) -> Result<Self, Error> {
         let client = reqwest::Client::builder()
             .user_agent("graphql-rust/0.10.0")
             .default_headers(
@@ -30,12 +30,11 @@ impl RekuestClient {
         })
     }
 
-    pub fn request<T: serde::Serialize>(&self, body: &QueryBody<T>) -> RekuestClientFunc {
+    pub fn request<T: serde::Serialize>(&self, body: &QueryBody<T>) -> MikroClientFunc {
         self.client.post(&self.endpoint_url).json(body)
     }
 }
-
-impl Clone for RekuestClient {
+impl Clone for MikroClient {
     fn clone(&self) -> Self {
         Self {
             client: self.client.clone(),

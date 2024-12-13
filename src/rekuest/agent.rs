@@ -1,4 +1,5 @@
 use crate::fakts;
+use crate::App;
 
 use super::agent_protocol::*;
 use super::api::ensure_agent;
@@ -36,7 +37,7 @@ pub async fn provide_forever(
     config: RekuestFakt,
     token: String,
     registry: FunctionRegistry,
-    client: RekuestClient,
+    app: App,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let (ws_stream, _) = tokio_tungstenite::connect_async(config.agent.endpoint_url).await?;
     let (write, read) = ws_stream.split();
@@ -118,7 +119,7 @@ pub async fn provide_forever(
                                     id: provision.to_string(),
                                 });
 
-                            let res = client.request(&get_provision).send().await;
+                            let res = app.clone().rekuest.request(&get_provision).send().await;
 
                             let response_body: Response<get_provision::ResponseData> =
                                 res.unwrap().json().await.unwrap();
@@ -126,7 +127,8 @@ pub async fn provide_forever(
                             let template = response_body.data.unwrap().provision.template.id;
                             match registry.get_function(template.as_str()) {
                                 Some(func) => {
-                                    let returns = func(serde_json::to_string(&args).unwrap());
+                                    let returns =
+                                        func((app.clone(), serde_json::to_string(&args).unwrap()));
                                     pin!(returns);
 
                                     let x = returns.await;

@@ -25,3 +25,5 @@ uuid = { version = "1.11.0", features = ["v4"] }
 zarrs_object_store = "0.3.0"
 object_store = { version = "0.11.1", features = ["aws"] }
 zarrs_storage = { version = "0.3.0", features = ["async"] }
+ndarray-rand = "0.15.0"
+rand_isaac = "0.3.0"

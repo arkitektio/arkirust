@@ -34,3 +34,12 @@ impl UnlokClient {
         self.client.post(&self.endpoint_url).json(body)
     }
 }
+
+impl Clone for UnlokClient {
+    fn clone(&self) -> Self {
+        Self {
+            client: self.client.clone(),
+            endpoint_url: self.endpoint_url.clone(),
+        }
+    }
+}

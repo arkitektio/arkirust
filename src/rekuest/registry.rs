@@ -1,3 +1,5 @@
+use crate::App;
+
 use super::api::create_template;
 use std::collections::HashMap;
 use std::future::Future;
@@ -6,7 +8,7 @@ use std::pin::Pin;
 pub struct FunctionRegistry {
     functions: HashMap<
         String,
-        Box<dyn Fn(String) -> Pin<Box<dyn Future<Output = String> + Send>> + Send + Sync>,
+        Box<dyn Fn((App, String)) -> Pin<Box<dyn Future<Output = String> + Send>> + Send + Sync>,
     >,
     templates: HashMap<String, create_template::TemplateInput>,
 }
@@ -25,13 +27,14 @@ impl FunctionRegistry {
         function: F,
         template: create_template::TemplateInput,
     ) where
-        F: Fn(String) -> Fut + Send + Sync + 'static,
+        F: Fn(App, String) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = String> + Send + 'static,
     {
         // Wrap the given function into one returning a boxed, pinned future
-        let wrapped = move |input: String| -> Pin<Box<dyn Future<Output = String> + Send>> {
-            Box::pin(function(input))
-        };
+        let wrapped =
+            move |(app, input): (App, String)| -> Pin<Box<dyn Future<Output = String> + Send>> {
+                Box::pin(function(app, input))
+            };
 
         self.functions.insert(name.to_string(), Box::new(wrapped));
         self.templates.insert(name.to_string(), template);
@@ -40,8 +43,9 @@ impl FunctionRegistry {
     pub fn get_function(
         &self,
         name: &str,
-    ) -> Option<&Box<dyn Fn(String) -> Pin<Box<dyn Future<Output = String> + Send>> + Send + Sync>>
-    {
+    ) -> Option<
+        &Box<dyn Fn((App, String)) -> Pin<Box<dyn Future<Output = String> + Send>> + Send + Sync>,
+    > {
         self.functions.get(name)
     }
 

@@ -12,6 +12,7 @@ use fakts::fakts_protocol::Requirement;
 use fakts::funcs::register_client;
 use mikro::api::request_upload::RequestUploadInput;
 use mikro::client::MikroClient;
+use mikro::upload::create_image;
 use object_store::aws::AmazonS3Builder;
 use rekuest::agent::create_agent;
 use rekuest::agent::provide_forever;
@@ -27,6 +28,7 @@ use rekuest::fakt::RekuestFakt;
 use rekuest::ports::Port;
 use rekuest::registry::FunctionRegistry;
 use zarrs::array::ArrayBuilder;
+use zarrs::array::ZARR_NAN_F64;
 use zarrs_object_store::object_store::ObjectStore;
 
 use graphql_client::GraphQLQuery;
@@ -34,6 +36,11 @@ use graphql_client::Response;
 
 use futures::StreamExt;
 use mikro::fakt::MikroFakt;
+use ndarray::Array;
+use ndarray_rand::rand::SeedableRng;
+use ndarray_rand::rand_distr::Uniform;
+use ndarray_rand::RandomExt;
+use rand_isaac::isaac64::Isaac64Rng;
 use serde::{Deserialize, Serialize};
 use unlok::client::UnlokClient;
 use unlok::fakt::UnlokFakt;
@@ -50,20 +57,27 @@ use zarrs_object_store::AsyncObjectStore;
 use zarrs_storage::AsyncReadableWritableListableStorage;
 #[derive(Debug, Deserialize, Serialize)]
 struct ExampleFuncArgs {
-    name: i64,
+    name: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 struct ExampleFuncReturns {
-    port: i64,
+    image: String,
 }
 
-async fn example_func(args: String) -> String {
+async fn example_func(app: App, args: String) -> String {
     let args = serde_json::from_str::<ExampleFuncArgs>(&args).unwrap();
 
-    println!("Received args: {:?}", args);
+    let mut rng = Isaac64Rng::seed_from_u64(42);
+
+    let shape = (1, 1, 1, 1000, 1000);
+    let array = Array::random_using(shape, Uniform::new(0, 100), &mut rng);
+
+    let image = create_image(app.mikro, array, args.name).await.unwrap();
+
+    println!("Image: {:?}", image);
     let returns = ExampleFuncReturns {
-        port: args.port + 1,
+        image: image.data.unwrap().from_array_like.id,
     };
     serde_json::to_string(&returns).unwrap()
 }
@@ -73,6 +87,21 @@ struct ExpectedFakts {
     unlok: UnlokFakt,
     rekuest: RekuestFakt,
     mikro: MikroFakt,
+}
+
+struct App {
+    rekuest: RekuestClient,
+    unlok: UnlokClient,
+    mikro: MikroClient,
+}
+impl Clone for App {
+    fn clone(&self) -> Self {
+        App {
+            rekuest: self.rekuest.clone(),
+            unlok: self.unlok.clone(),
+            mikro: self.mikro.clone(),
+        }
+    }
 }
 
 #[tokio::main]
@@ -114,125 +143,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let unlok = UnlokClient::new(fakts.unlok.clone(), &token).unwrap();
     let mikro = MikroClient::new(fakts.mikro.clone(), &token).unwrap();
 
+    let app = App {
+        rekuest: rekuest,
+        unlok: unlok,
+        mikro: mikro,
+    };
+
     create_agent(
-        &rekuest,
+        &app.rekuest,
         "default",
         "My beautiful rust agent",
         vec!["default"],
     )
     .await?;
 
-    let key = uuid::Uuid::new_v4().to_string();
-
-    let credentials_request: graphql_client::QueryBody<mikro::api::request_upload::Variables> =
-        mikro::api::RequestUpload::build_query(mikro::api::request_upload::Variables {
-            input: mikro::api::request_upload::RequestUploadInput {
-                key: key,
-                datalayer: "default".to_string(),
-            },
-        });
-
-    let response = mikro.request(&credentials_request).send().await?;
-
-    println!("Response: {:?}", response);
-    let body: Response<mikro::api::request_upload::ResponseData> =
-        response.json().await.map_err(|e| {
-            println!("Deserialization error: {}", e);
-            e
-        })?;
-
-    println!("Response body: {:#?}", body);
-
-    let credentials = body.data.unwrap().request_upload;
-
-    let cloned = credentials.clone();
-
-    let object_store = AmazonS3Builder::new()
-        .with_allow_http(true)
-        .with_bucket_name(credentials.bucket)
-        .with_endpoint(format!("http://127.0.0.1").as_str())
-        .with_access_key_id(credentials.access_key)
-        .with_secret_access_key(credentials.secret_key)
-        .with_token(credentials.session_token)
-        .build()?;
-
-    println!("Creating a new S3 object store");
-
-    let store: AsyncReadableWritableListableStorage =
-        Arc::new(zarrs_object_store::AsyncObjectStore::new(object_store));
-
-    println!("Creating a new Zarr V3 array in the object store");
-    // Write the root group metadata
-    zarrs::group::GroupBuilder::new()
-        .build(
-            store.clone(),
-            format!("/{}", credentials.key.as_str()).as_str(),
-        )?
-        .async_store_metadata()
-        .await?;
-
-    println!("Created a new Zarr V3 array in the object store");
-    // Create a new V3 array using the array builder
-    let array = ArrayBuilder::new(
-        vec![3, 4], // array shape
-        DataType::Float32,
-        vec![2, 2].try_into()?, // regular chunk shape (non-zero elements)
-        FillValue::from(ZARR_NAN_F32),
-    )
-    .bytes_to_bytes_codecs(vec![Arc::new(GzipCodec::new(5)?)])
-    .dimension_names(["y", "x"].into())
-    .attributes(
-        serde_json::json!({"Zarr V3": "is great"})
-            .as_object()
-            .unwrap()
-            .clone(),
-    )
-    .build(
-        store.clone(),
-        format!("/{}/data", credentials.key.as_str()).as_str(),
-    )?
-    .async_store_metadata()
-    .await?; // /path/to/hierarchy.zarr/array
-
-    let from_array_like_request: graphql_client::QueryBody<mikro::api::from_array_like::Variables> =
-        mikro::api::FromArrayLike::build_query(mikro::api::from_array_like::Variables {
-            input: mikro::api::from_array_like::FromArrayLikeInput {
-                array: credentials.store,
-                name: "my-array".to_string(),
-                dataset: None,
-                acquisition_views: None,
-                channel_views: None,
-                transformation_views: None,
-                pixel_views: None,
-                structure_views: None,
-                rgb_views: None,
-                timepoint_views: None,
-                optics_views: None,
-                roi_views: None,
-                file_views: None,
-                tags: None,
-                scale_views: None,
-                derived_views: None,
-            },
-        });
-
-    let response = mikro.request(&from_array_like_request).send().await?;
-    let body: Response<mikro::api::from_array_like::ResponseData> =
-        response.json().await.map_err(|e: reqwest::Error| {
-            println!("Deserialization error: {}", e);
-            e
-        })?;
-
-    println!("Response body: {:#?}", body);
-
-    let function_def = Definition::new("my-app", NodeKind::FUNCTION)
-        .args(vec![Port::new_int("port").build()])
-        .returns(vec![Port::new_int("port").build()])
+    let function_def = Definition::new("Create Rusty image", NodeKind::FUNCTION)
+        .description("Creates a really rusty image (unfortunatly only zarr v3")
+        .args(vec![Port::new_string("name").build()])
+        .returns(vec![Port::new_structure("image", "@mikro/image").build()])
         .build();
 
     let template_input = create_template::TemplateInput {
         definition: function_def,
-        interface: "my-agent".to_string(),
+        interface: "rusty-image".to_string(),
         dependencies: Vec::new(),
         logo: None,
         params: None,
@@ -251,7 +184,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         input: create_template_input,
     });
 
-    let mut res = rekuest.request(&create_first_template).send().await?;
+    let mut res = app.rekuest.request(&create_first_template).send().await?;
 
     let mut registry = FunctionRegistry::new();
 
@@ -270,7 +203,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     println!("{:#?}", response_body);
 
-    let _ = provide_forever(fakts.rekuest, token, registry, rekuest).await?;
+    let _ = provide_forever(fakts.rekuest, token, registry, app).await?;
 
     Ok(())
 }
