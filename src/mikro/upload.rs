@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use super::api;
 use super::client::MikroClient;
+use super::datalayer;
 use anyhow::Error;
 use graphql_client::GraphQLQuery;
 use graphql_client::Response;
@@ -25,51 +26,18 @@ use zarrs_storage::AsyncReadableWritableListableStorage;
 
 pub async fn create_image(
     mikro: MikroClient,
+    datalayer: datalayer::DatalayerClient,
     array: Array5<u32>,
     name: String,
 ) -> Result<Response<api::from_array_like::ResponseData>, Error> {
-    let key = uuid::Uuid::new_v4().to_string();
-
-    let credentials_request: graphql_client::QueryBody<api::request_upload::Variables> =
-        api::RequestUpload::build_query(api::request_upload::Variables {
-            input: api::request_upload::RequestUploadInput {
-                key: key,
-                datalayer: "default".to_string(),
-            },
-        });
-
-    let response = mikro.request(&credentials_request).send().await?;
-
-    println!("Response: {:?}", response);
-    let body: Response<api::request_upload::ResponseData> = response.json().await.map_err(|e| {
-        println!("Deserialization error: {}", e);
-        e
-    })?;
-
-    println!("Response body: {:#?}", body);
-
-    let credentials = body.data.unwrap().request_upload;
-
-    let object_store = AmazonS3Builder::new()
-        .with_allow_http(true)
-        .with_bucket_name(credentials.bucket)
-        .with_endpoint(format!("http://127.0.0.1").as_str())
-        .with_access_key_id(credentials.access_key)
-        .with_secret_access_key(credentials.secret_key)
-        .with_token(credentials.session_token)
-        .build()?;
-
-    println!("Creating a new S3 object store");
-
-    let store: AsyncReadableWritableListableStorage =
-        Arc::new(zarrs_object_store::AsyncObjectStore::new(object_store));
+    let store = datalayer.get_object_store().await?;
 
     println!("Creating a new Zarr V3 array in the object store");
     // Write the root group metadata
     zarrs::group::GroupBuilder::new()
         .build(
-            store.clone(),
-            format!("/{}", credentials.key.as_str()).as_str(),
+            store.zarr_store.clone(),
+            format!("/{}", &store.key).as_str(),
         )?
         .async_store_metadata()
         .await?;
@@ -96,8 +64,8 @@ pub async fn create_image(
             .clone(),
     )
     .build(
-        store.clone(),
-        format!("/{}/data", credentials.key.as_str()).as_str(),
+        store.zarr_store.clone(),
+        format!("/{}/data", &store.key).as_str(),
     )
     .unwrap();
 
@@ -117,7 +85,7 @@ pub async fn create_image(
     let from_array_like_request: graphql_client::QueryBody<api::from_array_like::Variables> =
         api::FromArrayLike::build_query(api::from_array_like::Variables {
             input: api::from_array_like::FromArrayLikeInput {
-                array: credentials.store,
+                array: store.store_id,
                 name: name,
                 dataset: None,
                 acquisition_views: None,

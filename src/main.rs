@@ -12,6 +12,8 @@ use fakts::fakts_protocol::Requirement;
 use fakts::funcs::register_client;
 use mikro::api::request_upload::RequestUploadInput;
 use mikro::client::MikroClient;
+use mikro::datalayer::DatalayerClient;
+use mikro::fakt::DatalayerFakt;
 use mikro::upload::create_image;
 use object_store::aws::AmazonS3Builder;
 use rekuest::agent::create_agent;
@@ -73,7 +75,9 @@ async fn example_func(app: App, args: String) -> String {
     let shape = (1, 1, 1, 1000, 1000);
     let array = Array::random_using(shape, Uniform::new(0, 100), &mut rng);
 
-    let image = create_image(app.mikro, array, args.name).await.unwrap();
+    let image = create_image(app.mikro, app.datalayer, array, args.name)
+        .await
+        .unwrap();
 
     println!("Image: {:?}", image);
     let returns = ExampleFuncReturns {
@@ -87,12 +91,14 @@ struct ExpectedFakts {
     unlok: UnlokFakt,
     rekuest: RekuestFakt,
     mikro: MikroFakt,
+    datalayer: DatalayerFakt,
 }
 
 struct App {
     rekuest: RekuestClient,
     unlok: UnlokClient,
     mikro: MikroClient,
+    datalayer: DatalayerClient,
 }
 impl Clone for App {
     fn clone(&self) -> Self {
@@ -100,6 +106,7 @@ impl Clone for App {
             rekuest: self.rekuest.clone(),
             unlok: self.unlok.clone(),
             mikro: self.mikro.clone(),
+            datalayer: self.datalayer.clone(),
         }
     }
 }
@@ -128,6 +135,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 service: "live.arkitekt.mikro".to_string(),
                 optional: false,
             },
+            Requirement {
+                key: "datalayer".to_string(),
+                service: "live.arkitekt.s3".to_string(),
+                optional: false,
+            },
         ],
     };
 
@@ -142,11 +154,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let rekuest = RekuestClient::new(fakts.rekuest.clone(), &token).unwrap();
     let unlok = UnlokClient::new(fakts.unlok.clone(), &token).unwrap();
     let mikro = MikroClient::new(fakts.mikro.clone(), &token).unwrap();
+    let datalayer =
+        DatalayerClient::new(fakts.mikro.clone(), fakts.datalayer.clone(), &token).unwrap();
 
     let app = App {
         rekuest: rekuest,
         unlok: unlok,
         mikro: mikro,
+        datalayer: datalayer,
     };
 
     create_agent(
