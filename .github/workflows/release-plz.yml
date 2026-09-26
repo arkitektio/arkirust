@@ -9,7 +9,7 @@ jobs:
   release-plz-release:
     name: Release
     runs-on: ubuntu-latest
-    if: ${{ github.repository_owner == 'jhnnsrs' }}
+    if: ${{ github.repository_owner == 'arkitektio' }}
     permissions:
       contents: write
       id-token: write # crates.io trusted publishing
@@ -31,7 +31,7 @@ jobs:
   release-plz-pr:
     name: Release PR
     runs-on: ubuntu-latest
-    if: ${{ github.repository_owner == 'jhnnsrs' }}
+    if: ${{ github.repository_owner == 'arkitektio' }}
     permissions:
       contents: write
       pull-requests: write

@@ -14,8 +14,8 @@ members = [
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-repository = "https://github.com/jhnnsrs/arkirust"
-homepage = "https://github.com/jhnnsrs/arkirust"
+repository = "https://github.com/arkitektio/arkirust"
+homepage = "https://github.com/arkitektio/arkirust"
 keywords = ["arkitekt", "microscopy", "bioimage", "graphql"]
 categories = ["science", "api-bindings"]
 
