@@ -1,8 +1,0 @@
-query GetProvision($id: ID!) {
-  provision(id: $id) {
-    id
-    template {
-      id
-    }
-  }
-}

@@ -1,0 +1,46 @@
+# Lockstep releases: every crate shares one version and one `vX.Y.Z` tag.
+# Versions and CHANGELOG.md are derived from Conventional Commits.
+[workspace]
+changelog_update = false
+git_release_enable = false
+git_tag_enable = false
+semver_check = true
+# Pre-1.0, make `feat:` bump the minor (0.1.0 -> 0.2.0) instead of the patch.
+features_always_increment_minor = true
+pr_labels = ["release"]
+
+[[package]]
+name = "fakts"
+version_group = "arkitekt"
+
+[[package]]
+name = "arkitekt-rath"
+version_group = "arkitekt"
+
+[[package]]
+name = "rekuest-macros"
+version_group = "arkitekt"
+
+[[package]]
+name = "rekuest"
+version_group = "arkitekt"
+
+[[package]]
+name = "arkitekt-mikro"
+version_group = "arkitekt"
+
+# `arkitekt` owns the tag, the GitHub release and the root changelog.
+[[package]]
+name = "arkitekt"
+version_group = "arkitekt"
+changelog_update = true
+changelog_path = "CHANGELOG.md"
+changelog_include = ["fakts", "arkitekt-rath", "rekuest-macros", "rekuest", "arkitekt-mikro"]
+git_tag_enable = true
+git_tag_name = "v{{ version }}"
+git_release_enable = true
+git_release_name = "v{{ version }}"
+
+[[package]]
+name = "arkitekt-examples"
+release = false

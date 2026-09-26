@@ -1,0 +1,89 @@
+# Operations of the mikro client, taken from the Python `mikro` package
+# (graphql/{fragments,mutations,queries}). graphql_client only resolves
+# fragments within one document, so the ones needed are inlined here.
+
+fragment ZarrUploadGrant on ZarrUploadGrant {
+  accessKey
+  secretKey
+  sessionToken
+  path
+  key
+  bucket
+  expiresIn
+  maxBytes
+  store
+}
+
+fragment ZarrAccessGrant on ZarrAccessGrant {
+  accessKey
+  secretKey
+  sessionToken
+  expiresIn
+  path
+  key
+  bucket
+}
+
+fragment ZarrStore on ZarrStore {
+  id
+  key
+  bucket
+  path
+}
+
+fragment ArrayDataset on ArrayDataset {
+  id
+  name
+  axisNames
+  shape
+  multiscale
+  dataArrays {
+    id
+    level
+    shape
+    chunkShape
+    store {
+      ...ZarrStore
+    }
+  }
+}
+
+mutation RequestZarrUpload($input: RequestZarrUploadInput!) {
+  requestZarrUpload(input: $input) {
+    ...ZarrUploadGrant
+  }
+}
+
+mutation FinishZarrUpload($input: FinishZarrUploadInput!) {
+  finishZarrUpload(input: $input) {
+    ...ZarrStore
+  }
+}
+
+mutation RequestZarrAccess($input: RequestZarrAccessInput!) {
+  requestZarrAccess(input: $input) {
+    ...ZarrAccessGrant
+  }
+}
+
+mutation CreateArrayDataset($input: CreateArrayDatasetInput!) {
+  createArrayDataset(input: $input) {
+    ...ArrayDataset
+  }
+}
+
+query GetArrayDataset($id: ID!) {
+  arrayDataset(id: $id) {
+    ...ArrayDataset
+  }
+}
+
+query SearchArrayDatasets($search: String, $values: [ID!], $limit: Int, $offset: Int = 0) {
+  options: arrayDatasets(
+    filters: { search: $search, ids: $values }
+    pagination: { limit: $limit, offset: $offset }
+  ) {
+    value: id
+    label: name
+  }
+}

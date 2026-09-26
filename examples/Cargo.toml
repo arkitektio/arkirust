@@ -1,0 +1,17 @@
+[package]
+name = "arkitekt-examples"
+description = "Example Arkitekt apps written in Rust"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+arkitekt.workspace = true
+mikro.workspace = true
+anyhow.workspace = true
+futures.workspace = true
+ndarray.workspace = true
+rand.workspace = true
+tokio.workspace = true
+tracing-subscriber.workspace = true

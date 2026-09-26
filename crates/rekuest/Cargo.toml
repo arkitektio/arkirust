@@ -1,0 +1,30 @@
+[package]
+name = "rekuest"
+description = "Rekuest agent: expose typed Rust functions as Arkitekt actions"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "../../README.md"
+
+[dependencies]
+fakts.workspace = true
+rath.workspace = true
+rekuest-macros.workspace = true
+anyhow.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+futures.workspace = true
+hex.workspace = true
+rand.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-tungstenite.workspace = true
+tracing.workspace = true
+uuid.workspace = true

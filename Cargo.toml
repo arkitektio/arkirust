@@ -1,29 +1,59 @@
-[package]
-name = "arkirust"
+[workspace]
+resolver = "2"
+members = [
+    "crates/fakts",
+    "crates/rath",
+    "crates/rekuest",
+    "crates/rekuest-macros",
+    "crates/arkitekt",
+    "crates/mikro",
+    "examples",
+]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
+repository = "https://github.com/jhnnsrs/arkirust"
+homepage = "https://github.com/jhnnsrs/arkirust"
+keywords = ["arkitekt", "microscopy", "bioimage", "graphql"]
+categories = ["science", "api-bindings"]
 
-[lib]
-proc-macro = true
+[workspace.dependencies]
+fakts = { path = "crates/fakts", version = "0.1.0" }
+rath = { path = "crates/rath", version = "0.1.0", package = "arkitekt-rath" }
+rekuest = { path = "crates/rekuest", version = "0.1.0" }
+rekuest-macros = { path = "crates/rekuest-macros", version = "0.1.0" }
+arkitekt = { path = "crates/arkitekt", version = "0.1.0" }
+mikro = { path = "crates/mikro", version = "0.1.0", package = "arkitekt-mikro" }
 
-[dependencies]
-syn = "2"
+anyhow = "1"
+thiserror = "2"
+async-trait = "0.1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "fs", "signal"] }
+futures = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+graphql_client = "0.14"
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+sha2 = "0.10"
+hex = "0.4"
+base64 = "0.22"
+dirs = "6"
+chrono = { version = "0.4", features = ["serde"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+rand = "0.8"
+ed25519-dalek = "2"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+ndarray = "0.17"
+zarrs = { version = "0.23", default-features = false, features = ["async", "ndarray", "gzip", "zstd", "sharding", "crc32c", "transpose"] }
+zarrs_object_store = "0.7"
+object_store = { version = "0.14", features = ["aws"] }
+
+syn = { version = "2", features = ["full", "extra-traits"] }
 quote = "1"
 proc-macro2 = "1"
-anyhow = "1.0.94"
-tokio = { version = "1.42.0", features = ["macros", "rt-multi-thread"] }
-reqwest = { version = "0.11", features = ["json"] }
-oauth2 = "4.4.2"
-serde = "1.0.216"
-serde_json = "1.0.133"
-tokio-tungstenite = "0.24.0"
-futures = "0.3.31"
-graphql_client = { version = "0.14.0", features = ["reqwest"] }
-zarrs = { version = "0.18.0", features = ["async"] }
-ndarray = "0.16.1"
-uuid = { version = "1.11.0", features = ["v4"] }
-zarrs_object_store = "0.3.0"
-object_store = { version = "0.11.1", features = ["aws"] }
-zarrs_storage = { version = "0.3.0", features = ["async"] }
-ndarray-rand = "0.15.0"
-rand_isaac = "0.3.0"
+heck = "0.5"

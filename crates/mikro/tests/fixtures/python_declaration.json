@@ -1,0 +1,235 @@
+{
+  "name": "hello:0.1.0",
+  "states": [],
+  "implementations": [
+    {
+      "definition": {
+        "description": "Greet someone\n\nSays hello, possibly several times.",
+        "collections": [],
+        "key": "greet",
+        "version": "1",
+        "name": "Greet",
+        "stateful": false,
+        "catalogs": null,
+        "port_groups": [],
+        "args": [
+          {
+            "key": "name",
+            "label": "name",
+            "kind": "STRING",
+            "description": "Who to greet",
+            "nullable": false,
+            "effects": [],
+            "validators": [],
+            "default": null,
+            "widget": null,
+            "requires": null
+          },
+          {
+            "key": "times",
+            "label": "times",
+            "kind": "INT",
+            "description": "How often",
+            "nullable": true,
+            "effects": [],
+            "validators": [],
+            "default": 1,
+            "widget": null,
+            "requires": null
+          }
+        ],
+        "returns": [
+          {
+            "key": "return0",
+            "label": "return0",
+            "kind": "STRING",
+            "description": "The greeting",
+            "nullable": false,
+            "effects": [],
+            "widget": null,
+            "provides": null
+          }
+        ],
+        "kind": "FUNCTION",
+        "is_test_for": [],
+        "is_dev": false
+      },
+      "dependencies": [],
+      "tracks": [],
+      "interface": "greet",
+      "locks": [],
+      "optimistics": [],
+      "manipulates": [],
+      "needs_token": true
+    },
+    {
+      "definition": {
+        "description": "Rescale an image",
+        "collections": [],
+        "key": "rescale",
+        "version": "1",
+        "name": "Rescale",
+        "stateful": false,
+        "catalogs": null,
+        "port_groups": [],
+        "args": [
+          {
+            "key": "image",
+            "label": null,
+            "kind": "STRUCTURE",
+            "description": null,
+            "identifier": "@mikro/arraydataset",
+            "nullable": false,
+            "effects": [],
+            "validators": [],
+            "default": null,
+            "widget": {
+              "kind": "SEARCH",
+              "query": "query SearchArrayDatasets($search: String, $values: [ID!], $limit: Int, $offset: Int = 0) {\n  options: arrayDatasets(\n    filters: {search: $search, ids: $values}\n    pagination: {limit: $limit, offset: $offset}\n  ) {\n    value: id\n    label: name\n    __typename\n  }\n}",
+              "ward": "mikro",
+              "filters": null,
+              "dependencies": null
+            },
+            "requires": null
+          },
+          {
+            "key": "factors",
+            "label": null,
+            "kind": "LIST",
+            "description": null,
+            "nullable": false,
+            "effects": [],
+            "children": [
+              {
+                "key": "...",
+                "label": null,
+                "kind": "FLOAT",
+                "description": null,
+                "nullable": false,
+                "effects": [],
+                "validators": [],
+                "default": null,
+                "widget": null,
+                "requires": null
+              }
+            ],
+            "validators": [],
+            "default": null,
+            "widget": null,
+            "requires": null
+          },
+          {
+            "key": "label",
+            "label": null,
+            "kind": "STRING",
+            "description": null,
+            "nullable": true,
+            "effects": [],
+            "validators": [],
+            "default": null,
+            "widget": null,
+            "requires": null
+          }
+        ],
+        "returns": [
+          {
+            "key": "return0",
+            "label": null,
+            "kind": "STRUCTURE",
+            "description": null,
+            "identifier": "@mikro/arraydataset",
+            "nullable": false,
+            "effects": [],
+            "widget": null,
+            "provides": null
+          },
+          {
+            "key": "return1",
+            "label": null,
+            "kind": "INT",
+            "description": null,
+            "nullable": false,
+            "effects": [],
+            "widget": null,
+            "provides": null
+          }
+        ],
+        "kind": "FUNCTION",
+        "is_test_for": [],
+        "is_dev": false
+      },
+      "dependencies": [],
+      "tracks": [],
+      "interface": "rescale",
+      "locks": [],
+      "optimistics": [],
+      "manipulates": [],
+      "needs_token": true
+    },
+    {
+      "definition": {
+        "description": "No Description",
+        "collections": [],
+        "key": "no_doc",
+        "version": "1",
+        "name": "No Doc",
+        "stateful": false,
+        "catalogs": null,
+        "port_groups": [],
+        "args": [
+          {
+            "key": "flag",
+            "label": null,
+            "kind": "BOOL",
+            "description": null,
+            "nullable": false,
+            "effects": [],
+            "validators": [],
+            "default": null,
+            "widget": null,
+            "requires": null
+          },
+          {
+            "key": "lookup",
+            "label": null,
+            "kind": "DICT",
+            "description": null,
+            "nullable": false,
+            "effects": [],
+            "children": [
+              {
+                "key": "...",
+                "label": null,
+                "kind": "INT",
+                "description": null,
+                "nullable": false,
+                "effects": [],
+                "validators": [],
+                "default": null,
+                "widget": null,
+                "requires": null
+              }
+            ],
+            "validators": [],
+            "default": null,
+            "widget": null,
+            "requires": null
+          }
+        ],
+        "returns": [],
+        "kind": "FUNCTION",
+        "is_test_for": [],
+        "is_dev": true
+      },
+      "dependencies": [],
+      "tracks": [],
+      "interface": "no_doc",
+      "locks": [],
+      "optimistics": [],
+      "manipulates": [],
+      "needs_token": true
+    }
+  ],
+  "locks": [],
+  "bloks": []
+}
