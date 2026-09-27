@@ -11,20 +11,16 @@ use rekuest::ContextBuilder;
 /// Actions then receive them as `#[inject]` parameters, and scripts look
 /// them up with [`Runtime::require`](crate::Runtime::require).
 ///
-/// ```ignore
-/// pub struct MikroService;
+/// Usually declared with [`#[arkitekt::service]`](crate::service), which
+/// derives the requirements from the builder's parameters:
 ///
-/// #[async_trait]
-/// impl Service for MikroService {
-///     fn name(&self) -> &'static str { "mikro" }
-///     fn requirements(&self) -> Vec<Requirement> {
-///         vec![Requirement::new("mikro", "live.arkitekt.mikro")]
-///     }
-///     async fn build(&self, fakts: &Fakts, clients: &mut ContextBuilder) -> anyhow::Result<()> {
-///         let alias = fakts.get_alias("mikro").await?;
-///         clients.insert(Mikro::new(alias.to_http_path("graphql"), ...));
-///         Ok(())
-///     }
+/// ```ignore
+/// #[arkitekt::service(name = "mikro")]
+/// pub fn service(
+///     #[require("live.arkitekt.mikro", "Where the user's images live")] mikro: Alias,
+///     fakts: Fakts,
+/// ) -> Mikro {
+///     Mikro::new(Rath::new(mikro.to_http_path("graphql"), Arc::new(fakts)))
 /// }
 /// ```
 #[async_trait]

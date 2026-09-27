@@ -49,7 +49,8 @@ pub use rath;
 pub use rekuest;
 
 pub use async_trait::async_trait;
-pub use fakts::{Fakts, Requirement};
+pub use fakts::{Alias, Fakts, Requirement};
+pub use rekuest_macros::service;
 pub use rekuest::{
     action, widgets, Background, Context, ContextBuilder, LogLevel, PortType, Shutdown, Startup, State, StateMut,
     StateRef, StateType, Structure, Task,
@@ -58,6 +59,9 @@ pub use rekuest::{
 /// Re-exports for generated code. Not a public API.
 #[doc(hidden)]
 pub mod __private {
+    pub use crate::service::Service;
+    pub use anyhow;
     pub use async_trait::async_trait;
+    pub use fakts;
     pub use rekuest;
 }

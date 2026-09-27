@@ -18,3 +18,7 @@ tracing-subscriber.workspace = true
 axum.workspace = true
 serde.workspace = true
 tracing.workspace = true
+
+[features]
+# Join the deployment's mesh when run with ARKITEKT_MESH=1.
+mesh = ["arkitekt/mesh"]

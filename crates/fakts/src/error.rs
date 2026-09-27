@@ -32,6 +32,8 @@ pub enum FaktsError {
     NoReachableAlias(String),
     #[error("refusing plain http to non-loopback host {0}; set FAKTS_ALLOW_INSECURE_TRANSPORT=1 to allow")]
     InsecureTransport(String),
+    #[error("mesh: {0}")]
+    Mesh(String),
 }
 
 pub type Result<T, E = FaktsError> = std::result::Result<T, E>;

@@ -27,6 +27,12 @@ thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 
+[features]
+default = []
+# Join the deployment's mesh with a userspace tailscaled sidecar
+# (`FaktsBuilder::mesh`); mesh aliases are reached through its proxy.
+mesh = ["tokio/process"]
+
 [dev-dependencies]
 wiremock = "0.6"
 tempfile = "3"

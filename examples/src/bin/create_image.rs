@@ -78,7 +78,7 @@ async fn main() -> anyhow::Result<()> {
 
     let app = App::new("rusty-images", "0.1.0")
         .description("Creates and processes images from Rust")
-        .service(mikro::service())
+        .service(mikro::service)
         .action(create_rusty_image)
         .action(invert_image);
 

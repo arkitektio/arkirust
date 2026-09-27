@@ -32,7 +32,7 @@ async fn create_rusty_image(
 async fn main() -> anyhow::Result<()> {
     // An App is a declaration; `run` authenticates, registers and blocks.
     let app = App::new("rusty-images", "0.1.0")
-        .service(mikro::service())
+        .service(mikro::service)
         .action(create_rusty_image);
 
     run(app).await
@@ -72,11 +72,27 @@ services it uses and which actions it offers. The fakts manifest is derived
 from that declaration: each service contributes its requirements, and apps
 that offer actions also require `rekuest`.
 
-**Services.** A service implements `arkitekt::Service`. It names the fakts
-instances it needs (for mikro, `mikro` → `live.arkitekt.mikro` and
-`s3` → `live.arkitekt.s3`) and, once the app is connected, builds its client
-from the resolved aliases. Clients are looked up by type: actions take them
-as `#[inject]` parameters, and scripts call `runtime.require::<Mikro>()`.
+**Services.** A service is a builder function, as with Python's
+`@registry.service`. Each `#[require]` parameter is a fakts requirement keyed by
+its name, resolved to an `Alias` before the body runs:
+
+```rust
+/// Mikro: the user's images, files and metadata.
+#[arkitekt::service(name = "mikro")]
+pub fn service(
+    #[require("live.arkitekt.mikro", "Where the user's images and their metadata live")] mikro: Alias,
+    #[require("live.arkitekt.s3", "Where the user's files are stored")] s3: Alias,
+    fakts: Fakts,
+) -> anyhow::Result<Mikro> {
+    let rath = Rath::from_alias(&mikro, "graphql", Arc::new(fakts))?;
+    Ok(Mikro::new(rath, DataLayer::from_alias(&s3)))
+}
+```
+
+`Option<Alias>` makes a requirement optional. The returned client is looked up
+by type: actions take it as an `#[inject]` parameter, and scripts call
+`runtime.require::<Mikro>()`. Build clients from the alias (`Rath::from_alias`,
+`alias.http_client()`) so they go through the mesh when needed.
 
 **Actions.** `#[action]` reads everything from the signature:
 
@@ -147,6 +163,23 @@ let app = App::new("camera", "0.1.0")
   * `.startup(..)` runs once before any action.
   * `.background(..)` runs for the app's lifetime.
   * `.shutdown(..)` runs when the app stops.
+
+## The mesh
+
+A deployment can serve some instances only over its private mesh (an ionscale
+tailnet). Build with the `mesh` feature and run with `ARKITEKT_MESH=1` (or
+`ConnectOptions::mesh(..)`):
+
+* When authorizing, the app asks for a mesh key. The approver can allow it.
+* The app then runs a userspace `tailscaled` as a sidecar. It needs no root and
+  runs next to a system tailscale. The sidecar joins the mesh once and keeps its
+  node under `~/.local/state/arkitekt/mesh/`.
+* Aliases the server marks as mesh-only are challenged and used through the
+  sidecar's local HTTP proxy. This covers GraphQL, the agent websocket and S3.
+* tailscale must be installed.
+
+If a proxy into the mesh is already running (e.g. `arkitekt mesh proxy`), set
+`ARKITEKT_MESH_PROXY=http://localhost:1055` instead.
 
 ## Serving without a rekuest server
 

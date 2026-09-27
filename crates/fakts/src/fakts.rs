@@ -49,6 +49,9 @@ pub struct FaktsBuilder {
     use_cache: bool,
     allow_insecure_transport: bool,
     http: Option<Client>,
+    mesh_proxy: Option<String>,
+    #[cfg(feature = "mesh")]
+    mesh: Option<crate::mesh::MeshOptions>,
 }
 
 impl FaktsBuilder {
@@ -71,6 +74,9 @@ impl FaktsBuilder {
             use_cache: true,
             allow_insecure_transport: false,
             http: None,
+            mesh_proxy: None,
+            #[cfg(feature = "mesh")]
+            mesh: None,
         }
     }
 
@@ -101,9 +107,41 @@ impl FaktsBuilder {
         self
     }
 
+    /// Reach mesh aliases through this HTTP proxy (e.g. an already running
+    /// `arkitekt mesh proxy` at `http://localhost:1055`). Aliases that need
+    /// the mesh are skipped without one.
+    pub fn mesh_proxy(mut self, proxy: impl Into<String>) -> Self {
+        self.mesh_proxy = Some(proxy.into());
+        self
+    }
+
+    /// Join the deployment's mesh: ask for a mesh key when authorizing, then
+    /// run a userspace tailscaled sidecar and reach mesh aliases through it.
+    /// Ignored when [`mesh_proxy`](Self::mesh_proxy) is set.
+    #[cfg(feature = "mesh")]
+    pub fn mesh(mut self, options: crate::mesh::MeshOptions) -> Self {
+        self.mesh = Some(options);
+        self
+    }
+
+    /// The grant to run: with the mesh on, the device code also asks for a mesh key.
+    fn effective_grant(&self) -> Grant {
+        #[cfg(feature = "mesh")]
+        if self.mesh.is_some() && self.mesh_proxy.is_none() {
+            if let Grant::DeviceCode(options) = &self.grant {
+                return Grant::DeviceCode(Arc::new(DeviceCodeOptions {
+                    request_auth_key: true,
+                    ..(**options).clone()
+                }));
+            }
+        }
+        self.grant.clone()
+    }
+
     /// Discover the server, then load the cached credential or run the grant.
     pub async fn load(self) -> Result<Fakts> {
         crate::install_crypto_provider();
+        let grant = self.effective_grant();
         let http = match self.http {
             Some(http) => http,
             None => Client::builder()
@@ -132,13 +170,27 @@ impl FaktsBuilder {
                 active
             }
             None => {
-                let active = run_grant(&http, &well_known, &self.manifest, &self.grant).await?;
+                let active = run_grant(&http, &well_known, &self.manifest, &grant).await?;
                 if let Some(path) = &cache_path {
                     cache::write(path, &cache_key, &active).await?;
                 }
                 active
             }
         };
+
+        #[cfg(feature = "mesh")]
+        let sidecar = match (&self.mesh, &self.mesh_proxy) {
+            (Some(options), None) => {
+                start_sidecar(options, &active, &well_known, &self.manifest, &cache_key).await?
+            }
+            _ => None,
+        };
+        #[cfg(feature = "mesh")]
+        let mesh_proxy = self
+            .mesh_proxy
+            .or_else(|| sidecar.as_ref().map(|s| s.proxy_url().to_owned()));
+        #[cfg(not(feature = "mesh"))]
+        let mesh_proxy = self.mesh_proxy;
 
         Ok(Fakts {
             inner: Arc::new(Inner {
@@ -151,9 +203,65 @@ impl FaktsBuilder {
                 active: Mutex::new(active),
                 refresh_lock: Mutex::new(()),
                 aliases: Mutex::new(HashMap::new()),
+                mesh_proxy,
+                #[cfg(feature = "mesh")]
+                _sidecar: sidecar,
             }),
         })
     }
+}
+
+/// Start the mesh sidecar for this app's node. The node lives in a state
+/// directory keyed by the app's identity, so it is joined once (with the key
+/// from the first token) and re-used afterwards.
+#[cfg(feature = "mesh")]
+async fn start_sidecar(
+    options: &crate::mesh::MeshOptions,
+    active: &ActiveFakts,
+    well_known: &WellKnown,
+    manifest: &Manifest,
+    cache_key: &str,
+) -> Result<Option<crate::mesh::Sidecar>> {
+    use crate::mesh::{hostname_label, Login, Sidecar};
+    use sha2::{Digest, Sha256};
+
+    let identity = active
+        .self_
+        .as_ref()
+        .and_then(|s| Some(format!("{}-{}-{}", s.sub.as_ref()?, s.organization.as_ref()?, s.hub.as_ref()?)))
+        .unwrap_or_else(|| hex::encode(&Sha256::digest(cache_key.as_bytes())[..8]));
+    let statedir = options
+        .state_root()
+        .join(format!("{}-{}", hostname_label(&manifest.identifier), hostname_label(&identity)));
+
+    let login = match &active.mesh {
+        Some(claim) => {
+            let coord_url = claim
+                .ionscale_coord_url
+                .clone()
+                .or_else(|| well_known.mesh_coord_url.clone())
+                .ok_or_else(|| FaktsError::Mesh("the server sent a mesh key but no coordination url".into()))?;
+            Some(Login {
+                coord_url,
+                auth_key: claim.ionscale_auth_key.clone(),
+            })
+        }
+        None => None,
+    };
+    if login.is_none() && !Sidecar::has_state(&statedir) {
+        tracing::warn!(
+            "the mesh is enabled, but this app holds no mesh key; mesh aliases will be skipped \
+             (authorize again with no_cache and allow mesh access to join)"
+        );
+        return Ok(None);
+    }
+
+    let hostname = options.hostname.clone().unwrap_or_else(|| {
+        let device = manifest.device_id.as_deref().unwrap_or_default();
+        let device: String = device.chars().filter(char::is_ascii_alphanumeric).take(8).collect();
+        hostname_label(&format!("{}-{device}", manifest.identifier))
+    });
+    Sidecar::start(options, statedir, &hostname, login).await.map(Some)
 }
 
 fn report_endpoint(well_known: &WellKnown) -> Option<String> {
@@ -211,6 +319,11 @@ struct Inner {
     active: Mutex<ActiveFakts>,
     refresh_lock: Mutex<()>,
     aliases: Mutex<HashMap<String, Alias>>,
+    /// The HTTP proxy mesh aliases are reached through.
+    mesh_proxy: Option<String>,
+    /// Kept alive for as long as the handle; stops tailscaled when dropped.
+    #[cfg(feature = "mesh")]
+    _sidecar: Option<crate::mesh::Sidecar>,
 }
 
 /// A loaded fakts configuration. Cheap to clone.
@@ -250,6 +363,11 @@ impl Fakts {
 
     pub fn http(&self) -> &Client {
         &self.inner.http
+    }
+
+    /// The HTTP proxy mesh aliases are reached through, if the mesh is on.
+    pub fn mesh_proxy(&self) -> Option<&str> {
+        self.inner.mesh_proxy.as_deref()
     }
 
     /// A snapshot of the current configuration.
@@ -302,15 +420,44 @@ impl Fakts {
     }
 
     async fn resolve_alias(&self, key: &str, instance: &Instance) -> Result<Alias> {
-        let http = Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .timeout(Duration::from_secs(3))
-            .build()?;
+        let challenge_client = |proxy: Option<&str>| -> Result<Client> {
+            let builder = Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .timeout(Duration::from_secs(3));
+            Ok(match proxy {
+                Some(proxy) => builder.proxy(reqwest::Proxy::all(proxy)?),
+                None => builder,
+            }
+            .build()?)
+        };
+        let direct = challenge_client(None)?;
+        let proxied = self.mesh_proxy().map(|p| challenge_client(Some(p))).transpose()?;
+
+        let mut skipped_mesh = false;
         for alias in &instance.aliases {
-            match self.challenge(&http, instance, alias).await {
-                Ok(()) => return Ok(alias.clone()),
+            let (http, proxy) = if alias.is_mesh() {
+                match (&proxied, self.mesh_proxy()) {
+                    (Some(http), Some(proxy)) => (http, Some(proxy)),
+                    _ => {
+                        skipped_mesh = true;
+                        tracing::debug!("skipping alias {} of {key}: it needs the mesh, which is off", alias.id);
+                        continue;
+                    }
+                }
+            } else {
+                (&direct, None)
+            };
+            match self.challenge(http, instance, alias).await {
+                Ok(()) => {
+                    let mut alias = alias.clone();
+                    alias.proxy = proxy.map(str::to_owned);
+                    return Ok(alias);
+                }
                 Err(e) => tracing::debug!("alias {} of {key} failed its challenge: {e}", alias.id),
             }
+        }
+        if skipped_mesh {
+            tracing::warn!("{key} has aliases only reachable over the mesh; enable the mesh to use them");
         }
         Err(FaktsError::NoReachableAlias(key.to_owned()))
     }
@@ -373,7 +520,7 @@ impl Fakts {
             .await
             {
                 Ok(response) => {
-                    let active = ActiveFakts::from_token_response(
+                    let mut active = ActiveFakts::from_token_response(
                         response,
                         &auth.client_id,
                         &auth.token_endpoint,
@@ -381,6 +528,9 @@ impl Fakts {
                         Some(&auth.refresh_token),
                         chrono::Utc::now().timestamp(),
                     )?;
+                    if active.mesh.is_none() {
+                        active.mesh = self.inner.active.lock().await.mesh.clone();
+                    }
                     // Persist the rotated refresh token *before* using the access token.
                     self.persist(&active).await?;
                     let token = active.auth.access_token.clone();

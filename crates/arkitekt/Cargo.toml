@@ -29,6 +29,9 @@ axum = { workspace = true, optional = true }
 default = []
 # Serve an app over HTTP + websocket without a rekuest server (`arkitekt::serve`).
 serve = ["rekuest/serve", "dep:axum"]
+# Join the deployment's mesh with a tailscaled sidecar (`ConnectOptions::mesh`,
+# or `ARKITEKT_MESH=1`); needs tailscale installed.
+mesh = ["fakts/mesh"]
 # `AgentTestClient` for testing served apps.
 testing = ["serve", "rekuest/testing"]
 

@@ -110,6 +110,21 @@ impl Rath {
         }
     }
 
+    /// A client for `append` under `alias`, proxied through the mesh when
+    /// the alias needs it.
+    pub fn from_alias(
+        alias: &fakts::Alias,
+        append: impl AsRef<str>,
+        token_loader: Arc<dyn TokenLoader>,
+    ) -> Result<Self> {
+        fakts::install_crypto_provider();
+        let http = alias
+            .http_client_builder()
+            .and_then(|b| b.user_agent(concat!("rath-rs/", env!("CARGO_PKG_VERSION"))).build())
+            .map_err(fakts::FaktsError::from)?;
+        Ok(Self::new(alias.to_http_path(append), token_loader).with_http_client(http))
+    }
+
     pub fn with_http_client(mut self, http: reqwest::Client) -> Self {
         self.http = http;
         self

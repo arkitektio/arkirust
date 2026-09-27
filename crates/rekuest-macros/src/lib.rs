@@ -47,6 +47,45 @@ use syn::{
     PathArguments, ReturnType, Type, TypeParamBound,
 };
 
+mod service;
+
+/// Turn a builder function into an arkitekt `Service`:
+///
+/// ```ignore
+/// /// Mikro: the user's images, files and metadata.
+/// #[arkitekt::service(name = "mikro")]
+/// pub async fn service(
+///     #[require("live.arkitekt.mikro", "Where the user's images live")] mikro: Alias,
+///     #[require("live.arkitekt.s3")] s3: Option<Alias>,
+///     fakts: Fakts,
+/// ) -> anyhow::Result<Mikro> {
+///     ..
+/// }
+/// ```
+///
+/// The function is replaced by a unit struct of the same name that
+/// implements `Service` (use it with `App::service(service)`); the body stays
+/// callable as `service::call(..)`.
+///
+/// * Each `#[require(service, description?)]` parameter is a requirement
+///   keyed by the parameter name, resolved to an `Alias` before the body
+///   runs. `Option<Alias>` makes it optional (`None` when not granted).
+/// * A `Fakts` parameter receives the app's fakts (e.g. as token loader).
+/// * The return value (`T` or `Result<T, E>`) is inserted into the context,
+///   so actions can `#[inject]` it.
+/// * `name = "…"` names the service (default: the function name).
+#[proc_macro_attribute]
+pub fn service(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let mut options = service::ServiceOptions::default();
+    let parser = syn::meta::parser(|meta| options.parse(meta));
+    parse_macro_input!(attr with parser);
+    let function = parse_macro_input!(item as ItemFn);
+    match service::expand_service(options, function) {
+        Ok(tokens) => tokens.into(),
+        Err(e) => e.to_compile_error().into(),
+    }
+}
+
 #[proc_macro_attribute]
 pub fn action(attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut options = ActionOptions::default();

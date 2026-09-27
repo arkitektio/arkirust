@@ -11,7 +11,7 @@ use ndarray::ArrayD;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let rt = arkitekt::easy("rusty-script", "0.1.0")
-        .service(mikro::service())
+        .service(mikro::service)
         .connect()
         .await?;
     let mikro = rt.require::<Mikro>()?;

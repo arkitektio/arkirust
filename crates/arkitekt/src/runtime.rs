@@ -31,6 +31,13 @@ pub struct ConnectOptions {
     pub policy: Option<ConnectionPolicy>,
     /// Allow plain http to non-loopback hosts.
     pub allow_insecure_transport: bool,
+    /// Reach mesh aliases through this running HTTP proxy (e.g. `arkitekt
+    /// mesh proxy`); defaults to `$ARKITEKT_MESH_PROXY`.
+    pub mesh_proxy: Option<String>,
+    /// Join the deployment's mesh with a tailscaled sidecar; `ARKITEKT_MESH=1`
+    /// turns it on with the defaults.
+    #[cfg(feature = "mesh")]
+    pub mesh: Option<fakts::MeshOptions>,
 }
 
 impl ConnectOptions {
@@ -46,6 +53,17 @@ impl ConnectOptions {
 
     pub fn force(mut self, force: bool) -> Self {
         self.force = force;
+        self
+    }
+
+    pub fn mesh_proxy(mut self, proxy: impl Into<String>) -> Self {
+        self.mesh_proxy = Some(proxy.into());
+        self
+    }
+
+    #[cfg(feature = "mesh")]
+    pub fn mesh(mut self, options: fakts::MeshOptions) -> Self {
+        self.mesh = Some(options);
         self
     }
 }
@@ -109,6 +127,20 @@ impl Runtime {
         if let Some(grant) = &options.grant {
             builder = builder.grant(grant.clone());
         }
+        if let Some(proxy) = options
+            .mesh_proxy
+            .clone()
+            .or_else(|| std::env::var("ARKITEKT_MESH_PROXY").ok().filter(|p| !p.is_empty()))
+        {
+            builder = builder.mesh_proxy(proxy);
+        }
+        #[cfg(feature = "mesh")]
+        if let Some(mesh) = options.mesh.clone().or_else(|| {
+            matches!(std::env::var("ARKITEKT_MESH").as_deref(), Ok("1" | "true"))
+                .then(fakts::MeshOptions::default)
+        }) {
+            builder = builder.mesh(mesh);
+        }
         let fakts = builder
             .load()
             .await
@@ -166,6 +198,7 @@ impl Runtime {
             .await
             .context("could not reach rekuest")?;
         let mut options = AgentOptions::new(alias.to_ws_path("agi"));
+        options.proxy = alias.proxy.clone();
         options.name = Some(format!("{}:{}", self.app.identifier, self.app.version));
         options.description = self.app.description.clone();
         options.force = self.options.force;

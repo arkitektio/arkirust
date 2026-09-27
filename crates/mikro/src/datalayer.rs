@@ -8,8 +8,10 @@
 
 use std::sync::Arc;
 
+use arkitekt::Alias;
 use object_store::aws::AmazonS3Builder;
 use object_store::prefix::PrefixStore;
+use object_store::ClientOptions;
 use zarrs_object_store::AsyncObjectStore;
 
 /// A zarr-capable store rooted at a grant's key.
@@ -29,12 +31,23 @@ pub struct Grant {
 #[derive(Debug, Clone)]
 pub struct DataLayer {
     endpoint_url: String,
+    /// The HTTP proxy the endpoint is reached through (the mesh sidecar).
+    proxy: Option<String>,
 }
 
 impl DataLayer {
     pub fn new(endpoint_url: impl Into<String>) -> Self {
         Self {
             endpoint_url: endpoint_url.into().trim_end_matches('/').to_owned(),
+            proxy: None,
+        }
+    }
+
+    /// The datalayer behind an `s3` alias, keeping the alias's proxy.
+    pub fn from_alias(alias: &Alias) -> Self {
+        Self {
+            proxy: alias.proxy().map(str::to_owned),
+            ..Self::new(alias.to_http_path(""))
         }
     }
 
@@ -54,6 +67,10 @@ impl DataLayer {
             .with_access_key_id(&grant.access_key)
             .with_secret_access_key(&grant.secret_key)
             .with_token(&grant.session_token)
+            .with_client_options(match &self.proxy {
+                Some(proxy) => ClientOptions::new().with_proxy_url(proxy),
+                None => ClientOptions::new(),
+            })
             .build()?;
         let prefixed = PrefixStore::new(s3, grant.key.as_str());
         Ok(Arc::new(AsyncObjectStore::new(prefixed)))

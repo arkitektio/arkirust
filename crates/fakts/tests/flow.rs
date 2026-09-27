@@ -1,25 +1,37 @@
 //! The fakts v2 flow against a mock server: discovery, device code, alias
 //! challenge, refresh rotation and cache reuse.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use fakts::{DeviceCodeOptions, Fakts, Grant, Manifest, Requirement, TokenLoader};
 use serde_json::json;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
 use wiremock::matchers::{body_string_contains, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn token_response(server: &MockServer, access: &str, refresh: &str) -> serde_json::Value {
     let port = server.address().port();
-    json!({
+    let mut response = json!({
         "access_token": access, "refresh_token": refresh, "token_type": "Bearer",
         "expires_in": 3600, "scope": "openid", "client_id": "client-1",
-        "self": {"deployment_name": "test", "alias": {"id": "self", "host": "127.0.0.1", "port": port}},
+        "self": {"deployment_name": "test", "alias": {"id": "self", "host": "127.0.0.1", "port": port},
+                 "sub": "12", "organization": 3, "hub": 7},
         "instances": {"mikro": {"service": "live.arkitekt.mikro", "identifier": "1", "aliases": [
             {"id": "dead", "host": "127.0.0.1", "port": 1, "challenge": "ht"},
             {"id": "lan", "host": "127.0.0.1", "port": port, "path": "mikro", "challenge": "ht"}
+        ]},
+        "hub": {"service": "live.arkitekt.hub", "identifier": "2", "aliases": [
+            {"id": "mesh", "host": "meshhub.test", "port": port, "path": "mikro", "challenge": "ht", "kind": "mesh"}
         ]}},
-        "statuses": {"mikro": "granted"}
-    })
+        "statuses": {"mikro": "granted", "hub": "granted"}
+    });
+    // Only the first (device code) token carries the mesh key.
+    if refresh == "refresh-1" {
+        response["mesh"] = json!({"ionscale_auth_key": "mesh-key", "ionscale_coord_url": "https://mesh.test"});
+    }
+    response
 }
 
 async fn mount_server() -> MockServer {
@@ -91,6 +103,47 @@ fn manifest() -> Manifest {
         .requirements
         .push(Requirement::new("mikro", "live.arkitekt.mikro"));
     manifest
+        .requirements
+        .push(Requirement::new("hub", "live.arkitekt.hub"));
+    manifest
+}
+
+/// A forwarding HTTP proxy that sends every request (absolute-form or
+/// `CONNECT`) to `127.0.0.1` on the requested port, whatever the host: the
+/// mesh hostnames in these tests only resolve through it. Counts requests.
+async fn start_proxy() -> (String, Arc<AtomicUsize>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let count = Arc::new(AtomicUsize::new(0));
+    let seen = count.clone();
+    tokio::spawn(async move {
+        loop {
+            let (mut client, _) = listener.accept().await.unwrap();
+            let seen = seen.clone();
+            tokio::spawn(async move {
+                let mut head = vec![];
+                while !head.ends_with(b"\r\n\r\n") {
+                    head.push(client.read_u8().await.unwrap());
+                }
+                seen.fetch_add(1, Ordering::SeqCst);
+                let text = String::from_utf8_lossy(&head).to_string();
+                let target = text.split_whitespace().nth(1).unwrap().to_owned();
+                let authority = target
+                    .strip_prefix("http://")
+                    .map(|rest| rest.split('/').next().unwrap())
+                    .unwrap_or(&target);
+                let port: u16 = authority.rsplit(':').next().unwrap().parse().unwrap();
+                let mut upstream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+                if text.starts_with("CONNECT") {
+                    client.write_all(b"HTTP/1.1 200 OK\r\n\r\n").await.unwrap();
+                } else {
+                    upstream.write_all(&head).await.unwrap();
+                }
+                let _ = tokio::io::copy_bidirectional(&mut client, &mut upstream).await;
+            });
+        }
+    });
+    (url, count)
 }
 
 #[tokio::test]
@@ -127,6 +180,9 @@ async fn device_code_refresh_and_cache() {
         format!("http://127.0.0.1:{}/mikro/graphql", server.address().port())
     );
     assert!(fakts.get_alias("kabinet").await.is_err());
+    assert_eq!(alias.proxy(), None);
+    // Without the mesh, the mesh-only alias is skipped.
+    assert!(fakts.get_alias("hub").await.is_err());
 
     // The cache is private to the user.
     #[cfg(unix)]
@@ -146,6 +202,15 @@ async fn device_code_refresh_and_cache() {
     let cached: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&cache).unwrap()).unwrap();
     assert_eq!(cached["fakts"]["auth"]["refresh_token"], "refresh-2");
+    // The mesh key outlives the refresh that did not carry it.
+    assert_eq!(cached["fakts"]["mesh"]["ionscale_auth_key"], "mesh-key");
+    let active = fakts.active().await;
+    assert!(active.mesh.is_some());
+    let me = active.self_.unwrap();
+    assert_eq!(
+        (me.sub.as_deref(), me.organization.as_deref(), me.hub.as_deref()),
+        (Some("12"), Some("3"), Some("7"))
+    );
 
     // A second load comes from the cache: no new device code (the mock expects exactly one).
     let again = Fakts::builder(server.uri(), manifest())
@@ -174,4 +239,43 @@ async fn refuses_protocol_v1() {
         .await
         .unwrap_err();
     assert!(err.to_string().contains("protocol 1"), "{err}");
+}
+
+#[tokio::test]
+async fn mesh_aliases_go_through_the_proxy() {
+    let server = mount_server().await;
+    let (proxy, count) = start_proxy().await;
+    let grant = Grant::DeviceCode(Arc::new(DeviceCodeOptions {
+        hook: Arc::new(|_: &str, _: &str| {}),
+        ..Default::default()
+    }));
+    let fakts = Fakts::builder(server.uri(), manifest())
+        .grant(grant)
+        .no_cache(true)
+        .mesh_proxy(&proxy)
+        .load()
+        .await
+        .unwrap();
+
+    // Direct aliases stay direct.
+    let direct = fakts.get_alias("mikro").await.unwrap();
+    assert_eq!(direct.proxy(), None);
+    assert_eq!(count.load(Ordering::SeqCst), 0);
+
+    // `meshhub.test` only resolves through the proxy.
+    let mesh = fakts.get_alias("hub").await.unwrap();
+    assert_eq!(mesh.id, "mesh");
+    assert_eq!(mesh.proxy(), Some(proxy.as_str()));
+    assert_eq!(count.load(Ordering::SeqCst), 1);
+
+    // Clients built from the alias use the proxy too.
+    let resp = mesh
+        .http_client()
+        .unwrap()
+        .get(mesh.to_http_path("ht"))
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+    assert_eq!(count.load(Ordering::SeqCst), 2);
 }

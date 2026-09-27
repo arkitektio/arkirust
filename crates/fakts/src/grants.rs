@@ -104,6 +104,8 @@ struct DemandBody<'a> {
     redirect_uris: Vec<String>,
     requested_client_kind: ClientKind,
     requested_client_role: ClientRole,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    request_auth_key: bool,
 }
 
 /// Called with the approval URL and user code while the device code is pending.
@@ -121,11 +123,15 @@ pub fn default_device_code_hook() -> DeviceCodeHook {
     })
 }
 
+#[derive(Clone)]
 pub struct DeviceCodeOptions {
     pub client_kind: ClientKind,
     pub client_role: ClientRole,
     pub expiration: Duration,
     pub hook: DeviceCodeHook,
+    /// Ask for a key to join the deployment's mesh; it comes back once, with
+    /// the first token (as `mesh`), if the approver allows it.
+    pub request_auth_key: bool,
 }
 
 impl Default for DeviceCodeOptions {
@@ -135,6 +141,7 @@ impl Default for DeviceCodeOptions {
             client_role: ClientRole::default(),
             expiration: Duration::from_secs(300),
             hook: default_device_code_hook(),
+            request_auth_key: false,
         }
     }
 }
@@ -169,6 +176,7 @@ pub async fn device_code_grant(
         redirect_uris: vec![],
         requested_client_kind: options.client_kind,
         requested_client_role: options.client_role,
+        request_auth_key: options.request_auth_key,
     };
 
     let demand = loop {
@@ -305,5 +313,23 @@ mod tests {
         assert!(check_transport("http://localhost:8000", false).is_ok());
         assert!(check_transport("https://example.com", false).is_ok());
         assert!(check_transport("http://example.com", true).is_ok());
+    }
+
+    #[test]
+    fn mesh_key_is_only_requested_when_asked() {
+        let manifest = Manifest::new("app", "0.1.0");
+        let body = |request_auth_key| {
+            serde_json::to_value(DemandBody {
+                manifest: &manifest,
+                expiration_time_seconds: 300,
+                redirect_uris: vec![],
+                requested_client_kind: ClientKind::default(),
+                requested_client_role: ClientRole::default(),
+                request_auth_key,
+            })
+            .unwrap()
+        };
+        assert!(body(false).get("request_auth_key").is_none());
+        assert_eq!(body(true)["request_auth_key"], true);
     }
 }

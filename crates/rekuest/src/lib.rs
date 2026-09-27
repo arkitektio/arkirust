@@ -35,6 +35,7 @@ pub mod state;
 #[cfg(feature = "serve")]
 pub mod serve;
 mod task;
+pub mod transport;
 
 pub use crate::action::{Action, ActionError, Concurrency, Registry};
 pub use crate::agent::{Agent, AgentError, AgentOptions, ConnectionPolicy};

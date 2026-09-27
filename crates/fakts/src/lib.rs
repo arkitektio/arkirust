@@ -25,12 +25,16 @@ pub mod cache;
 mod error;
 mod fakts;
 pub mod grants;
+#[cfg(feature = "mesh")]
+pub mod mesh;
 mod models;
 
 pub use crate::error::{FaktsError, Result};
 pub use crate::fakts::{Fakts, FaktsBuilder, Grant, TokenLoader};
 pub use crate::grants::{ClientKind, ClientRole, DeviceCodeHook, DeviceCodeOptions};
 pub use crate::models::*;
+#[cfg(feature = "mesh")]
+pub use crate::mesh::MeshOptions;
 
 /// Select the process-wide TLS provider (ring), once.
 ///

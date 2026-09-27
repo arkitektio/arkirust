@@ -113,6 +113,9 @@ pub struct WellKnown {
     pub token_endpoint: String,
     #[serde(default)]
     pub device_authorization_endpoint: Option<String>,
+    /// The mesh coordination server (ionscale), when the deployment has a mesh.
+    #[serde(default)]
+    pub mesh_coord_url: Option<String>,
 }
 
 /// One way of reaching a service instance.
@@ -130,9 +133,50 @@ pub struct Alias {
     pub challenge: String,
     #[serde(default)]
     pub public: bool,
+    /// How the server reaches the instance: `"absolute"`, `"relative"` or
+    /// `"mesh"` (only reachable over the deployment's tailnet).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// The HTTP proxy this alias is reached through (the mesh sidecar), set
+    /// when the alias is resolved. Never sent or cached.
+    #[serde(skip)]
+    pub proxy: Option<String>,
 }
 
 impl Alias {
+    /// Whether this alias is only reachable over the mesh: the server says
+    /// so, or (for servers that do not send `kind`) the host is a tailnet
+    /// address in 100.64.0.0/10.
+    pub fn is_mesh(&self) -> bool {
+        match self.kind.as_deref() {
+            Some(kind) => kind == "mesh",
+            None => self
+                .host
+                .parse::<std::net::Ipv4Addr>()
+                .is_ok_and(|ip| ip.octets()[0] == 100 && (ip.octets()[1] & 0b1100_0000) == 64),
+        }
+    }
+
+    /// The proxy to reach this alias through, if any.
+    pub fn proxy(&self) -> Option<&str> {
+        self.proxy.as_deref()
+    }
+
+    /// A client for this alias: proxied through the mesh sidecar when needed.
+    pub fn http_client_builder(&self) -> reqwest::Result<reqwest::ClientBuilder> {
+        let builder = reqwest::Client::builder();
+        Ok(match &self.proxy {
+            Some(proxy) => builder.proxy(reqwest::Proxy::all(proxy)?),
+            None => builder,
+        })
+    }
+
+    /// See [`Alias::http_client_builder`].
+    pub fn http_client(&self) -> reqwest::Result<reqwest::Client> {
+        crate::install_crypto_provider();
+        self.http_client_builder()?.build()
+    }
+
     fn build(&self, scheme: &str, append: Option<&str>) -> String {
         let mut url = format!("{scheme}://{}", self.host);
         if let Some(port) = self.port {
@@ -190,6 +234,42 @@ pub struct SelfFakt {
     #[serde(default)]
     pub deployment_name: String,
     pub alias: Alias,
+    /// The user the app acts for.
+    #[serde(default, deserialize_with = "string_or_number")]
+    pub sub: Option<String>,
+    /// The organization the app was authorized in.
+    #[serde(default, deserialize_with = "string_or_number")]
+    pub organization: Option<String>,
+    /// The hub the app is bound to (its mesh tag is `tag:hub-<hub>`).
+    #[serde(default, deserialize_with = "string_or_number")]
+    pub hub: Option<String>,
+}
+
+/// An id the server may send as a string or a number.
+fn string_or_number<'de, D: serde::Deserializer<'de>>(de: D) -> Result<Option<String>, D::Error> {
+    Ok(match Option::<serde_json::Value>::deserialize(de)? {
+        None | Some(serde_json::Value::Null) => None,
+        Some(serde_json::Value::String(s)) => Some(s),
+        Some(other) => Some(other.to_string()),
+    })
+}
+
+/// A key to join the deployment's mesh, handed out once with the first
+/// device-code token when the app asked for one (`request_auth_key`).
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MeshClaim {
+    pub ionscale_auth_key: String,
+    #[serde(default)]
+    pub ionscale_coord_url: Option<String>,
+}
+
+impl std::fmt::Debug for MeshClaim {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MeshClaim")
+            .field("ionscale_auth_key", &"***")
+            .field("ionscale_coord_url", &self.ionscale_coord_url)
+            .finish()
+    }
 }
 
 /// Response of the device authorization endpoint.
@@ -236,6 +316,8 @@ pub struct TokenResponse {
     pub instances: HashMap<String, Instance>,
     #[serde(default)]
     pub statuses: HashMap<String, String>,
+    #[serde(default)]
+    pub mesh: Option<MeshClaim>,
 }
 
 fn default_token_type() -> String {
@@ -284,6 +366,10 @@ pub struct ActiveFakts {
     pub instances: HashMap<String, Instance>,
     #[serde(default)]
     pub statuses: HashMap<String, String>,
+    /// The mesh key from the first token; kept across refreshes, which do
+    /// not carry it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mesh: Option<MeshClaim>,
 }
 
 impl ActiveFakts {
@@ -323,6 +409,7 @@ impl ActiveFakts {
             },
             instances: response.instances,
             statuses: response.statuses,
+            mesh: response.mesh,
         })
     }
 }
@@ -330,6 +417,27 @@ impl ActiveFakts {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mesh_detection() {
+        let alias = |host: &str, kind: Option<&str>| Alias {
+            id: "a".into(),
+            host: host.into(),
+            port: None,
+            ssl: false,
+            path: None,
+            challenge: String::new(),
+            public: false,
+            kind: kind.map(Into::into),
+            proxy: None,
+        };
+        assert!(alias("meshhub.org.mesh.example", Some("mesh")).is_mesh());
+        assert!(alias("100.64.0.1", None).is_mesh());
+        assert!(alias("100.127.255.254", None).is_mesh());
+        assert!(!alias("100.128.0.1", None).is_mesh());
+        assert!(!alias("100.64.0.1", Some("absolute")).is_mesh());
+        assert!(!alias("go.arkitekt.live", None).is_mesh());
+    }
 
     #[test]
     fn alias_paths() {
@@ -341,6 +449,8 @@ mod tests {
             path: Some("/mikro".into()),
             challenge: "ht".into(),
             public: false,
+            kind: None,
+            proxy: None,
         };
         assert_eq!(
             alias.to_http_path("graphql"),

@@ -98,7 +98,7 @@ async fn main() -> anyhow::Result<()> {
     // authenticates, registers the action and blocks.
     let app = App::new("upload-demo", "0.1.0")
         .description("Puts fake images into mikro, from Rust")
-        .service(mikro::service())
+        .service(mikro::service)
         .action(upload_fake_image);
 
     run(app).await

@@ -96,6 +96,8 @@ pub struct AgentOptions {
     /// Take over from another connection of the same agent.
     pub force: bool,
     pub policy: ConnectionPolicy,
+    /// HTTP proxy to reach the endpoint through (the mesh sidecar).
+    pub proxy: Option<String>,
 }
 
 impl AgentOptions {
@@ -106,6 +108,7 @@ impl AgentOptions {
             description: None,
             force: false,
             policy: ConnectionPolicy::default(),
+            proxy: None,
         }
     }
 }
@@ -254,7 +257,7 @@ impl Agent {
     async fn session(&self) -> Result<SessionEnd, AgentError> {
         let token = self.tokens.get_token().await?;
 
-        let (ws, _) = match tokio_tungstenite::connect_async(&self.options.endpoint_url).await {
+        let (ws, _) = match crate::transport::connect_ws(&self.options.endpoint_url, self.options.proxy.as_deref()).await {
             Ok(ws) => ws,
             Err(e) => return Ok(SessionEnd::Dropped(format!("connect to {}: {e}", self.options.endpoint_url))),
         };

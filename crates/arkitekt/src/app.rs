@@ -18,7 +18,7 @@ use crate::service::{rekuest_requirement, Service};
 /// ```ignore
 /// App::new("hello", "0.1.0")
 ///     .description("Says hello")
-///     .service(mikro::service())
+///     .service(mikro::service)
 ///     .action(greet)
 ///     .run()
 ///     .await

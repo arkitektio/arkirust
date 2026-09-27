@@ -13,7 +13,7 @@
 //!     Ok(mikro.create_array_dataset(&name, &data, mikro::axes_for(&["y", "x"])).await?)
 //! }
 //!
-//! App::new("my-app", "0.1.0").service(mikro::service()).action(create_image).run().await
+//! App::new("my-app", "0.1.0").service(mikro::service).action(create_image).run().await
 //! ```
 //!
 //! An [`ArrayDataset`] is a [`Structure`](arkitekt::Structure): it travels as
@@ -23,7 +23,7 @@ pub mod api;
 mod array;
 mod datalayer;
 mod models;
-mod service;
+mod specs;
 
 use arkitekt::rath::Rath;
 use ndarray::ArrayD;
@@ -32,7 +32,7 @@ pub use crate::api::create_array_dataset::{AxisInput, AxisType};
 pub use crate::array::{chunk_shape, MikroElement};
 pub use crate::datalayer::{DataLayer, Grant, GrantStore};
 pub use crate::models::{axes_for, ArrayDataset, DataArray, ZarrStore, SEARCH_ARRAY_DATASETS};
-pub use crate::service::{service, MikroService};
+pub use crate::specs::service;
 
 #[derive(Debug, thiserror::Error)]
 pub enum MikroError {
