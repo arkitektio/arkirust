@@ -11,7 +11,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/arkitektio/arkirust"
@@ -20,12 +20,12 @@ keywords = ["arkitekt", "microscopy", "bioimage", "graphql"]
 categories = ["science", "api-bindings"]
 
 [workspace.dependencies]
-fakts = { path = "crates/fakts", version = "0.1.0" }
-rath = { path = "crates/rath", version = "0.1.0", package = "arkitekt-rath" }
-rekuest = { path = "crates/rekuest", version = "0.1.0" }
-rekuest-macros = { path = "crates/rekuest-macros", version = "0.1.0" }
-arkitekt = { path = "crates/arkitekt", version = "0.1.0" }
-mikro = { path = "crates/mikro", version = "0.1.0", package = "arkitekt-mikro" }
+fakts = { path = "crates/fakts", version = "0.2.0" }
+rath = { path = "crates/rath", version = "0.2.0", package = "arkitekt-rath" }
+rekuest = { path = "crates/rekuest", version = "0.2.0" }
+rekuest-macros = { path = "crates/rekuest-macros", version = "0.2.0" }
+arkitekt = { path = "crates/arkitekt", version = "0.2.0" }
+mikro = { path = "crates/mikro", version = "0.2.0", package = "arkitekt-mikro" }
 
 anyhow = "1"
 thiserror = "2"

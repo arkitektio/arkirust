@@ -59,7 +59,7 @@ checksum = "c1fd03a028ef38ba2276dce7e33fcd6369c158a1bca17946c4b1b701891c1ff7"
 
 [[package]]
 name = "arkitekt"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "arkitekt-rath",
@@ -79,7 +79,7 @@ dependencies = [
 
 [[package]]
 name = "arkitekt-examples"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "arkitekt",
@@ -96,7 +96,7 @@ dependencies = [
 
 [[package]]
 name = "arkitekt-mikro"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "arkitekt",
@@ -115,7 +115,7 @@ dependencies = [
 
 [[package]]
 name = "arkitekt-rath"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "fakts",
@@ -768,7 +768,7 @@ dependencies = [
 
 [[package]]
 name = "fakts"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -2331,7 +2331,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "rekuest"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "arkitekt-rath",
@@ -2360,7 +2360,7 @@ dependencies = [
 
 [[package]]
 name = "rekuest-macros"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "heck 0.5.0",
  "proc-macro-crate",
