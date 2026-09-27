@@ -1,0 +1,21 @@
+{
+  "status": 200,
+  "headers": {
+    "content-type": "application/json"
+  },
+  "body": {
+    "count": 1,
+    "tasks": {
+      "c79479cb-789a-48c6-b477-1b32f68afb03": {
+        "task": "c79479cb-789a-48c6-b477-1b32f68afb03",
+        "action_key": "pausable",
+        "interface": "pausable",
+        "user": "tester",
+        "app": "fastapi",
+        "action": "api_call",
+        "running": true,
+        "actor_id": "7eedcdab-3929-4a44-8bc5-97f1d7512785"
+      }
+    }
+  }
+}

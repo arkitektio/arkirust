@@ -59,13 +59,43 @@ pub fn action(attr: TokenStream, item: TokenStream) -> TokenStream {
     }
 }
 
-#[derive(Default)]
 struct ActionOptions {
     name: Option<LitStr>,
     description: Option<LitStr>,
     interface: Option<LitStr>,
     collections: Vec<LitStr>,
+    locks: Vec<LitStr>,
+    parallel: bool,
+    auto_locks: bool,
     krate: Option<Path>,
+}
+
+fn string_list(array: ExprArray, what: &str) -> syn::Result<Vec<LitStr>> {
+    array
+        .elems
+        .into_iter()
+        .map(|elem| match elem {
+            Expr::Lit(syn::ExprLit {
+                lit: syn::Lit::Str(s), ..
+            }) => Ok(s),
+            other => Err(syn::Error::new(other.span(), format!("{what} must be string literals"))),
+        })
+        .collect()
+}
+
+impl Default for ActionOptions {
+    fn default() -> Self {
+        Self {
+            name: None,
+            description: None,
+            interface: None,
+            collections: vec![],
+            locks: vec![],
+            parallel: false,
+            auto_locks: true,
+            krate: None,
+        }
+    }
 }
 
 impl ActionOptions {
@@ -77,25 +107,23 @@ impl ActionOptions {
         } else if meta.path.is_ident("interface") {
             self.interface = Some(meta.value()?.parse()?);
         } else if meta.path.is_ident("collections") {
-            let array: ExprArray = meta.value()?.parse()?;
-            for elem in array.elems {
-                match elem {
-                    Expr::Lit(syn::ExprLit {
-                        lit: syn::Lit::Str(s),
-                        ..
-                    }) => self.collections.push(s),
-                    other => {
-                        return Err(syn::Error::new(
-                            other.span(),
-                            "collections must be string literals",
-                        ))
-                    }
-                }
-            }
+            self.collections = string_list(meta.value()?.parse()?, "collections")?;
+        } else if meta.path.is_ident("locks") {
+            self.locks = string_list(meta.value()?.parse()?, "locks")?;
+        } else if meta.path.is_ident("concurrency") {
+            let value: LitStr = meta.value()?.parse()?;
+            self.parallel = match value.value().as_str() {
+                "serial" => false,
+                "parallel" => true,
+                _ => return Err(syn::Error::new(value.span(), "concurrency is \"serial\" or \"parallel\"")),
+            };
+        } else if meta.path.is_ident("auto_locks") {
+            let value: syn::LitBool = meta.value()?.parse()?;
+            self.auto_locks = value.value;
         } else if meta.path.is_ident("crate") {
             self.krate = Some(meta.value()?.parse()?);
         } else {
-            return Err(meta.error("unknown action option; expected name, description, interface, collections or crate"));
+            return Err(meta.error("unknown action option; expected name, description, interface, collections, locks, concurrency, auto_locks or crate"));
         }
         Ok(())
     }
@@ -220,6 +248,8 @@ enum ParamKind {
     },
     Inject,
     Task,
+    /// `StateMut<T>` (write) or `StateRef<T>` (read-only).
+    State { state: Type, write: bool },
 }
 
 struct Param {
@@ -250,6 +280,17 @@ fn generic_types(segment: &syn::PathSegment) -> Vec<&Type> {
             .collect(),
         _ => vec![],
     }
+}
+
+/// `StateMut<T>` → `(T, true)`, `StateRef<T>` → `(T, false)`.
+fn state_param(ty: &Type) -> Option<(Type, bool)> {
+    let segment = last_segment(ty)?;
+    let write = match segment.ident.to_string().as_str() {
+        "StateMut" => true,
+        "StateRef" => false,
+        _ => return None,
+    };
+    generic_types(segment).first().map(|t| ((*t).clone(), write))
 }
 
 /// `Result<T, ..>` → `Some(T)`.
@@ -357,7 +398,15 @@ fn parse_params(function: &mut ItemFn) -> syn::Result<Vec<Param>> {
             ParamKind::Inject
         } else if last_segment(&ty).is_some_and(|s| s.ident == "Task") {
             ParamKind::Task
+        } else if let Some((state, write)) = state_param(&ty) {
+            ParamKind::State { state, write }
         } else {
+            if key == "value" {
+                return Err(syn::Error::new(
+                    pat.ident.span(),
+                    "'value' is a reserved port key (it names a port's own value in validators and effects); rename the parameter",
+                ));
+            }
             ParamKind::Port {
                 description,
                 label,
@@ -519,6 +568,14 @@ fn expand_action(options: ActionOptions, mut function: ItemFn) -> syn::Result<To
                     .map_err(|e| #p::ActionError::Failed(e.to_string()))?;
             },
             ParamKind::Task => quote!(let #ident: #ty = __rk_task.clone();),
+            ParamKind::State { state, write } => {
+                let getter = if *write { quote!(state_mut) } else { quote!(state_ref) };
+                quote_spanned! {ty.span()=>
+                    let #ident: #ty = __rk_task
+                        .#getter::<#state>()
+                        .map_err(|e| #p::ActionError::Failed(e.to_string()))?;
+                }
+            }
         }
     });
     let call_args: Vec<&Ident> = params.iter().map(|param| &param.ident).collect();
@@ -586,6 +643,29 @@ fn expand_action(options: ActionOptions, mut function: ItemFn) -> syn::Result<To
         }
     };
 
+    // ---- states, locks, concurrency ----------------------------------------
+    let state_params: Vec<(&Type, bool)> = params
+        .iter()
+        .filter_map(|param| match &param.kind {
+            ParamKind::State { state, write } => Some((state, *write)),
+            _ => None,
+        })
+        .collect();
+    let stateful = !state_params.is_empty();
+    let written_states: Vec<&Type> = state_params.iter().filter(|(_, w)| *w).map(|(t, _)| *t).collect();
+    // As in Python, locks are inferred from every state an action takes, read-only or not.
+    let lock_states: Vec<&Type> = if options.auto_locks {
+        state_params.iter().map(|(t, _)| *t).collect()
+    } else {
+        vec![]
+    };
+    let declared_locks = &options.locks;
+    let concurrency = if options.parallel {
+        quote!(#p::Concurrency::Parallel)
+    } else {
+        quote!(#p::Concurrency::Serial)
+    };
+
     // ---- output ----------------------------------------------------------
     let doc_attrs: Vec<_> = function
         .attrs
@@ -621,10 +701,36 @@ fn expand_action(options: ActionOptions, mut function: ItemFn) -> syn::Result<To
                 #interface.to_owned()
             }
 
+            fn locks(&self) -> ::std::vec::Vec<::std::string::String> {
+                let mut locks: ::std::vec::Vec<::std::string::String> =
+                    ::std::vec![#(#declared_locks.to_owned()),*];
+                #(
+                    locks.extend(
+                        <#lock_states as #p::StateType>::REQUIRED_LOCKS.iter().map(|l| l.to_string()),
+                    );
+                )*
+                locks.sort();
+                locks.dedup();
+                locks
+            }
+
+            fn manipulates(&self) -> ::std::vec::Vec<::std::string::String> {
+                let mut states: ::std::vec::Vec<::std::string::String> =
+                    ::std::vec![#(<#written_states as #p::StateType>::NAME.to_owned()),*];
+                states.sort();
+                states.dedup();
+                states
+            }
+
+            fn concurrency(&self) -> #p::Concurrency {
+                #concurrency
+            }
+
             fn definition(&self) -> #p::Definition {
                 let mut definition = #p::Definition::new(#key, #name, #kind);
                 definition.description = ::std::option::Option::Some(#description.to_owned());
                 definition.is_dev = #is_dev;
+                definition.stateful = #stateful;
                 definition.collections = ::std::vec![#(#collections.to_owned()),*];
                 definition.args = ::std::vec![#(#arg_ports),*];
                 definition.returns = ::std::vec![#(#return_ports),*];
@@ -643,6 +749,96 @@ fn expand_action(options: ActionOptions, mut function: ItemFn) -> syn::Result<To
                     #body
                     ::std::result::Result::Ok(())
                 })
+            }
+        }
+    })
+}
+
+/// Make a struct an agent state.
+///
+/// ```ignore
+/// #[derive(Clone, Serialize, Deserialize, State)]
+/// #[state(name = "CameraState", locks = ["camera"])]
+/// struct CameraState {
+///     /// Whether the camera is connected
+///     connected: bool,
+///     exposure_ms: f64,
+/// }
+/// ```
+///
+/// * `name` is the state's interface (default: the struct name).
+/// * `locks` are the locks an action must hold to change the state; actions
+///   taking the state hold them automatically.
+/// * Each field becomes a port (typed through `PortType`); a field's doc
+///   comment is its description. Values travel as their serde JSON, so fields
+///   should not be structures (e.g. an `ArrayDataset`) and should not be
+///   renamed with serde.
+#[proc_macro_derive(State, attributes(state))]
+pub fn derive_state(item: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(item as syn::DeriveInput);
+    match expand_state(input) {
+        Ok(tokens) => tokens.into(),
+        Err(e) => e.to_compile_error().into(),
+    }
+}
+
+fn expand_state(input: syn::DeriveInput) -> syn::Result<TokenStream2> {
+    let ident = &input.ident;
+    let mut name = ident.to_string();
+    let mut locks: Vec<LitStr> = vec![];
+    let mut krate: Option<Path> = None;
+    for attr in input.attrs.iter().filter(|a| a.path().is_ident("state")) {
+        attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("name") {
+                let value: LitStr = meta.value()?.parse()?;
+                name = value.value();
+            } else if meta.path.is_ident("locks") {
+                locks = string_list(meta.value()?.parse()?, "locks")?;
+            } else if meta.path.is_ident("crate") {
+                krate = Some(meta.value()?.parse()?);
+            } else {
+                return Err(meta.error("unknown state option; expected name, locks or crate"));
+            }
+            Ok(())
+        })?;
+    }
+    let rk = krate.as_ref().map(|p| quote!(#p)).unwrap_or_else(rekuest_path);
+    let p = quote!(#rk::__private);
+
+    let syn::Data::Struct(data) = &input.data else {
+        return Err(syn::Error::new(ident.span(), "a state must be a struct with named fields"));
+    };
+    let syn::Fields::Named(fields) = &data.fields else {
+        return Err(syn::Error::new(ident.span(), "a state must be a struct with named fields"));
+    };
+
+    let ports = fields.named.iter().map(|field| {
+        let key = field
+            .ident
+            .as_ref()
+            .expect("named field")
+            .to_string()
+            .trim_start_matches("r#")
+            .to_owned();
+        let ty = &field.ty;
+        let describe = parse_docs(&field.attrs)
+            .description
+            .map(|d| quote!(let port = port.describe(#d);));
+        quote_spanned! {ty.span()=> {
+            let port: #p::Port = <#ty as #p::PortType>::port(#key).into_return();
+            #describe
+            port
+        }}
+    });
+
+    let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
+    Ok(quote! {
+        impl #impl_generics #p::StateType for #ident #ty_generics #where_clause {
+            const NAME: &'static str = #name;
+            const REQUIRED_LOCKS: &'static [&'static str] = &[#(#locks),*];
+
+            fn ports() -> ::std::vec::Vec<#p::Port> {
+                ::std::vec![#(#ports),*]
             }
         }
     })

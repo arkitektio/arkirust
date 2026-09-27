@@ -6,8 +6,20 @@ use futures::future::BoxFuture;
 use serde_json::{Map, Value};
 
 use crate::context::Context;
-use crate::definition::{Definition, Implementation};
+use crate::definition::{AgentDeclaration, Definition, Implementation};
+use crate::hooks::{hook_fn, Background, Hooks, Startup};
+use crate::state::{StateDeclaration, StateType};
 use crate::task::Task;
+
+/// Whether assignments of one action may run at the same time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Concurrency {
+    /// One assignment at a time (the default, as in Python).
+    #[default]
+    Serial,
+    /// Any number at once.
+    Parallel,
+}
 
 /// How an action run failed, which decides the event reported to the server.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,21 +64,43 @@ pub trait Action: Send + Sync + 'static {
         task: Task,
     ) -> BoxFuture<'static, Result<(), ActionError>>;
 
+    /// Locks held while an assignment runs (declared, plus those required by
+    /// the states it takes).
+    fn locks(&self) -> Vec<String> {
+        vec![]
+    }
+
+    /// The states this action changes.
+    fn manipulates(&self) -> Vec<String> {
+        vec![]
+    }
+
+    fn concurrency(&self) -> Concurrency {
+        Concurrency::Serial
+    }
+
     fn implementation(&self) -> Implementation {
-        Implementation::new(self.interface(), self.definition())
+        let mut implementation = Implementation::new(self.interface(), self.definition());
+        implementation.locks = self.locks();
+        implementation.manipulates = self.manipulates();
+        implementation
     }
 }
 
-/// The actions an app offers, in registration order.
+/// Everything an app offers: actions, states and hooks.
 #[derive(Clone, Default)]
 pub struct Registry {
     actions: Vec<Arc<dyn Action>>,
+    states: Vec<StateDeclaration>,
+    hooks: Hooks,
 }
 
 impl std::fmt::Debug for Registry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_list()
-            .entries(self.actions.iter().map(|a| a.interface()))
+        f.debug_struct("Registry")
+            .field("actions", &self.actions.iter().map(|a| a.interface()).collect::<Vec<_>>())
+            .field("states", &self.states.iter().map(|s| &s.name).collect::<Vec<_>>())
+            .field("hooks", &self.hooks)
             .finish()
     }
 }
@@ -84,11 +118,52 @@ impl Registry {
         self
     }
 
+    /// Declare a state with its initial value (a startup hook may replace it).
+    pub fn state<T: StateType>(&mut self, initial: T) -> &mut Self {
+        self.states.retain(|s| s.name != T::NAME);
+        self.states.push(StateDeclaration::of(Some(initial)));
+        self
+    }
+
+    /// Declare a state whose value a startup hook provides.
+    pub fn declare_state<T: StateType>(&mut self) -> &mut Self {
+        self.states.retain(|s| s.name != T::NAME);
+        self.states.push(StateDeclaration::of::<T>(None));
+        self
+    }
+
+    /// Run `hook` once before any action (see [`Startup`]).
+    pub fn startup<F, Fut>(&mut self, hook: F) -> &mut Self
+    where
+        F: Fn(Startup) -> Fut + Send + Sync + 'static,
+        Fut: std::future::Future<Output = anyhow::Result<()>> + Send + 'static,
+    {
+        self.hooks.startup.push(hook_fn(hook));
+        self
+    }
+
+    /// Run `hook` for the agent's lifetime (cancelled on shutdown).
+    pub fn background<F, Fut>(&mut self, hook: F) -> &mut Self
+    where
+        F: Fn(Background) -> Fut + Send + Sync + 'static,
+        Fut: std::future::Future<Output = anyhow::Result<()>> + Send + 'static,
+    {
+        self.hooks.background.push(hook_fn(hook));
+        self
+    }
+
+    /// Run `hook` once when the agent stops.
+    pub fn shutdown<F, Fut>(&mut self, hook: F) -> &mut Self
+    where
+        F: Fn(Background) -> Fut + Send + Sync + 'static,
+        Fut: std::future::Future<Output = anyhow::Result<()>> + Send + 'static,
+    {
+        self.hooks.shutdown.push(hook_fn(hook));
+        self
+    }
+
     pub fn get(&self, interface: &str) -> Option<Arc<dyn Action>> {
-        self.actions
-            .iter()
-            .find(|a| a.interface() == interface)
-            .cloned()
+        self.actions.iter().find(|a| a.interface() == interface).cloned()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -105,5 +180,50 @@ impl Registry {
 
     pub fn iter(&self) -> impl Iterator<Item = &Arc<dyn Action>> {
         self.actions.iter()
+    }
+
+    pub fn states(&self) -> &[StateDeclaration] {
+        &self.states
+    }
+
+    pub(crate) fn hooks(&self) -> &Hooks {
+        &self.hooks
+    }
+
+    /// Every lock key used by an action, in first-use order.
+    pub fn lock_keys(&self) -> Vec<String> {
+        let mut keys: Vec<String> = vec![];
+        for action in &self.actions {
+            for key in action.locks() {
+                if !keys.contains(&key) {
+                    keys.push(key);
+                }
+            }
+        }
+        keys
+    }
+
+    /// The declaration sent in `REGISTER`.
+    pub fn declaration(&self, name: Option<String>, description: Option<String>) -> AgentDeclaration {
+        let mut declaration = AgentDeclaration {
+            name,
+            description,
+            implementations: self.implementations(),
+            states: self.states.iter().map(StateDeclaration::to_declaration_json).collect(),
+            locks: self
+                .lock_keys()
+                .into_iter()
+                .map(|key| {
+                    serde_json::json!({
+                        "key": key,
+                        "definition": { "key": key, "description": format!("Lock definition for {key}") },
+                    })
+                })
+                .collect(),
+            bloks: vec![],
+            hash: None,
+        };
+        declaration.hash = Some(declaration.compute_hash());
+        declaration
     }
 }

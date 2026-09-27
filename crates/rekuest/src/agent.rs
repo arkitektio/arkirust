@@ -1,39 +1,37 @@
-//! The rekuest agent: registers the app's actions over the `/agi` websocket
-//! and runs assignments as they arrive.
+//! The rekuest agent: registers the app over the `/agi` websocket and runs
+//! assignments as they arrive.
 //!
 //! Connection lifecycle:
 //! 1. connect, send `REGISTER` (token + declaration), wait for `INIT`
 //! 2. re-send unacknowledged terminal reports, answer inquiries
-//! 3. serve: answer `HEARTBEAT`s, spawn a tokio task per `ASSIGN`, abort on
-//!    `CANCEL`/`INTERRUPT`
-//! 4. on disconnect, reconnect with exponential backoff; running tasks keep
-//!    going and report once the next connection is up.
+//! 3. after the *first* `INIT` only: activate (startup hooks, `SESSION_INIT`,
+//!    background hooks). Activation runs beside the read loop so heartbeats
+//!    keep being answered; assignments wait until it is done.
+//! 4. serve: answer `HEARTBEAT`s, hand `ASSIGN`/`CANCEL`/`PAUSE`/… to the
+//!    [`Executor`]
+//! 5. on disconnect, reconnect with exponential backoff; running tasks keep
+//!    going and report once the next connection is up. Reconnecting never
+//!    re-runs startup hooks.
 
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::panic::AssertUnwindSafe;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use fakts::TokenLoader;
-use futures::{FutureExt, SinkExt, StreamExt};
+use futures::{SinkExt, StreamExt};
 use rand::Rng;
-use tokio::task::AbortHandle;
 use tokio_tungstenite::tungstenite::Message;
 
-use crate::action::{ActionError, Registry};
+use crate::action::Registry;
 use crate::context::Context;
 use crate::definition::AgentDeclaration;
+use crate::executor::Executor;
 use crate::messages::{parse_to_agent, Assign, Envelope, FromAgent, ToAgent};
 use crate::outbox::Outbox;
-use crate::task::Task;
 
 /// Close codes after which reconnecting is pointless.
 const CLOSE_BLOCKED: u16 = 4003;
 const CLOSE_BUSY: u16 = 4004;
 const CLOSE_KICKED: u16 = 4005;
-
-/// How many finished task ids are remembered to ignore duplicate assigns.
-const FINISHED_MEMORY: usize = 2048;
 
 /// No frame for this long means the connection is dead (the server heartbeats).
 const IDLE_TIMEOUT: Duration = Duration::from_secs(120);
@@ -50,6 +48,8 @@ pub enum AgentError {
     Closed { code: u16, reason: String },
     #[error("giving up after {0} failed connection attempts")]
     Exhausted(usize),
+    #[error("the agent could not start: {0}")]
+    Activation(String),
 }
 
 /// Exponential backoff between reconnect attempts.
@@ -117,69 +117,57 @@ enum SessionEnd {
     Bounce(Option<Duration>),
 }
 
-type Fatal = AgentError;
-
+/// Activation happens once per agent; until it is done, assignments wait.
 #[derive(Default)]
-struct Tasks {
-    running: HashMap<String, AbortHandle>,
-    finished: VecDeque<String>,
-    finished_set: HashSet<String>,
+enum Activation {
+    #[default]
+    NotStarted,
+    Running(Vec<Assign>),
+    Done,
+    Failed(String),
 }
 
-impl Tasks {
-    fn finish(&mut self, task: &str) -> bool {
-        let was_running = self.running.remove(task).is_some();
-        if self.finished_set.insert(task.to_owned()) {
-            self.finished.push_back(task.to_owned());
-            if self.finished.len() > FINISHED_MEMORY {
-                if let Some(old) = self.finished.pop_front() {
-                    self.finished_set.remove(&old);
-                }
-            }
-        }
-        was_running
-    }
-}
-
-/// Serves a [`Registry`] of actions to a rekuest server.
+/// Serves an app's actions to a rekuest server.
 pub struct Agent {
     options: AgentOptions,
-    registry: Arc<Registry>,
-    ctx: Context,
+    executor: Executor,
     tokens: Arc<dyn TokenLoader>,
     outbox: Arc<Outbox>,
-    tasks: Arc<Mutex<Tasks>>,
+    activation: Arc<Mutex<Activation>>,
+    activation_changed: Arc<tokio::sync::Notify>,
     session_id: String,
 }
 
 impl Agent {
-    pub fn new(
-        options: AgentOptions,
-        registry: Registry,
-        ctx: Context,
-        tokens: Arc<dyn TokenLoader>,
-    ) -> Self {
+    pub fn new(options: AgentOptions, registry: Registry, ctx: Context, tokens: Arc<dyn TokenLoader>) -> Self {
+        let outbox = Arc::new(Outbox::new());
+        // One session per agent: REGISTER announces it, SESSION_INIT and every
+        // STATE_PATCH carry it.
+        let session_id = uuid::Uuid::new_v4().to_string();
         Self {
             options,
-            registry: Arc::new(registry),
-            ctx,
+            executor: Executor::with_session(registry, ctx, outbox.clone(), None, Some(session_id.clone())),
             tokens,
-            outbox: Arc::new(Outbox::new()),
-            tasks: Arc::default(),
-            session_id: uuid::Uuid::new_v4().to_string(),
+            outbox,
+            activation: Arc::default(),
+            activation_changed: Arc::default(),
+            session_id,
         }
+    }
+
+    pub fn executor(&self) -> &Executor {
+        &self.executor
     }
 
     /// What this agent registers.
     pub fn declaration(&self) -> AgentDeclaration {
-        AgentDeclaration::new(
-            self.options.name.clone(),
-            self.options.description.clone(),
-            self.registry.implementations(),
-        )
+        self.executor
+            .registry()
+            .declaration(self.options.name.clone(), self.options.description.clone())
     }
 
     /// Serve until a fatal error (or until the retry budget is exhausted).
+    /// Call [`Agent::shutdown`] afterwards to run shutdown hooks.
     pub async fn run(&self) -> Result<(), AgentError> {
         fakts::install_crypto_provider();
         let policy = self.options.policy.clone();
@@ -203,25 +191,72 @@ impl Agent {
                 return Err(AgentError::Exhausted(attempt - 1));
             }
             let delay = policy.delay_for(attempt);
-            tracing::info!(
-                "reconnecting in {delay:?} (attempt {attempt}/{})",
-                policy.max_retries
-            );
+            tracing::info!("reconnecting in {delay:?} (attempt {attempt}/{})", policy.max_retries);
             tokio::time::sleep(delay).await;
         }
     }
 
-    async fn session(&self) -> Result<SessionEnd, Fatal> {
+    /// Run shutdown hooks and flush state changes.
+    pub async fn shutdown(&self) {
+        self.executor.teardown().await;
+    }
+
+    /// Start activation after the first INIT; later INITs do nothing.
+    fn start_activation(&self) {
+        {
+            let mut activation = self.activation.lock().expect("activation lock");
+            if !matches!(*activation, Activation::NotStarted) {
+                return;
+            }
+            *activation = Activation::Running(vec![]);
+        }
+        let executor = self.executor.clone();
+        let activation = self.activation.clone();
+        let changed = self.activation_changed.clone();
+        tokio::spawn(async move {
+            let result = executor.activate().await;
+            let next = match &result {
+                Ok(()) => Activation::Done,
+                Err(e) => Activation::Failed(format!("{e:#}")),
+            };
+            let previous = std::mem::replace(&mut *activation.lock().expect("activation lock"), next);
+            if let (Ok(()), Activation::Running(buffered)) = (&result, previous) {
+                for assign in buffered {
+                    executor.assign(assign);
+                }
+            }
+            changed.notify_waiters();
+        });
+    }
+
+    fn activation_failure(&self) -> Option<String> {
+        match &*self.activation.lock().expect("activation lock") {
+            Activation::Failed(e) => Some(e.clone()),
+            _ => None,
+        }
+    }
+
+    /// Run now if activated, else hold until activation is done.
+    fn assign(&self, assign: Assign) {
+        let mut activation = self.activation.lock().expect("activation lock");
+        match &mut *activation {
+            Activation::Done => {
+                drop(activation);
+                self.executor.assign(assign);
+            }
+            Activation::Running(buffered) => buffered.push(assign),
+            Activation::Failed(_) => tracing::warn!("dropping an assignment: the agent failed to start"),
+            // Cannot happen (assignments come after INIT), but never lose one.
+            Activation::NotStarted => *activation = Activation::Running(vec![assign]),
+        }
+    }
+
+    async fn session(&self) -> Result<SessionEnd, AgentError> {
         let token = self.tokens.get_token().await?;
 
         let (ws, _) = match tokio_tungstenite::connect_async(&self.options.endpoint_url).await {
             Ok(ws) => ws,
-            Err(e) => {
-                return Ok(SessionEnd::Dropped(format!(
-                    "connect to {}: {e}",
-                    self.options.endpoint_url
-                )))
-            }
+            Err(e) => return Ok(SessionEnd::Dropped(format!("connect to {}: {e}", self.options.endpoint_url))),
         };
         let (mut sink, mut stream) = ws.split();
 
@@ -240,6 +275,7 @@ impl Agent {
         let mut early: Vec<ToAgent> = vec![];
 
         let end = loop {
+            let activation_changed = self.activation_changed.notified();
             let frame = tokio::select! {
                 Some(envelope) = rx.recv() => {
                     if let Err(e) = sink.send(Message::Text(to_json(&envelope))).await {
@@ -247,15 +283,18 @@ impl Agent {
                     }
                     continue;
                 }
+                _ = activation_changed => {
+                    if let Some(error) = self.activation_failure() {
+                        self.outbox.detach();
+                        return Err(AgentError::Activation(error));
+                    }
+                    continue;
+                }
                 frame = tokio::time::timeout(IDLE_TIMEOUT, stream.next()) => frame,
             };
 
             let text = match frame {
-                Err(_) => {
-                    break SessionEnd::Dropped(
-                        "no frame from the server within the idle timeout".into(),
-                    )
-                }
+                Err(_) => break SessionEnd::Dropped("no frame from the server within the idle timeout".into()),
                 Ok(None) => break SessionEnd::Dropped("stream ended".into()),
                 Ok(Some(Err(e))) => break SessionEnd::Dropped(format!("read: {e}")),
                 Ok(Some(Ok(Message::Text(text)))) => text,
@@ -295,7 +334,7 @@ impl Agent {
                 } => {
                     tracing::info!(
                         "registered as agent {agent} with {} actions",
-                        self.registry.len()
+                        self.executor.registry().len()
                     );
                     for d in diagnostics {
                         tracing::warn!(
@@ -309,6 +348,7 @@ impl Agent {
                     self.outbox.attach(tx.clone());
                     self.outbox.resend_unacked();
                     self.answer_inquiries(inquiries.into_iter().map(|i| i.task));
+                    self.start_activation();
                     initialized = true;
                     for message in early.drain(..) {
                         self.dispatch(message);
@@ -337,12 +377,10 @@ impl Agent {
     fn dispatch(&self, message: ToAgent) {
         match message {
             ToAgent::Assign(assign) => self.assign(*assign),
-            ToAgent::Cancel { task } => {
-                self.abort(&task, FromAgent::Cancelled { task: task.clone() })
-            }
-            ToAgent::Interrupt { task } => {
-                self.abort(&task, FromAgent::Interrupted { task: task.clone() })
-            }
+            ToAgent::Cancel { task } => self.executor.cancel(&task),
+            ToAgent::Interrupt { task } => self.executor.interrupt(&task),
+            ToAgent::Pause { task } => self.executor.pause(&task),
+            ToAgent::Resume { task, step } => self.executor.resume(&task, step),
             ToAgent::EventAck { event, seq, .. } => self.outbox.ack(event.as_deref(), seq),
             ToAgent::Unknown => tracing::debug!("ignoring an unsupported message"),
             other => tracing::debug!("ignoring {other:?}"),
@@ -367,15 +405,14 @@ impl Agent {
     }
 
     fn answer_inquiries(&self, tasks: impl Iterator<Item = String>) {
-        let state = self.tasks.lock().expect("tasks lock");
         for task in tasks {
-            if state.running.contains_key(&task) {
+            if self.executor.is_running(&task) {
                 self.outbox.send(FromAgent::Progress {
                     task,
                     progress: None,
                     message: Some("still running".into()),
                 });
-            } else if !state.finished_set.contains(&task) {
+            } else if !self.executor.has_finished(&task) {
                 self.outbox.send(FromAgent::Critical {
                     task,
                     error: "the agent restarted and lost this task".into(),
@@ -383,89 +420,8 @@ impl Agent {
             }
         }
     }
-
-    fn assign(&self, assign: Assign) {
-        let mut state = self.tasks.lock().expect("tasks lock");
-        let task_id = assign.task.clone();
-        if state.running.contains_key(&task_id) || state.finished_set.contains(&task_id) {
-            tracing::debug!("ignoring duplicate ASSIGN for task {task_id}");
-            return;
-        }
-        let Some(action) = self.registry.get(&assign.interface) else {
-            self.outbox.send(FromAgent::Critical {
-                task: task_id,
-                error: format!(
-                    "this agent has no action with interface '{}'",
-                    assign.interface
-                ),
-            });
-            return;
-        };
-
-        let assign = Arc::new(assign);
-        let args = assign.args.clone();
-        let token = assign.token.clone();
-        let task = Task::new(assign, self.outbox.clone());
-        let outbox = self.outbox.clone();
-        let tasks = self.tasks.clone();
-        let ctx = self.ctx.clone();
-        let id = task_id.clone();
-
-        let run = async move {
-            outbox.send(FromAgent::Progress {
-                task: id.clone(),
-                progress: Some(0),
-                message: Some("Queued for running".into()),
-            });
-            let body = rath::with_task_token(token, action.run(args, ctx, task));
-            let event = match AssertUnwindSafe(body).catch_unwind().await {
-                Ok(Ok(())) => FromAgent::Completed { task: id.clone() },
-                Ok(Err(ActionError::Failed(error))) => FromAgent::Failed {
-                    task: id.clone(),
-                    error,
-                },
-                Ok(Err(ActionError::Critical(error))) => FromAgent::Critical {
-                    task: id.clone(),
-                    error,
-                },
-                Err(panic) => FromAgent::Critical {
-                    task: id.clone(),
-                    error: format!("the action panicked: {}", panic_message(&panic)),
-                },
-            };
-            // A cancelled task was already reported by `abort`.
-            if tasks.lock().expect("tasks lock").finish(&id) {
-                outbox.send(event);
-            }
-        };
-
-        // The lock is held across the spawn so the task cannot finish before
-        // it is registered as running.
-        let handle = tokio::spawn(run);
-        state.running.insert(task_id, handle.abort_handle());
-    }
-
-    fn abort(&self, task: &str, report: FromAgent) {
-        let mut state = self.tasks.lock().expect("tasks lock");
-        match state.running.get(task).cloned() {
-            Some(handle) => {
-                handle.abort();
-                state.finish(task);
-                self.outbox.send(report);
-            }
-            None => tracing::debug!("cannot stop task {task}: it is not running"),
-        }
-    }
 }
 
 fn to_json(envelope: &Envelope) -> String {
     serde_json::to_string(envelope).expect("messages serialize")
-}
-
-fn panic_message(panic: &Box<dyn std::any::Any + Send>) -> String {
-    panic
-        .downcast_ref::<&str>()
-        .map(|s| s.to_string())
-        .or_else(|| panic.downcast_ref::<String>().cloned())
-        .unwrap_or_else(|| "unknown panic".into())
 }

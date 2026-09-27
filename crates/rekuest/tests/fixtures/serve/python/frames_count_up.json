@@ -1,0 +1,34 @@
+[
+  {
+    "id": "baea285f-b86a-4af1-b110-3a97f40eb7ea",
+    "seq": 7,
+    "type": "PROGRESS",
+    "task": "3a5c3d11-87eb-4a47-8d26-b43c8171b5e0",
+    "progress": 0,
+    "message": "Queued for running"
+  },
+  {
+    "id": "107223f5-7c41-4333-8615-a66690bb8ed9",
+    "seq": 8,
+    "type": "YIELD",
+    "task": "3a5c3d11-87eb-4a47-8d26-b43c8171b5e0",
+    "returns": {
+      "return0": 0
+    }
+  },
+  {
+    "id": "7359e459-396b-4561-8a25-8667ba61978d",
+    "seq": 9,
+    "type": "YIELD",
+    "task": "3a5c3d11-87eb-4a47-8d26-b43c8171b5e0",
+    "returns": {
+      "return0": 1
+    }
+  },
+  {
+    "id": "a1b56577-6ed7-40a3-9bdf-9f973b5d7b59",
+    "seq": 10,
+    "type": "COMPLETED",
+    "task": "3a5c3d11-87eb-4a47-8d26-b43c8171b5e0"
+  }
+]

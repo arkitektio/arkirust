@@ -1,0 +1,38 @@
+{
+  "status": 200,
+  "headers": {
+    "content-type": "application/json"
+  },
+  "body": {
+    "from_global_revision": 0,
+    "to_global_revision": 2,
+    "patches": [
+      {
+        "timepoint": "2026-09-26T20:27:58.263000Z",
+        "state_id": "CameraState",
+        "global_current_rev": 0,
+        "global_future_rev": 1,
+        "correlation_id": "759fc766-5cc5-41e8-a756-d4fd34f811c4",
+        "session_id": "1a476967-c09a-4769-af55-3743a411e45b",
+        "patch": {
+          "op": "replace",
+          "path": "/exposure_ms",
+          "value": 20.0
+        }
+      },
+      {
+        "timepoint": "2026-09-26T20:27:58.793000Z",
+        "state_id": "CameraState",
+        "global_current_rev": 1,
+        "global_future_rev": 2,
+        "correlation_id": "582cdbfb-562f-4068-9686-dd246bc5b2f5",
+        "session_id": "1a476967-c09a-4769-af55-3743a411e45b",
+        "patch": {
+          "op": "add",
+          "path": "/tags/0",
+          "value": "a"
+        }
+      }
+    ]
+  }
+}

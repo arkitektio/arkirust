@@ -78,6 +78,16 @@ pub enum ToAgent {
     Interrupt {
         task: String,
     },
+    /// Stop the task at its next pausepoint.
+    Pause {
+        task: String,
+    },
+    /// Release a paused task; with `step`, stop again at the next pausepoint.
+    Resume {
+        task: String,
+        #[serde(default)]
+        step: bool,
+    },
     Heartbeat {},
     Bounce {
         #[serde(default)]
@@ -163,6 +173,42 @@ pub enum FromAgent {
     Interrupted {
         task: String,
     },
+    Paused {
+        task: String,
+    },
+    Resumed {
+        task: String,
+    },
+    /// One RFC 6902 operation on a state. `old_value` is always null, as in Python.
+    StatePatch {
+        session_id: String,
+        global_rev: u64,
+        state_name: String,
+        ts: f64,
+        op: String,
+        path: String,
+        value: Value,
+        old_value: Value,
+        task_id: Option<String>,
+    },
+    /// Every state at a revision.
+    StateSnapshot {
+        session_id: String,
+        global_rev: u64,
+        snapshots: Map<String, Value>,
+    },
+    /// The baseline of a session: every state after startup.
+    SessionInit {
+        session_id: String,
+        states: Map<String, Value>,
+    },
+    Lock {
+        key: String,
+        task: String,
+    },
+    Unlock {
+        key: String,
+    },
 }
 
 impl FromAgent {
@@ -179,10 +225,17 @@ impl FromAgent {
     }
 
     /// Events that carry a `seq`.
+    /// Task events carry a `seq`; registration, heartbeats, state and lock messages do not.
     pub fn is_event(&self) -> bool {
         !matches!(
             self,
-            FromAgent::Register { .. } | FromAgent::HeartbeatAnswer {}
+            FromAgent::Register { .. }
+                | FromAgent::HeartbeatAnswer {}
+                | FromAgent::StatePatch { .. }
+                | FromAgent::StateSnapshot { .. }
+                | FromAgent::SessionInit { .. }
+                | FromAgent::Lock { .. }
+                | FromAgent::Unlock { .. }
         )
     }
 
@@ -196,7 +249,9 @@ impl FromAgent {
             | FromAgent::Failed { task, .. }
             | FromAgent::Critical { task, .. }
             | FromAgent::Cancelled { task }
-            | FromAgent::Interrupted { task } => Some(task),
+            | FromAgent::Interrupted { task }
+            | FromAgent::Paused { task }
+            | FromAgent::Resumed { task } => Some(task),
             _ => None,
         }
     }

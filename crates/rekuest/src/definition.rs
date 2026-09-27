@@ -73,6 +73,12 @@ pub struct Implementation {
     pub params: Option<Value>,
     #[serde(default = "yes")]
     pub needs_token: bool,
+    /// Locks held while an assignment runs.
+    #[serde(default)]
+    pub locks: Vec<String>,
+    /// States an assignment may change.
+    #[serde(default)]
+    pub manipulates: Vec<String>,
 }
 
 fn yes() -> bool {
@@ -87,6 +93,8 @@ impl Implementation {
             dependencies: vec![],
             params: None,
             needs_token: true,
+            locks: vec![],
+            manipulates: vec![],
         }
     }
 }

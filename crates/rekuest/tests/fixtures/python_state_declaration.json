@@ -1,0 +1,289 @@
+{
+  "name": "twin:0.1.0",
+  "states": [
+    {
+      "interface": "CameraState",
+      "definition": {
+        "ports": [
+          {
+            "key": "connected",
+            "label": null,
+            "kind": "BOOL",
+            "description": null,
+            "nullable": false,
+            "effects": [],
+            "widget": null,
+            "provides": null
+          },
+          {
+            "key": "exposure_ms",
+            "label": null,
+            "kind": "FLOAT",
+            "description": null,
+            "nullable": false,
+            "effects": [],
+            "widget": null,
+            "provides": null
+          },
+          {
+            "key": "tags",
+            "label": null,
+            "kind": "LIST",
+            "description": null,
+            "nullable": false,
+            "effects": [],
+            "children": [
+              {
+                "key": "...",
+                "label": null,
+                "kind": "STRING",
+                "description": null,
+                "nullable": false,
+                "effects": [],
+                "widget": null,
+                "provides": null
+              }
+            ],
+            "widget": null,
+            "provides": null
+          }
+        ],
+        "name": "CameraState"
+      }
+    }
+  ],
+  "implementations": [
+    {
+      "definition": {
+        "description": "Set Exposure\n\nChanges the exposure time.",
+        "collections": [],
+        "key": "set_exposure",
+        "version": "1",
+        "name": "Set Exposure",
+        "stateful": true,
+        "catalogs": null,
+        "port_groups": [],
+        "args": [
+          {
+            "key": "exposure_ms",
+            "label": null,
+            "kind": "FLOAT",
+            "description": null,
+            "nullable": false,
+            "effects": [],
+            "validators": [],
+            "default": null,
+            "widget": null,
+            "requires": null
+          }
+        ],
+        "returns": [
+          {
+            "key": "return0",
+            "label": null,
+            "kind": "FLOAT",
+            "description": null,
+            "nullable": false,
+            "effects": [],
+            "widget": null,
+            "provides": null
+          }
+        ],
+        "kind": "FUNCTION",
+        "is_test_for": [],
+        "is_dev": false
+      },
+      "dependencies": [],
+      "tracks": [],
+      "interface": "set_exposure",
+      "locks": [
+        "camera"
+      ],
+      "optimistics": [],
+      "manipulates": [
+        "CameraState"
+      ],
+      "needs_token": true
+    },
+    {
+      "definition": {
+        "description": "Add Tag",
+        "collections": [],
+        "key": "add_tag",
+        "version": "1",
+        "name": "Add Tag",
+        "stateful": true,
+        "catalogs": null,
+        "port_groups": [],
+        "args": [
+          {
+            "key": "tag",
+            "label": null,
+            "kind": "STRING",
+            "description": null,
+            "nullable": false,
+            "effects": [],
+            "validators": [],
+            "default": null,
+            "widget": null,
+            "requires": null
+          }
+        ],
+        "returns": [
+          {
+            "key": "return0",
+            "label": null,
+            "kind": "INT",
+            "description": null,
+            "nullable": false,
+            "effects": [],
+            "widget": null,
+            "provides": null
+          }
+        ],
+        "kind": "FUNCTION",
+        "is_test_for": [],
+        "is_dev": false
+      },
+      "dependencies": [],
+      "tracks": [],
+      "interface": "add_tag",
+      "locks": [
+        "camera"
+      ],
+      "optimistics": [],
+      "manipulates": [
+        "CameraState"
+      ],
+      "needs_token": true
+    },
+    {
+      "definition": {
+        "description": "Count Up",
+        "collections": [],
+        "key": "count_up",
+        "version": "1",
+        "name": "Count Up",
+        "stateful": false,
+        "catalogs": null,
+        "port_groups": [],
+        "args": [
+          {
+            "key": "until",
+            "label": null,
+            "kind": "INT",
+            "description": null,
+            "nullable": false,
+            "effects": [],
+            "validators": [],
+            "default": null,
+            "widget": null,
+            "requires": null
+          }
+        ],
+        "returns": [
+          {
+            "key": "return0",
+            "label": null,
+            "kind": "INT",
+            "description": null,
+            "nullable": false,
+            "effects": [],
+            "widget": null,
+            "provides": null
+          }
+        ],
+        "kind": "GENERATOR",
+        "is_test_for": [],
+        "is_dev": false
+      },
+      "dependencies": [],
+      "tracks": [],
+      "interface": "count_up",
+      "locks": [],
+      "optimistics": [],
+      "manipulates": [],
+      "needs_token": true
+    },
+    {
+      "definition": {
+        "description": "Explode",
+        "collections": [],
+        "key": "explode",
+        "version": "1",
+        "name": "Explode",
+        "stateful": false,
+        "catalogs": null,
+        "port_groups": [],
+        "args": [],
+        "returns": [
+          {
+            "key": "return0",
+            "label": null,
+            "kind": "INT",
+            "description": null,
+            "nullable": false,
+            "effects": [],
+            "widget": null,
+            "provides": null
+          }
+        ],
+        "kind": "FUNCTION",
+        "is_test_for": [],
+        "is_dev": false
+      },
+      "dependencies": [],
+      "tracks": [],
+      "interface": "explode",
+      "locks": [],
+      "optimistics": [],
+      "manipulates": [],
+      "needs_token": true
+    },
+    {
+      "definition": {
+        "description": "Pausable",
+        "collections": [],
+        "key": "pausable",
+        "version": "1",
+        "name": "Pausable",
+        "stateful": false,
+        "catalogs": null,
+        "port_groups": [],
+        "args": [],
+        "returns": [
+          {
+            "key": "return0",
+            "label": null,
+            "kind": "STRING",
+            "description": null,
+            "nullable": false,
+            "effects": [],
+            "widget": null,
+            "provides": null
+          }
+        ],
+        "kind": "FUNCTION",
+        "is_test_for": [],
+        "is_dev": false
+      },
+      "dependencies": [],
+      "tracks": [],
+      "interface": "pausable",
+      "locks": [],
+      "optimistics": [],
+      "manipulates": [],
+      "needs_token": true
+    }
+  ],
+  "locks": [
+    {
+      "key": "camera",
+      "definition": {
+        "key": "camera",
+        "description": "Lock definition for camera"
+      }
+    }
+  ],
+  "bloks": []
+}

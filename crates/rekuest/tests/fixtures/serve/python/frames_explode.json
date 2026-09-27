@@ -1,0 +1,17 @@
+[
+  {
+    "id": "6c542b25-1279-4641-9ce0-d5fd1e0d96c8",
+    "seq": 11,
+    "type": "PROGRESS",
+    "task": "c1333b04-e0c8-41b0-a6b2-d98336a0f5d5",
+    "progress": 0,
+    "message": "Queued for running"
+  },
+  {
+    "id": "fcbf2aa6-b5fa-4f79-801a-c9e58dcd9161",
+    "seq": 12,
+    "type": "CRITICAL",
+    "task": "c1333b04-e0c8-41b0-a6b2-d98336a0f5d5",
+    "error": "boom"
+  }
+]

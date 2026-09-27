@@ -23,21 +23,33 @@ mod action;
 pub mod agent;
 mod context;
 mod definition;
+mod emit;
+pub mod executor;
+mod hooks;
+mod locks;
 pub mod messages;
 mod outbox;
 mod port_type;
 mod ports;
+pub mod state;
+#[cfg(feature = "serve")]
+pub mod serve;
 mod task;
 
-pub use crate::action::{Action, ActionError, Registry};
+pub use crate::action::{Action, ActionError, Concurrency, Registry};
 pub use crate::agent::{Agent, AgentError, AgentOptions, ConnectionPolicy};
 pub use crate::context::{Context, ContextBuilder, MissingClient};
 pub use crate::definition::{ActionKind, AgentDeclaration, Definition, Implementation};
+pub use crate::emit::{Emitter, NullEmitter};
+pub use crate::executor::{Executor, StateView, TaskView};
+pub use crate::hooks::{Background, Shutdown, Startup};
+pub use crate::locks::{LockTable, LockView};
+pub use crate::state::{Mutation, Sink, StateError, StateHub, StateMut, StateRef, StateType};
 pub use crate::messages::LogLevel;
 pub use crate::port_type::{unwrap_reference, PortError, PortType, Structure};
 pub use crate::ports::{widgets, Choice, Port, PortKind};
 pub use crate::task::Task;
-pub use rekuest_macros::action;
+pub use rekuest_macros::{action, State};
 
 /// Everything `#[action]`-generated code refers to. Not a public API.
 #[doc(hidden)]
@@ -46,10 +58,11 @@ pub mod __private {
     pub use serde_json;
     pub use tokio;
 
-    pub use crate::action::{Action, ActionError};
+    pub use crate::action::{Action, ActionError, Concurrency};
     pub use crate::context::Context;
     pub use crate::definition::{ActionKind, Definition};
     pub use crate::port_type::PortType;
     pub use crate::ports::Port;
+    pub use crate::state::{StateMut, StateRef, StateType};
     pub use crate::task::Task;
 }

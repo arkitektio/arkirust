@@ -1,0 +1,86 @@
+{
+  "status": 200,
+  "headers": {
+    "content-type": "application/json"
+  },
+  "body": {
+    "count": 1,
+    "states": {
+      "CameraState": {
+        "interface": "CameraState",
+        "key": null,
+        "app": null,
+        "definition": {
+          "ports": [
+            {
+              "key": "connected",
+              "label": null,
+              "kind": "BOOL",
+              "description": null,
+              "identifier": null,
+              "nullable": false,
+              "effects": [],
+              "choices": null,
+              "referenceUnit": null,
+              "proposedUnits": null,
+              "dimension": null,
+              "children": null,
+              "widget": null,
+              "provides": null
+            },
+            {
+              "key": "exposure_ms",
+              "label": null,
+              "kind": "FLOAT",
+              "description": null,
+              "identifier": null,
+              "nullable": false,
+              "effects": [],
+              "choices": null,
+              "referenceUnit": null,
+              "proposedUnits": null,
+              "dimension": null,
+              "children": null,
+              "widget": null,
+              "provides": null
+            },
+            {
+              "key": "tags",
+              "label": null,
+              "kind": "LIST",
+              "description": null,
+              "identifier": null,
+              "nullable": false,
+              "effects": [],
+              "choices": null,
+              "referenceUnit": null,
+              "proposedUnits": null,
+              "dimension": null,
+              "children": [
+                {
+                  "key": "...",
+                  "label": null,
+                  "kind": "STRING",
+                  "description": null,
+                  "identifier": null,
+                  "nullable": false,
+                  "effects": [],
+                  "choices": null,
+                  "referenceUnit": null,
+                  "proposedUnits": null,
+                  "dimension": null,
+                  "children": null,
+                  "widget": null,
+                  "provides": null
+                }
+              ],
+              "widget": null,
+              "provides": null
+            }
+          ],
+          "name": "CameraState"
+        }
+      }
+    }
+  }
+}

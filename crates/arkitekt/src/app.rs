@@ -1,9 +1,11 @@
 //! The app declaration.
 
+use std::future::Future;
 use std::sync::Arc;
 
 use fakts::{Manifest, PublicSource};
-use rekuest::{Action, Registry};
+
+use rekuest::{Action, Background, Registry, StateType, Startup};
 
 use crate::runtime::{ConnectOptions, Runtime};
 use crate::service::{rekuest_requirement, Service};
@@ -97,6 +99,50 @@ impl App {
         self
     }
 
+    /// Declare a state (a `#[derive(State)]` struct) with its initial value.
+    /// Every change actions make to it is published, so do not add actions
+    /// that only read it back.
+    pub fn state<T: StateType>(mut self, initial: T) -> Self {
+        self.registry.state(initial);
+        self
+    }
+
+    /// Declare a state whose initial value a startup hook provides.
+    pub fn declare_state<T: StateType>(mut self) -> Self {
+        self.registry.declare_state::<T>();
+        self
+    }
+
+    /// Run once before any action: connect hardware, set states, provide contexts.
+    pub fn startup<F, Fut>(mut self, hook: F) -> Self
+    where
+        F: Fn(Startup) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = anyhow::Result<()>> + Send + 'static,
+    {
+        self.registry.startup(hook);
+        self
+    }
+
+    /// Run for the app's lifetime (cancelled on shutdown).
+    pub fn background<F, Fut>(mut self, hook: F) -> Self
+    where
+        F: Fn(Background) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = anyhow::Result<()>> + Send + 'static,
+    {
+        self.registry.background(hook);
+        self
+    }
+
+    /// Run once when the app stops.
+    pub fn shutdown<F, Fut>(mut self, hook: F) -> Self
+    where
+        F: Fn(Background) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = anyhow::Result<()>> + Send + 'static,
+    {
+        self.registry.shutdown(hook);
+        self
+    }
+
     pub fn identifier(&self) -> &str {
         &self.identifier
     }
@@ -117,8 +163,14 @@ impl App {
     /// The manifest, derived from the declaration: the requirements are
     /// exactly what the services (and, if actions are offered, the agent) need.
     pub fn manifest(&self, device_id: Option<String>) -> Manifest {
+        self.manifest_for(device_id, true)
+    }
+
+    /// The manifest; `remote_agent` adds the rekuest requirement when the app
+    /// offers actions (a served app needs no rekuest server).
+    pub fn manifest_for(&self, device_id: Option<String>, remote_agent: bool) -> Manifest {
         let mut requirements = vec![];
-        if self.provides() {
+        if remote_agent && self.provides() {
             requirements.push(rekuest_requirement());
         }
         for service in &self.services {

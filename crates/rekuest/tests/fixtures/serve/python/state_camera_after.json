@@ -1,0 +1,16 @@
+{
+  "status": 200,
+  "headers": {
+    "content-type": "application/json"
+  },
+  "body": {
+    "revision": 2,
+    "state": {
+      "connected": true,
+      "exposure_ms": 20.0,
+      "tags": [
+        "a"
+      ]
+    }
+  }
+}

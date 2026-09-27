@@ -1,0 +1,18 @@
+{
+  "status": 200,
+  "headers": {
+    "content-type": "application/json"
+  },
+  "body": {
+    "count": 1,
+    "locks": {
+      "camera": {
+        "key": "camera",
+        "definition": {
+          "key": "camera",
+          "description": "Lock definition for camera"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,603 @@
+{
+  "LockCollectionResponse": {
+    "properties": {
+      "count": {
+        "type": "integer",
+        "title": "Count"
+      },
+      "locks": {
+        "additionalProperties": {
+          "$ref": "#/components/schemas/LockView"
+        },
+        "type": "object",
+        "title": "Locks"
+      }
+    },
+    "type": "object",
+    "required": [
+      "count",
+      "locks"
+    ],
+    "title": "LockCollectionResponse",
+    "description": "Collection response for lock overview endpoints."
+  },
+  "RetrieverPatchEventResponse": {
+    "properties": {
+      "timepoint": {
+        "type": "string",
+        "format": "date-time",
+        "title": "Timepoint"
+      },
+      "state_id": {
+        "type": "string",
+        "title": "State Id"
+      },
+      "global_current_rev": {
+        "type": "integer",
+        "title": "Global Current Rev"
+      },
+      "global_future_rev": {
+        "type": "integer",
+        "title": "Global Future Rev"
+      },
+      "correlation_id": {
+        "type": "string",
+        "title": "Correlation Id"
+      },
+      "session_id": {
+        "type": "string",
+        "title": "Session Id"
+      },
+      "patch": {
+        "title": "Patch"
+      }
+    },
+    "type": "object",
+    "required": [
+      "timepoint",
+      "state_id",
+      "global_current_rev",
+      "global_future_rev",
+      "correlation_id",
+      "session_id",
+      "patch"
+    ],
+    "title": "RetrieverPatchEventResponse",
+    "description": "Response representing a persisted patch event."
+  },
+  "RetrieverSessionBoundaryResponse": {
+    "properties": {
+      "session_id": {
+        "type": "string",
+        "title": "Session Id"
+      },
+      "start_global_revision": {
+        "type": "integer",
+        "title": "Start Global Revision"
+      },
+      "end_global_revision": {
+        "type": "integer",
+        "title": "End Global Revision"
+      },
+      "start_time": {
+        "type": "string",
+        "format": "date-time",
+        "title": "Start Time"
+      },
+      "end_time": {
+        "type": "string",
+        "format": "date-time",
+        "title": "End Time"
+      }
+    },
+    "type": "object",
+    "required": [
+      "session_id",
+      "start_global_revision",
+      "end_global_revision",
+      "start_time",
+      "end_time"
+    ],
+    "title": "RetrieverSessionBoundaryResponse",
+    "description": "Response describing the global revision boundaries of a session."
+  },
+  "RetrieverSessionInfoResponse": {
+    "properties": {
+      "current_session": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Current Session"
+      }
+    },
+    "type": "object",
+    "required": [
+      "current_session"
+    ],
+    "title": "RetrieverSessionInfoResponse",
+    "description": "Response containing the active session identifier."
+  },
+  "RetrieverSnapshotResponse": {
+    "properties": {
+      "timepoint": {
+        "type": "string",
+        "format": "date-time",
+        "title": "Timepoint"
+      },
+      "data": {
+        "title": "Data"
+      },
+      "global_revision": {
+        "type": "integer",
+        "title": "Global Revision"
+      },
+      "session_id": {
+        "type": "string",
+        "title": "Session Id"
+      }
+    },
+    "type": "object",
+    "required": [
+      "timepoint",
+      "data",
+      "global_revision",
+      "session_id"
+    ],
+    "title": "RetrieverSnapshotResponse",
+    "description": "Response representing a reconstructed state snapshot."
+  },
+  "RetrieverTaskBoundaryResponse": {
+    "properties": {
+      "correlation_id": {
+        "type": "string",
+        "title": "Correlation Id"
+      },
+      "start_global_revision": {
+        "type": "integer",
+        "title": "Start Global Revision"
+      },
+      "end_global_revision": {
+        "type": "integer",
+        "title": "End Global Revision"
+      },
+      "start_time": {
+        "type": "string",
+        "format": "date-time",
+        "title": "Start Time"
+      },
+      "end_time": {
+        "type": "string",
+        "format": "date-time",
+        "title": "End Time"
+      }
+    },
+    "type": "object",
+    "required": [
+      "correlation_id",
+      "start_global_revision",
+      "end_global_revision",
+      "start_time",
+      "end_time"
+    ],
+    "title": "RetrieverTaskBoundaryResponse",
+    "description": "Response describing the global revision boundaries of a task."
+  },
+  "StateCollectionResponse": {
+    "properties": {
+      "current_session": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Current Session"
+      },
+      "current_global_revision": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Current Global Revision"
+      },
+      "count": {
+        "type": "integer",
+        "title": "Count"
+      },
+      "states": {
+        "additionalProperties": {
+          "$ref": "#/components/schemas/StateView"
+        },
+        "type": "object",
+        "title": "States"
+      },
+      "recent_patches": {
+        "items": {
+          "$ref": "#/components/schemas/RetrieverPatchEventResponse"
+        },
+        "type": "array",
+        "title": "Recent Patches"
+      }
+    },
+    "type": "object",
+    "required": [
+      "current_session",
+      "current_global_revision",
+      "count",
+      "states"
+    ],
+    "title": "StateCollectionResponse",
+    "description": "Collection response for state overview endpoints."
+  },
+  "StateSegmentsResponse": {
+    "properties": {
+      "from_global_revision": {
+        "type": "integer",
+        "title": "From Global Revision"
+      },
+      "to_global_revision": {
+        "type": "integer",
+        "title": "To Global Revision"
+      },
+      "patches": {
+        "items": {
+          "$ref": "#/components/schemas/RetrieverPatchEventResponse"
+        },
+        "type": "array",
+        "title": "Patches"
+      }
+    },
+    "type": "object",
+    "required": [
+      "from_global_revision",
+      "to_global_revision",
+      "patches"
+    ],
+    "title": "StateSegmentsResponse",
+    "description": "Response representing persisted patches within a global revision range."
+  },
+  "TaskCollectionResponse": {
+    "properties": {
+      "count": {
+        "type": "integer",
+        "title": "Count"
+      },
+      "tasks": {
+        "additionalProperties": {
+          "$ref": "#/components/schemas/TaskView"
+        },
+        "type": "object",
+        "title": "Tasks"
+      }
+    },
+    "type": "object",
+    "required": [
+      "count",
+      "tasks"
+    ],
+    "title": "TaskCollectionResponse",
+    "description": "Collection response for task overview endpoints."
+  },
+  "Set ExposureRequest": {
+    "type": "object",
+    "title": "Set ExposureRequest",
+    "properties": {
+      "args": {
+        "type": "object",
+        "title": "Set ExposureArgs",
+        "properties": {
+          "exposure_ms": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "exposure_ms"
+        ]
+      },
+      "policy": {
+        "type": "object",
+        "description": "The policy for the task"
+      },
+      "reference": {
+        "type": "string",
+        "description": "A reference string"
+      },
+      "cached": {
+        "type": "boolean",
+        "default": false
+      },
+      "log": {
+        "type": "boolean",
+        "default": false
+      },
+      "capture": {
+        "type": "boolean",
+        "default": false
+      },
+      "ephemeral": {
+        "type": "boolean",
+        "default": false
+      },
+      "step": {
+        "type": "boolean",
+        "description": "Whether to step through the task"
+      }
+    },
+    "required": [
+      "args",
+      "cached",
+      "log",
+      "capture",
+      "ephemeral"
+    ]
+  },
+  "Set ExposureResponse": {
+    "type": "object",
+    "title": "Set ExposureResponse",
+    "properties": {
+      "return0": {
+        "type": "number"
+      }
+    },
+    "required": [
+      "return0"
+    ]
+  },
+  "Add TagRequest": {
+    "type": "object",
+    "title": "Add TagRequest",
+    "properties": {
+      "args": {
+        "type": "object",
+        "title": "Add TagArgs",
+        "properties": {
+          "tag": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tag"
+        ]
+      },
+      "policy": {
+        "type": "object",
+        "description": "The policy for the task"
+      },
+      "reference": {
+        "type": "string",
+        "description": "A reference string"
+      },
+      "cached": {
+        "type": "boolean",
+        "default": false
+      },
+      "log": {
+        "type": "boolean",
+        "default": false
+      },
+      "capture": {
+        "type": "boolean",
+        "default": false
+      },
+      "ephemeral": {
+        "type": "boolean",
+        "default": false
+      },
+      "step": {
+        "type": "boolean",
+        "description": "Whether to step through the task"
+      }
+    },
+    "required": [
+      "args",
+      "cached",
+      "log",
+      "capture",
+      "ephemeral"
+    ]
+  },
+  "Add TagResponse": {
+    "type": "object",
+    "title": "Add TagResponse",
+    "properties": {
+      "return0": {
+        "type": "integer"
+      }
+    },
+    "required": [
+      "return0"
+    ]
+  },
+  "Count UpRequest": {
+    "type": "object",
+    "title": "Count UpRequest",
+    "properties": {
+      "args": {
+        "type": "object",
+        "title": "Count UpArgs",
+        "properties": {
+          "until": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "until"
+        ]
+      },
+      "policy": {
+        "type": "object",
+        "description": "The policy for the task"
+      },
+      "reference": {
+        "type": "string",
+        "description": "A reference string"
+      },
+      "cached": {
+        "type": "boolean",
+        "default": false
+      },
+      "log": {
+        "type": "boolean",
+        "default": false
+      },
+      "capture": {
+        "type": "boolean",
+        "default": false
+      },
+      "ephemeral": {
+        "type": "boolean",
+        "default": false
+      },
+      "step": {
+        "type": "boolean",
+        "description": "Whether to step through the task"
+      }
+    },
+    "required": [
+      "args",
+      "cached",
+      "log",
+      "capture",
+      "ephemeral"
+    ]
+  },
+  "Count UpResponse": {
+    "type": "object",
+    "title": "Count UpResponse",
+    "properties": {
+      "return0": {
+        "type": "integer"
+      }
+    },
+    "required": [
+      "return0"
+    ]
+  },
+  "ExplodeRequest": {
+    "type": "object",
+    "title": "ExplodeRequest",
+    "properties": {
+      "args": {
+        "type": "object",
+        "title": "ExplodeArgs",
+        "properties": {}
+      },
+      "policy": {
+        "type": "object",
+        "description": "The policy for the task"
+      },
+      "reference": {
+        "type": "string",
+        "description": "A reference string"
+      },
+      "cached": {
+        "type": "boolean",
+        "default": false
+      },
+      "log": {
+        "type": "boolean",
+        "default": false
+      },
+      "capture": {
+        "type": "boolean",
+        "default": false
+      },
+      "ephemeral": {
+        "type": "boolean",
+        "default": false
+      },
+      "step": {
+        "type": "boolean",
+        "description": "Whether to step through the task"
+      }
+    },
+    "required": [
+      "args",
+      "cached",
+      "log",
+      "capture",
+      "ephemeral"
+    ]
+  },
+  "ExplodeResponse": {
+    "type": "object",
+    "title": "ExplodeResponse",
+    "properties": {
+      "return0": {
+        "type": "integer"
+      }
+    },
+    "required": [
+      "return0"
+    ]
+  },
+  "PausableRequest": {
+    "type": "object",
+    "title": "PausableRequest",
+    "properties": {
+      "args": {
+        "type": "object",
+        "title": "PausableArgs",
+        "properties": {}
+      },
+      "policy": {
+        "type": "object",
+        "description": "The policy for the task"
+      },
+      "reference": {
+        "type": "string",
+        "description": "A reference string"
+      },
+      "cached": {
+        "type": "boolean",
+        "default": false
+      },
+      "log": {
+        "type": "boolean",
+        "default": false
+      },
+      "capture": {
+        "type": "boolean",
+        "default": false
+      },
+      "ephemeral": {
+        "type": "boolean",
+        "default": false
+      },
+      "step": {
+        "type": "boolean",
+        "description": "Whether to step through the task"
+      }
+    },
+    "required": [
+      "args",
+      "cached",
+      "log",
+      "capture",
+      "ephemeral"
+    ]
+  },
+  "PausableResponse": {
+    "type": "object",
+    "title": "PausableResponse",
+    "properties": {
+      "return0": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "return0"
+    ]
+  }
+}

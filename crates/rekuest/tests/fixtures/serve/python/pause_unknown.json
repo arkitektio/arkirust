@@ -1,0 +1,10 @@
+{
+  "status": 200,
+  "headers": {
+    "content-type": "application/json"
+  },
+  "body": {
+    "status": "pausing",
+    "task": "nope"
+  }
+}

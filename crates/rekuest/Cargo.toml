@@ -19,6 +19,8 @@ async-trait.workspace = true
 chrono.workspace = true
 futures.workspace = true
 hex.workspace = true
+indexmap.workspace = true
+json-patch.workspace = true
 rand.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -28,3 +30,22 @@ tokio.workspace = true
 tokio-tungstenite.workspace = true
 tracing.workspace = true
 uuid.workspace = true
+axum = { workspace = true, optional = true }
+rusqlite = { workspace = true, optional = true }
+reqwest = { workspace = true, optional = true }
+
+[features]
+default = []
+# Serve an app over HTTP + websocket without a rekuest server (port of rekuest.contrib.fastapi).
+serve = ["dep:axum", "dep:rusqlite"]
+# AgentTestClient for testing served apps.
+testing = ["serve", "dep:reqwest"]
+
+[dev-dependencies]
+reqwest.workspace = true
+tempfile = "3"
+axum.workspace = true
+
+[[example]]
+name = "serve_twin"
+required-features = ["serve"]

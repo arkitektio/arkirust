@@ -1,0 +1,49 @@
+[
+  {
+    "id": "d6dff72d-4802-4ae6-b4b7-45da041e50a6",
+    "seq": 1,
+    "type": "PROGRESS",
+    "task": "759fc766-5cc5-41e8-a756-d4fd34f811c4",
+    "progress": 0,
+    "message": "Queued for running"
+  },
+  {
+    "id": "b0f762da-7285-4041-9d20-d38e92af418d",
+    "type": "LOCK",
+    "key": "camera",
+    "task": "759fc766-5cc5-41e8-a756-d4fd34f811c4"
+  },
+  {
+    "id": "77ccd67b-a439-4282-b559-083f36b0ec78",
+    "type": "STATE_PATCH",
+    "session_id": "1a476967-c09a-4769-af55-3743a411e45b",
+    "global_rev": 1,
+    "state_name": "CameraState",
+    "ts": 1790454478.263191,
+    "op": "replace",
+    "path": "/exposure_ms",
+    "value": 20.0,
+    "old_value": null,
+    "task_id": "759fc766-5cc5-41e8-a756-d4fd34f811c4"
+  },
+  {
+    "id": "df2aca38-83ba-410c-b52d-a9dde81119d6",
+    "seq": 2,
+    "type": "YIELD",
+    "task": "759fc766-5cc5-41e8-a756-d4fd34f811c4",
+    "returns": {
+      "return0": 20.0
+    }
+  },
+  {
+    "id": "52d7780f-15ef-4fff-9d74-d0a10fe1a12f",
+    "seq": 3,
+    "type": "COMPLETED",
+    "task": "759fc766-5cc5-41e8-a756-d4fd34f811c4"
+  },
+  {
+    "id": "d33d270c-d34b-486e-99f0-f90066a60a4e",
+    "type": "UNLOCK",
+    "key": "camera"
+  }
+]

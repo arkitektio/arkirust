@@ -23,3 +23,19 @@ tokio.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 dirs.workspace = true
+axum = { workspace = true, optional = true }
+
+[features]
+default = []
+# Serve an app over HTTP + websocket without a rekuest server (`arkitekt::serve`).
+serve = ["rekuest/serve", "dep:axum"]
+# `AgentTestClient` for testing served apps.
+testing = ["serve", "rekuest/testing"]
+
+[dev-dependencies]
+serde.workspace = true
+tokio.workspace = true
+
+[[test]]
+name = "serve"
+required-features = ["testing"]

@@ -7,7 +7,7 @@ license.workspace = true
 publish = false
 
 [dependencies]
-arkitekt.workspace = true
+arkitekt = { workspace = true, features = ["serve"] }
 mikro.workspace = true
 anyhow.workspace = true
 futures.workspace = true
@@ -15,3 +15,6 @@ ndarray.workspace = true
 rand.workspace = true
 tokio.workspace = true
 tracing-subscriber.workspace = true
+axum.workspace = true
+serde.workspace = true
+tracing.workspace = true

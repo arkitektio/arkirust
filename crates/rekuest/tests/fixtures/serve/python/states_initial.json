@@ -1,0 +1,24 @@
+{
+  "status": 200,
+  "headers": {
+    "content-type": "application/json"
+  },
+  "body": {
+    "current_session": "1a476967-c09a-4769-af55-3743a411e45b",
+    "current_global_revision": 0,
+    "count": 1,
+    "states": {
+      "CameraState": {
+        "interface": "CameraState",
+        "name": "CameraState",
+        "initialized": true,
+        "value": {
+          "connected": true,
+          "exposure_ms": 10.0,
+          "tags": []
+        }
+      }
+    },
+    "recent_patches": []
+  }
+}

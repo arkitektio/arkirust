@@ -1,0 +1,60 @@
+{
+  "/count_up": {
+    "post": {
+      "summary": "Count Up",
+      "description": "Count Up",
+      "operationId": "implementation_endpoint_count_up_post",
+      "requestBody": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Count UpRequest"
+            }
+          }
+        },
+        "required": true
+      },
+      "responses": {
+        "200": {
+          "description": "Successful Response",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Count UpResponse"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "/set_exposure": {
+    "post": {
+      "summary": "Set Exposure",
+      "description": "Set Exposure\n\nChanges the exposure time.",
+      "operationId": "implementation_endpoint_set_exposure_post",
+      "requestBody": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Set ExposureRequest"
+            }
+          }
+        },
+        "required": true
+      },
+      "responses": {
+        "200": {
+          "description": "Successful Response",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Set ExposureResponse"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

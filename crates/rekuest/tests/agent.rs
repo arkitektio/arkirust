@@ -104,7 +104,7 @@ async fn serves_assignments() {
 
     // Heartbeats are answered.
     send(&mut ws, json!({"type": "HEARTBEAT", "id": "h"})).await;
-    assert_eq!(recv(&mut ws).await["type"], "HEARTBEAT_ANSWER");
+    recv_type(&mut ws, "HEARTBEAT_ANSWER").await;
 
     // A function runs, yields and completes.
     send(&mut ws, assign("t1", "add", json!({"a": 2, "b": 3}))).await;

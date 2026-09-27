@@ -1,0 +1,10 @@
+{
+  "status": 200,
+  "headers": {
+    "content-type": "application/json"
+  },
+  "body": {
+    "status": "submitted",
+    "task": "582cdbfb-562f-4068-9686-dd246bc5b2f5"
+  }
+}

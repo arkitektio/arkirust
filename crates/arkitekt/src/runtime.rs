@@ -53,7 +53,8 @@ impl ConnectOptions {
 /// A connected app.
 pub struct Runtime {
     app: App,
-    fakts: Fakts,
+    /// `None` when the app needs no services (a served app without requirements).
+    fakts: Option<Fakts>,
     context: Context,
     options: ConnectOptions,
 }
@@ -71,15 +72,34 @@ impl Runtime {
     /// Load fakts (from cache, token or device code), then build every
     /// service's clients, in declaration order.
     pub async fn connect(app: App, options: ConnectOptions) -> anyhow::Result<Self> {
+        Self::connect_as(app, options, true).await
+    }
+
+    /// Connect an app that is served locally ([`serve`](crate::serve)): only
+    /// its services' requirements are requested, and an app without any
+    /// authenticates nothing.
+    pub async fn connect_local(app: App, options: ConnectOptions) -> anyhow::Result<Self> {
+        Self::connect_as(app, options, false).await
+    }
+
+    async fn connect_as(app: App, options: ConnectOptions, remote_agent: bool) -> anyhow::Result<Self> {
+        let device_id = options.device_id.clone().or_else(|| device_id().ok());
+        let manifest = app.manifest_for(device_id, remote_agent);
+        if manifest.requirements.is_empty() && !remote_agent {
+            return Ok(Self {
+                app,
+                fakts: None,
+                context: Context::default(),
+                options,
+            });
+        }
+
         let url = options
             .url
             .clone()
             .or_else(|| std::env::var("FAKTS_URL").ok())
             .or_else(|| std::env::var("ARKITEKT_URL").ok())
             .unwrap_or_else(|| DEFAULT_ARKITEKT_URL.to_owned());
-        let device_id = options.device_id.clone().or_else(|| device_id().ok());
-        let manifest = app.manifest(device_id);
-
         let mut builder = Fakts::builder(&url, manifest)
             .no_cache(options.no_cache)
             .allow_insecure_transport(options.allow_insecure_transport);
@@ -105,7 +125,7 @@ impl Runtime {
 
         Ok(Self {
             app,
-            fakts,
+            fakts: Some(fakts),
             context: clients.build(),
             options,
         })
@@ -115,8 +135,9 @@ impl Runtime {
         &self.app
     }
 
-    pub fn fakts(&self) -> &Fakts {
-        &self.fakts
+    /// The loaded configuration (`None` if the app needed no services).
+    pub fn fakts(&self) -> Option<&Fakts> {
+        self.fakts.as_ref()
     }
 
     /// The client lookup actions receive.
@@ -136,8 +157,11 @@ impl Runtime {
 
     /// Build the rekuest agent for this app's actions.
     pub async fn agent(&self) -> anyhow::Result<Agent> {
-        let alias = self
+        let fakts = self
             .fakts
+            .as_ref()
+            .context("this runtime was connected for local serving and has no rekuest server")?;
+        let alias = fakts
             .get_alias("rekuest")
             .await
             .context("could not reach rekuest")?;
@@ -152,7 +176,7 @@ impl Runtime {
             options,
             self.app.registry.clone(),
             self.context.clone(),
-            Arc::new(self.fakts.clone()),
+            Arc::new(fakts.clone()),
         ))
     }
 
@@ -166,13 +190,15 @@ impl Runtime {
             self.app.identifier,
             self.app.version
         );
-        tokio::select! {
-            result = agent.run() => Ok(result?),
+        let result = tokio::select! {
+            result = agent.run() => result.map_err(anyhow::Error::from),
             _ = tokio::signal::ctrl_c() => {
                 tracing::info!("shutting down");
                 Ok(())
             }
-        }
+        };
+        agent.shutdown().await;
+        result
     }
 }
 

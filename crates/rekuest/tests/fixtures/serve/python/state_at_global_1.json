@@ -1,0 +1,18 @@
+{
+  "status": 200,
+  "headers": {
+    "content-type": "application/json"
+  },
+  "body": [
+    {
+      "timepoint": "2026-09-26T20:27:58.263000Z",
+      "data": {
+        "connected": true,
+        "exposure_ms": 20.0,
+        "tags": []
+      },
+      "global_revision": 1,
+      "session_id": "1a476967-c09a-4769-af55-3743a411e45b"
+    }
+  ]
+}

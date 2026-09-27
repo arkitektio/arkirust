@@ -1,0 +1,16 @@
+{
+  "status": 200,
+  "headers": {
+    "content-type": "application/json"
+  },
+  "body": {
+    "count": 1,
+    "locks": {
+      "camera": {
+        "interface": "camera",
+        "key": "camera",
+        "task_id": null
+      }
+    }
+  }
+}

@@ -50,6 +50,13 @@ impl Context {
         ContextBuilder::default()
     }
 
+    /// A builder starting from everything this context holds.
+    pub fn to_builder(&self) -> ContextBuilder {
+        ContextBuilder {
+            clients: (*self.clients).clone(),
+        }
+    }
+
     /// The client of type `T`, if one was registered.
     pub fn get<T: Clone + Send + Sync + 'static>(&self) -> Option<T> {
         self.clients

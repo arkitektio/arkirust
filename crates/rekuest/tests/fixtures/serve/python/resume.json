@@ -1,0 +1,10 @@
+{
+  "status": 200,
+  "headers": {
+    "content-type": "application/json"
+  },
+  "body": {
+    "status": "resuming",
+    "task": "c79479cb-789a-48c6-b477-1b32f68afb03"
+  }
+}

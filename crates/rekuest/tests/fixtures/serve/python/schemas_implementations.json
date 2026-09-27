@@ -1,0 +1,316 @@
+{
+  "status": 200,
+  "headers": {
+    "content-type": "application/json"
+  },
+  "body": {
+    "count": 5,
+    "implementations": {
+      "set_exposure": {
+        "definition": {
+          "description": "Set Exposure\n\nChanges the exposure time.",
+          "collections": [],
+          "key": "set_exposure",
+          "version": "1",
+          "name": "Set Exposure",
+          "stateful": true,
+          "pure": null,
+          "idempotent": null,
+          "allowProbe": null,
+          "catalogs": null,
+          "portGroups": [],
+          "args": [
+            {
+              "key": "exposure_ms",
+              "label": null,
+              "kind": "FLOAT",
+              "description": null,
+              "identifier": null,
+              "nullable": false,
+              "effects": [],
+              "choices": null,
+              "referenceUnit": null,
+              "proposedUnits": null,
+              "dimension": null,
+              "children": null,
+              "validators": [],
+              "default": null,
+              "widget": null,
+              "requires": null
+            }
+          ],
+          "returns": [
+            {
+              "key": "return0",
+              "label": null,
+              "kind": "FLOAT",
+              "description": null,
+              "identifier": null,
+              "nullable": false,
+              "effects": [],
+              "choices": null,
+              "referenceUnit": null,
+              "proposedUnits": null,
+              "dimension": null,
+              "children": null,
+              "widget": null,
+              "provides": null
+            }
+          ],
+          "kind": "FUNCTION",
+          "isTestFor": [],
+          "isDev": false
+        },
+        "dependencies": [],
+        "tracks": [],
+        "interface": "set_exposure",
+        "params": null,
+        "instanceId": null,
+        "locks": [
+          "camera"
+        ],
+        "optimistics": [],
+        "manipulates": [
+          "CameraState"
+        ],
+        "needsToken": true,
+        "provenanceAudience": null,
+        "effect": null
+      },
+      "add_tag": {
+        "definition": {
+          "description": "Add Tag",
+          "collections": [],
+          "key": "add_tag",
+          "version": "1",
+          "name": "Add Tag",
+          "stateful": true,
+          "pure": null,
+          "idempotent": null,
+          "allowProbe": null,
+          "catalogs": null,
+          "portGroups": [],
+          "args": [
+            {
+              "key": "tag",
+              "label": null,
+              "kind": "STRING",
+              "description": null,
+              "identifier": null,
+              "nullable": false,
+              "effects": [],
+              "choices": null,
+              "referenceUnit": null,
+              "proposedUnits": null,
+              "dimension": null,
+              "children": null,
+              "validators": [],
+              "default": null,
+              "widget": null,
+              "requires": null
+            }
+          ],
+          "returns": [
+            {
+              "key": "return0",
+              "label": null,
+              "kind": "INT",
+              "description": null,
+              "identifier": null,
+              "nullable": false,
+              "effects": [],
+              "choices": null,
+              "referenceUnit": null,
+              "proposedUnits": null,
+              "dimension": null,
+              "children": null,
+              "widget": null,
+              "provides": null
+            }
+          ],
+          "kind": "FUNCTION",
+          "isTestFor": [],
+          "isDev": false
+        },
+        "dependencies": [],
+        "tracks": [],
+        "interface": "add_tag",
+        "params": null,
+        "instanceId": null,
+        "locks": [
+          "camera"
+        ],
+        "optimistics": [],
+        "manipulates": [
+          "CameraState"
+        ],
+        "needsToken": true,
+        "provenanceAudience": null,
+        "effect": null
+      },
+      "count_up": {
+        "definition": {
+          "description": "Count Up",
+          "collections": [],
+          "key": "count_up",
+          "version": "1",
+          "name": "Count Up",
+          "stateful": false,
+          "pure": null,
+          "idempotent": null,
+          "allowProbe": null,
+          "catalogs": null,
+          "portGroups": [],
+          "args": [
+            {
+              "key": "until",
+              "label": null,
+              "kind": "INT",
+              "description": null,
+              "identifier": null,
+              "nullable": false,
+              "effects": [],
+              "choices": null,
+              "referenceUnit": null,
+              "proposedUnits": null,
+              "dimension": null,
+              "children": null,
+              "validators": [],
+              "default": null,
+              "widget": null,
+              "requires": null
+            }
+          ],
+          "returns": [
+            {
+              "key": "return0",
+              "label": null,
+              "kind": "INT",
+              "description": null,
+              "identifier": null,
+              "nullable": false,
+              "effects": [],
+              "choices": null,
+              "referenceUnit": null,
+              "proposedUnits": null,
+              "dimension": null,
+              "children": null,
+              "widget": null,
+              "provides": null
+            }
+          ],
+          "kind": "GENERATOR",
+          "isTestFor": [],
+          "isDev": false
+        },
+        "dependencies": [],
+        "tracks": [],
+        "interface": "count_up",
+        "params": null,
+        "instanceId": null,
+        "locks": [],
+        "optimistics": [],
+        "manipulates": [],
+        "needsToken": true,
+        "provenanceAudience": null,
+        "effect": null
+      },
+      "explode": {
+        "definition": {
+          "description": "Explode",
+          "collections": [],
+          "key": "explode",
+          "version": "1",
+          "name": "Explode",
+          "stateful": false,
+          "pure": null,
+          "idempotent": null,
+          "allowProbe": null,
+          "catalogs": null,
+          "portGroups": [],
+          "args": [],
+          "returns": [
+            {
+              "key": "return0",
+              "label": null,
+              "kind": "INT",
+              "description": null,
+              "identifier": null,
+              "nullable": false,
+              "effects": [],
+              "choices": null,
+              "referenceUnit": null,
+              "proposedUnits": null,
+              "dimension": null,
+              "children": null,
+              "widget": null,
+              "provides": null
+            }
+          ],
+          "kind": "FUNCTION",
+          "isTestFor": [],
+          "isDev": false
+        },
+        "dependencies": [],
+        "tracks": [],
+        "interface": "explode",
+        "params": null,
+        "instanceId": null,
+        "locks": [],
+        "optimistics": [],
+        "manipulates": [],
+        "needsToken": true,
+        "provenanceAudience": null,
+        "effect": null
+      },
+      "pausable": {
+        "definition": {
+          "description": "Pausable",
+          "collections": [],
+          "key": "pausable",
+          "version": "1",
+          "name": "Pausable",
+          "stateful": false,
+          "pure": null,
+          "idempotent": null,
+          "allowProbe": null,
+          "catalogs": null,
+          "portGroups": [],
+          "args": [],
+          "returns": [
+            {
+              "key": "return0",
+              "label": null,
+              "kind": "STRING",
+              "description": null,
+              "identifier": null,
+              "nullable": false,
+              "effects": [],
+              "choices": null,
+              "referenceUnit": null,
+              "proposedUnits": null,
+              "dimension": null,
+              "children": null,
+              "widget": null,
+              "provides": null
+            }
+          ],
+          "kind": "FUNCTION",
+          "isTestFor": [],
+          "isDev": false
+        },
+        "dependencies": [],
+        "tracks": [],
+        "interface": "pausable",
+        "params": null,
+        "instanceId": null,
+        "locks": [],
+        "optimistics": [],
+        "manipulates": [],
+        "needsToken": true,
+        "provenanceAudience": null,
+        "effect": null
+      }
+    }
+  }
+}

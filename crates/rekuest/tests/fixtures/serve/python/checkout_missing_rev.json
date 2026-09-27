@@ -1,0 +1,19 @@
+{
+  "status": 422,
+  "headers": {
+    "content-type": "application/json"
+  },
+  "body": {
+    "detail": [
+      {
+        "type": "missing",
+        "loc": [
+          "query",
+          "global_revision_id"
+        ],
+        "msg": "Field required",
+        "input": null
+      }
+    ]
+  }
+}

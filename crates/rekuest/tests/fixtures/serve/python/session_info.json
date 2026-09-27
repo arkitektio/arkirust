@@ -1,0 +1,9 @@
+{
+  "status": 200,
+  "headers": {
+    "content-type": "application/json"
+  },
+  "body": {
+    "current_session": "1a476967-c09a-4769-af55-3743a411e45b"
+  }
+}
