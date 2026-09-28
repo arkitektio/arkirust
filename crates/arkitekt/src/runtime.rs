@@ -34,8 +34,9 @@ pub struct ConnectOptions {
     /// Reach mesh aliases through this running HTTP proxy (e.g. `arkitekt
     /// mesh proxy`); defaults to `$ARKITEKT_MESH_PROXY`.
     pub mesh_proxy: Option<String>,
-    /// Join the deployment's mesh with a tailscaled sidecar; `ARKITEKT_MESH=1`
-    /// turns it on with the defaults.
+    /// Join the deployment's mesh; `ARKITEKT_MESH=1` turns it on with the defaults
+    /// (the `arkitekt-meshd` sidecar), `ARKITEKT_MESH=native` runs the node
+    /// in-process instead (feature `mesh-native`).
     #[cfg(feature = "mesh")]
     pub mesh: Option<fakts::MeshOptions>,
 }
@@ -136,8 +137,15 @@ impl Runtime {
         }
         #[cfg(feature = "mesh")]
         if let Some(mesh) = options.mesh.clone().or_else(|| {
-            matches!(std::env::var("ARKITEKT_MESH").as_deref(), Ok("1" | "true"))
-                .then(fakts::MeshOptions::default)
+            let backend = match std::env::var("ARKITEKT_MESH").as_deref() {
+                Ok("1" | "true" | "sidecar") => fakts::MeshBackend::Sidecar,
+                Ok("native") => fakts::MeshBackend::Native,
+                _ => return None,
+            };
+            Some(fakts::MeshOptions {
+                backend,
+                ..Default::default()
+            })
         }) {
             builder = builder.mesh(mesh);
         }
@@ -202,6 +210,14 @@ impl Runtime {
         options.name = Some(format!("{}:{}", self.app.identifier, self.app.version));
         options.description = self.app.description.clone();
         options.force = self.options.force;
+        // One journal per app, so two apps in one directory never re-send each other's backlog.
+        let file: String = self
+            .app
+            .identifier
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+            .collect();
+        options.journal_path = Some(format!("{file}.journal.db").into());
         if let Some(policy) = &self.options.policy {
             options.policy = policy.clone();
         }

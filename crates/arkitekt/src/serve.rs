@@ -9,13 +9,16 @@
 //!
 //! The actions become `POST /{interface}` and `POST /assign/{interface}`, an
 //! observer websocket at `/ws` streams what happens, and `GET /states`,
-//! `/tasks`, `/locks` and the state history routes show the app's state. See
+//! `/tasks`, `/locks` and the state history routes show the app's state. The
+//! journal (`/journal…`, or `"journal": true` on the websocket) records every
+//! task event and state change in one order and replays any position. See
 //! [`rekuest::serve`] for every route.
 
 use tokio::net::ToSocketAddrs;
 
+pub use rekuest::journal::{Fold, Journal, JournalEntry, Watermark};
 pub use rekuest::serve::{
-    AuthHook, AuthRequest, History, HistoryStore, LocalAgent, ServeOptions, SubscriptionInit, Unauthorized,
+    AuthHook, AuthRequest, EntryQuery, History, HistoryStore, LocalAgent, ServeOptions, SubscriptionInit, Unauthorized,
 };
 #[cfg(feature = "testing")]
 pub use rekuest::serve::testing::{AgentTestClient, AssignmentResult, Event};

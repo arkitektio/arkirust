@@ -29,9 +29,14 @@ axum = { workspace = true, optional = true }
 default = []
 # Serve an app over HTTP + websocket without a rekuest server (`arkitekt::serve`).
 serve = ["rekuest/serve", "dep:axum"]
-# Join the deployment's mesh with a tailscaled sidecar (`ConnectOptions::mesh`,
-# or `ARKITEKT_MESH=1`); needs tailscale installed.
+# Join the deployment's mesh with the `arkitekt-meshd` sidecar (`ConnectOptions::mesh`,
+# or `ARKITEKT_MESH=1`); needs `arkitekt-meshd` (see meshd/).
 mesh = ["fakts/mesh"]
+# Also run the mesh node in-process (`ARKITEKT_MESH=native`, the `arkitekt-mesh` crate), no sidecar.
+mesh-native = ["mesh", "fakts/mesh-native"]
+# The native node's TURN relay and TCP forwards (`Fakts::mesh_turn`/`mesh_forward`),
+# for WebRTC media such as LiveKit (see the `lovekit` crate).
+mesh-relay = ["mesh-native", "fakts/mesh-relay"]
 # `AgentTestClient` for testing served apps.
 testing = ["serve", "rekuest/testing"]
 
