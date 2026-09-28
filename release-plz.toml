@@ -10,6 +10,23 @@ features_always_increment_minor = true
 pr_labels = ["release"]
 
 [[package]]
+name = "arkitekt-mesh"
+version_group = "arkitekt"
+
+# The sidecar binary (`cargo install arkitekt-meshd`); its prebuilt binaries
+# and the Python wheels are released by .github/workflows/meshd.yml on a
+# `meshd-vX.Y.Z` tag.
+[[package]]
+name = "arkitekt-meshd"
+version_group = "arkitekt"
+
+# Published to PyPI (as `arkitekt-mesh`) by the meshd workflow, not crates.io.
+[[package]]
+name = "arkitekt-mesh-py"
+version_group = "arkitekt"
+publish = false
+
+[[package]]
 name = "fakts"
 version_group = "arkitekt"
 
@@ -29,13 +46,17 @@ version_group = "arkitekt"
 name = "arkitekt-mikro"
 version_group = "arkitekt"
 
+[[package]]
+name = "arkitekt-lovekit"
+version_group = "arkitekt"
+
 # `arkitekt` owns the tag, the GitHub release and the root changelog.
 [[package]]
 name = "arkitekt"
 version_group = "arkitekt"
 changelog_update = true
 changelog_path = "CHANGELOG.md"
-changelog_include = ["fakts", "arkitekt-rath", "rekuest-macros", "rekuest", "arkitekt-mikro"]
+changelog_include = ["arkitekt-mesh", "arkitekt-meshd", "fakts", "arkitekt-rath", "rekuest-macros", "rekuest", "arkitekt-mikro", "arkitekt-lovekit"]
 git_tag_enable = true
 git_tag_name = "v{{ version }}"
 git_release_enable = true

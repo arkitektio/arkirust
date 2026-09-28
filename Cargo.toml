@@ -7,6 +7,10 @@ members = [
     "crates/rekuest-macros",
     "crates/arkitekt",
     "crates/mikro",
+    "crates/lovekit",
+    "crates/mesh",
+    "crates/meshd",
+    "crates/mesh-py",
     "examples",
 ]
 
@@ -26,6 +30,8 @@ rekuest = { path = "crates/rekuest", version = "0.1.0" }
 rekuest-macros = { path = "crates/rekuest-macros", version = "0.1.0" }
 arkitekt = { path = "crates/arkitekt", version = "0.1.0" }
 mikro = { path = "crates/mikro", version = "0.1.0", package = "arkitekt-mikro" }
+lovekit = { path = "crates/lovekit", version = "0.1.0", package = "arkitekt-lovekit" }
+mesh = { path = "crates/mesh", version = "0.1.0", package = "arkitekt-mesh" }
 
 anyhow = "1"
 thiserror = "2"
