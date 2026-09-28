@@ -1,0 +1,205 @@
+schema @link(url: "https://specs.apollo.dev/federation/v2.11", import: ["@key"]) {
+  query: Query
+  mutation: Mutation
+  subscription: Subscription
+}
+
+type App @key(fields: "id", resolvable: true) {
+  id: ID!
+  identifier: String!
+}
+
+type Client @key(fields: "id", resolvable: true) {
+  id: ID!
+  release: Release
+  clientId: String!
+}
+
+type CollaborativeBroadcast {
+  id: ID!
+  title: String!
+  createdAt: DateTime!
+
+  """The streamers that are collaborating on this broadcast."""
+  streamers(filters: StreamerFilter, pagination: OffsetPaginationInput): [Streamer!]!
+  streams: [Stream!]!
+  videoStreams: [Stream!]!
+  audioStreams: [Stream!]!
+}
+
+"""Filter for Solo Broadcasts"""
+input CollaborativeBroadcastFilter {
+  ids: [ID!] = null
+  search: String = null
+  AND: CollaborativeBroadcastFilter
+  OR: CollaborativeBroadcastFilter
+  NOT: CollaborativeBroadcastFilter
+  DISTINCT: Boolean
+}
+
+"""Date with time (isoformat)"""
+scalar DateTime
+
+input EnsureCollaborativeBroadcastInput {
+  instanceId: String = null
+  title: String = null
+}
+
+input EnsureSoloBroadcastInput {
+  instanceId: String = null
+  title: String = null
+}
+
+input EnsureStreamInput {
+  broadcast: ID = null
+  kind: StreamKind! = VIDEO
+  title: String = null
+}
+
+input JoinBroadcastInput {
+  broadcast: ID!
+}
+
+type Mutation {
+  """Create a solo broadcast"""
+  ensureSoloBroadcast(input: EnsureSoloBroadcastInput!): SoloBroadcast!
+
+  """Create a collaborative broadcast"""
+  ensureCollaborativeBroadcast(input: EnsureCollaborativeBroadcastInput!): CollaborativeBroadcast!
+
+  """Create a stream and return the token for it"""
+  ensureStream(input: EnsureStreamInput!): String!
+
+  """Join a solo broadcast and return the token for it"""
+  joinBroadcast(input: JoinBroadcastInput!): String!
+}
+
+input OffsetPaginationInput {
+  offset: Int! = 0
+  limit: Int
+}
+
+type Organization @key(fields: "id", resolvable: true) {
+  id: ID!
+  slug: String!
+}
+
+type Query {
+  _entities(representations: [_Any!]!): [_Entity]!
+  _service: _Service!
+
+  """Get a stream"""
+  streams(filters: StreamFilter, pagination: OffsetPaginationInput): [Stream!]!
+
+  """Get all solo broadcasts"""
+  soloBroadcasts(filters: SoloBroadcastFilter, pagination: OffsetPaginationInput): [SoloBroadcast!]!
+
+  """Get all collaborative broadcasts"""
+  collaborativeBroadcasts(filters: CollaborativeBroadcastFilter, pagination: OffsetPaginationInput): [CollaborativeBroadcast!]!
+
+  """Get a stream by ID"""
+  stream(id: ID!): Stream!
+
+  """Get a solo broadcast by ID"""
+  soloBroadcast(id: ID!): SoloBroadcast!
+
+  """Get a collaborative broadcast by ID"""
+  collaborativeBroadcast(id: ID!): CollaborativeBroadcast!
+}
+
+type Release @key(fields: "id", resolvable: true) {
+  id: ID!
+  app: App!
+  version: String!
+}
+
+type SoloBroadcast {
+  id: ID!
+  title: String!
+  createdAt: DateTime!
+  streamer: Streamer!
+  videoStreams: [Stream!]!
+  audioStreams: [Stream!]!
+}
+
+"""Filter for Solo Broadcasts"""
+input SoloBroadcastFilter {
+  ids: [ID!] = null
+  search: String = null
+  AND: SoloBroadcastFilter
+  OR: SoloBroadcastFilter
+  NOT: SoloBroadcastFilter
+  DISTINCT: Boolean
+}
+
+type Stream {
+  id: ID!
+  kind: StreamKind!
+  streamer: Streamer!
+  title: String!
+}
+
+type StreamEvent {
+  create: Stream
+  delete: ID
+  update: Stream
+  moved: Stream
+}
+
+"""Filter for Streams"""
+input StreamFilter {
+  ids: [ID!] = null
+  search: String = null
+  AND: StreamFilter
+  OR: StreamFilter
+  NOT: StreamFilter
+  DISTINCT: Boolean
+}
+
+"""The state of a dask cluster"""
+enum StreamKind {
+  VIDEO
+  AUDIO
+}
+
+type Streamer {
+  id: ID!
+  user: User!
+  client: Client!
+
+  """The solo broadcasts created by this agent, if any."""
+  soloBroadcasts: SoloBroadcast
+
+  """The collaborative broadcasts created by this agent."""
+  collaborativeBroadcasts(filters: CollaborativeBroadcastFilter, pagination: OffsetPaginationInput): [CollaborativeBroadcast!]!
+}
+
+"""Filter for Dask Clusters"""
+input StreamerFilter {
+  ids: [ID!] = null
+  search: String = null
+  AND: StreamerFilter
+  OR: StreamerFilter
+  NOT: StreamerFilter
+  DISTINCT: Boolean
+}
+
+type Subscription {
+  """Subscribe to stream events"""
+  streams(dataset: ID = null): StreamEvent!
+}
+
+type User @key(fields: "id", resolvable: true) {
+  id: ID!
+  sub: String!
+  preferredUsername: String!
+  activeOrganization: Organization
+}
+
+scalar _Any
+
+union _Entity = App | Client | Organization | Release | User
+
+type _Service {
+  sdl: String!
+}

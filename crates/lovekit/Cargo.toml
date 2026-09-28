@@ -1,0 +1,50 @@
+[package]
+name = "arkitekt-lovekit"
+description = "Client for Arkitekt's lovekit service: LiveKit broadcasts and streams, reachable over the deployment's mesh"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "README.md"
+
+[lib]
+name = "lovekit"
+
+[dependencies]
+arkitekt.workspace = true
+anyhow.workspace = true
+graphql_client.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+# Joining and publishing to LiveKit rooms (builds WebRTC: large).
+livekit = { version = "0.9", optional = true }
+tokio = { workspace = true, optional = true }
+
+[features]
+default = []
+# Connect `livekit` rooms and publish video (`Lovekit::connect_room`,
+# `VideoPublisher`).
+livekit = ["dep:livekit", "dep:tokio"]
+# ...also to a media server that is only on the mesh: signaling through a
+# local forward, media through the mesh node's TURN relay (UDP over the mesh).
+mesh = ["livekit", "arkitekt/mesh-relay"]
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+serde_json.workspace = true
+# tests/lab_livekit.rs: mesh sessions with a TURN relay, and LiveKit tokens.
+mesh = { workspace = true, features = ["session", "relay"] }
+futures.workspace = true
+hmac = "0.12"
+sha2.workspace = true
+base64.workspace = true
+tempfile = "3"
+
+[[test]]
+name = "lab_livekit"
+required-features = ["livekit"]

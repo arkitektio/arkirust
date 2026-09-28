@@ -1,0 +1,86 @@
+# The lovekit operations, as the Python package declares them (graphql/ there),
+# in one document: graphql_client resolves fragments only within a document.
+
+fragment Streamer on Streamer {
+  user {
+    sub
+  }
+  client {
+    clientId
+  }
+}
+
+fragment Stream on Stream {
+  id
+  title
+  kind
+}
+
+fragment SoloBroadcast on SoloBroadcast {
+  id
+  title
+  streamer {
+    ...Streamer
+  }
+}
+
+fragment CollaborativeBroadcast on CollaborativeBroadcast {
+  id
+  title
+  streamers {
+    ...Streamer
+  }
+}
+
+mutation EnsureSoloBroadcast($input: EnsureSoloBroadcastInput!) {
+  ensureSoloBroadcast(input: $input) {
+    ...SoloBroadcast
+  }
+}
+
+mutation EnsureStream($input: EnsureStreamInput!) {
+  ensureStream(input: $input)
+}
+
+mutation JoinBroadcast($input: JoinBroadcastInput!) {
+  joinBroadcast(input: $input)
+}
+
+query GetStream($id: ID!) {
+  stream(id: $id) {
+    ...Stream
+  }
+}
+
+query ListStreams($filter: StreamFilter, $pagination: OffsetPaginationInput) {
+  streams(filters: $filter, pagination: $pagination) {
+    ...Stream
+  }
+}
+
+query GetSoloBroadcast($id: ID!) {
+  soloBroadcast(id: $id) {
+    ...SoloBroadcast
+  }
+}
+
+query ListSoloBroadcasts($filter: SoloBroadcastFilter, $pagination: OffsetPaginationInput) {
+  soloBroadcasts(filters: $filter, pagination: $pagination) {
+    ...SoloBroadcast
+  }
+}
+
+query GetCollaborativeBroadcast($id: ID!) {
+  collaborativeBroadcast(id: $id) {
+    ...CollaborativeBroadcast
+  }
+}
+
+query ListCollaborativeBroadcasts(
+  $filter: CollaborativeBroadcastFilter
+  $pagination: OffsetPaginationInput
+) {
+  collaborativeBroadcasts(filters: $filter, pagination: $pagination) {
+    ...CollaborativeBroadcast
+  }
+}
