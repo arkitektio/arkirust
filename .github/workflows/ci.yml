@@ -29,6 +29,10 @@ jobs:
           sudo bash llvm.sh 21
           echo "CC=clang-21" >> "$GITHUB_ENV"
           echo "CXX=clang++-21" >> "$GITHUB_ENV"
+      # ...and GLib's headers (plus those it loads X11/DRM/VA through).
+      - run: >-
+          sudo apt-get install -y libglib2.0-dev libgbm-dev libdrm-dev libva-dev
+          libx11-dev libxext-dev libxfixes-dev libxdamage-dev libxrandr-dev libxcomposite-dev
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --all-features
       - run: cargo test --workspace
