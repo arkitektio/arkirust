@@ -28,7 +28,7 @@ pub struct Diagnostic {
 /// A request to run an action.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Assign {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
     pub interface: String,
     pub task: String,
@@ -54,7 +54,7 @@ pub struct Assign {
     pub org: String,
     pub action: String,
     pub implementation: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token: Option<String>,
 }
 
@@ -70,6 +70,9 @@ pub enum ToAgent {
         hash: Option<String>,
         #[serde(default)]
         diagnostics: Vec<Diagnostic>,
+        /// The server persists journal positions and answers with `JOURNAL_ACK`.
+        #[serde(default)]
+        journal: bool,
     },
     Assign(Box<Assign>),
     Cancel {
@@ -107,6 +110,25 @@ pub enum ToAgent {
         task: Option<String>,
         #[serde(default)]
         seq: Option<u64>,
+    },
+    /// Drop these shelved values (by the id the agent minted).
+    Collect {
+        #[serde(default)]
+        drawers: Vec<String>,
+    },
+    /// The server's answer to a `SHELVE`; the agent minted the id already.
+    Shelved {
+        #[serde(default)]
+        error: Option<String>,
+    },
+    Unshelved {
+        #[serde(default)]
+        error: Option<String>,
+    },
+    /// Everything of `journal_session` up to `pos` is persisted.
+    JournalAck {
+        journal_session: String,
+        pos: u64,
     },
     /// Anything this agent does not handle (yet).
     #[serde(other)]
@@ -209,6 +231,53 @@ pub enum FromAgent {
     Unlock {
         key: String,
     },
+    /// The agent holds a value in memory under `resource_id`, an id it minted
+    /// itself. The value is referenced by that id right away; the server only
+    /// records the drawer.
+    Shelve {
+        #[serde(rename = "ref")]
+        reference: String,
+        identifier: String,
+        resource_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        label: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        description: Option<String>,
+        /// The task that shelved it, if any.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        task: Option<String>,
+    },
+    /// The agent dropped a shelved value.
+    Unshelve {
+        #[serde(rename = "ref")]
+        reference: String,
+        drawer: String,
+    },
+    /// The assignment a task started from, as the journal records it (no token).
+    /// Only sent to a server that keeps a journal.
+    Assign(Box<Assign>),
+    /// The task read the clock (a durable-action effect).
+    Now {
+        task: String,
+        /// `{task}:{step}`, filled in by the journal.
+        #[serde(default)]
+        effect_id: String,
+        value: f64,
+    },
+    /// The task drew random bytes (hex).
+    Random {
+        task: String,
+        #[serde(default)]
+        effect_id: String,
+        value: String,
+    },
+    /// The task slept until a deadline (epoch seconds).
+    Sleep {
+        task: String,
+        #[serde(default)]
+        effect_id: String,
+        until: f64,
+    },
 }
 
 impl FromAgent {
@@ -225,7 +294,8 @@ impl FromAgent {
     }
 
     /// Events that carry a `seq`.
-    /// Task events carry a `seq`; registration, heartbeats, state and lock messages do not.
+    /// Task events carry a `seq`; registration, heartbeats, state, lock,
+    /// shelve and journal-only messages do not.
     pub fn is_event(&self) -> bool {
         !matches!(
             self,
@@ -236,7 +306,28 @@ impl FromAgent {
                 | FromAgent::SessionInit { .. }
                 | FromAgent::Lock { .. }
                 | FromAgent::Unlock { .. }
+                | FromAgent::Shelve { .. }
+                | FromAgent::Unshelve { .. }
+        ) && !self.is_journal_only()
+    }
+
+    /// Kinds only a journal-capable server understands, and legacy
+    /// subscribers never see: the assignment echo and the effects.
+    pub fn is_journal_only(&self) -> bool {
+        matches!(
+            self,
+            FromAgent::Assign(_) | FromAgent::Now { .. } | FromAgent::Random { .. } | FromAgent::Sleep { .. }
         )
+    }
+
+    /// Effects: their `effect_id` is `{task}:{step}`.
+    pub fn effect_id_mut(&mut self) -> Option<&mut String> {
+        match self {
+            FromAgent::Now { effect_id, .. } | FromAgent::Random { effect_id, .. } | FromAgent::Sleep { effect_id, .. } => {
+                Some(effect_id)
+            }
+            _ => None,
+        }
     }
 
     pub fn task(&self) -> Option<&str> {
@@ -251,18 +342,36 @@ impl FromAgent {
             | FromAgent::Cancelled { task }
             | FromAgent::Interrupted { task }
             | FromAgent::Paused { task }
-            | FromAgent::Resumed { task } => Some(task),
+            | FromAgent::Resumed { task }
+            | FromAgent::Now { task, .. }
+            | FromAgent::Random { task, .. }
+            | FromAgent::Sleep { task, .. } => Some(task),
+            FromAgent::Assign(assign) => Some(assign.task.as_str()),
+            FromAgent::Shelve { task, .. } => task.as_deref(),
             _ => None,
         }
     }
 }
 
-/// A [`FromAgent`] message with its `id` and (for events) `seq`.
+/// A [`FromAgent`] message with its `id`, (for events) `seq`, and (once
+/// journaled) its position. Journal fields are named so they cannot clash
+/// with message fields (`STATE_PATCH` has its own `session_id` and `ts`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Envelope {
     pub id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seq: Option<u64>,
+    /// Position in the agent's journal; see [`crate::journal`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pos: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub journal_session: Option<String>,
+    /// When the agent recorded it (seconds since the epoch).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_ts: Option<f64>,
+    /// The entry's step within its task (not `step`: ASSIGN has a `step` flag).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_step: Option<u64>,
     #[serde(flatten)]
     pub message: FromAgent,
 }
@@ -272,6 +381,23 @@ impl Envelope {
         Self {
             id: uuid::Uuid::new_v4().to_string(),
             seq: None,
+            pos: None,
+            journal_session: None,
+            agent_ts: None,
+            task_step: None,
+            message,
+        }
+    }
+
+    /// The envelope of a journaled message: its id and position come from the entry.
+    pub fn journaled(message: FromAgent, entry: &crate::journal::JournalEntry) -> Self {
+        Self {
+            id: entry.message_id.clone(),
+            seq: None,
+            pos: Some(entry.pos),
+            journal_session: Some(entry.session_id.clone()),
+            agent_ts: Some(entry.event_time as f64 / 1000.0),
+            task_step: entry.step,
             message,
         }
     }

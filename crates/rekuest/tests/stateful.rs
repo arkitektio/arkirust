@@ -118,8 +118,10 @@ fn assign(task: &str, interface: &str, args: Value, step: bool) -> Value {
 async fn states_locks_and_pauses_over_the_socket() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("ws://{}/agi", listener.local_addr().unwrap());
+    let mut options = AgentOptions::new(url);
+    options.journal_path = None;
     let agent = Arc::new(Agent::new(
-        AgentOptions::new(url),
+        options,
         twin::registry(),
         Context::default(),
         Arc::new(StaticToken),

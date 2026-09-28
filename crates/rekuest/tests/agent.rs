@@ -79,6 +79,7 @@ async fn serves_assignments() {
     registry.register(add).register(sleepy);
     let mut options = AgentOptions::new(url);
     options.name = Some("test:1".into());
+    options.journal_path = None;
     let agent = Agent::new(options, registry, Context::default(), Arc::new(StaticToken));
     let agent_task = tokio::spawn(async move { agent.run().await });
 

@@ -35,9 +35,11 @@ rusqlite = { workspace = true, optional = true }
 reqwest = { workspace = true, optional = true }
 
 [features]
-default = []
+default = ["wal"]
+# Keep the journal in a local SQLite file (write-ahead: unsent reports survive restarts).
+wal = ["dep:rusqlite"]
 # Serve an app over HTTP + websocket without a rekuest server (port of rekuest.contrib.fastapi).
-serve = ["dep:axum", "dep:rusqlite"]
+serve = ["wal", "dep:axum"]
 # AgentTestClient for testing served apps.
 testing = ["serve", "dep:reqwest"]
 

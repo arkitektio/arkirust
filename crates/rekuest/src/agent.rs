@@ -24,7 +24,9 @@ use tokio_tungstenite::tungstenite::Message;
 use crate::action::Registry;
 use crate::context::Context;
 use crate::definition::AgentDeclaration;
+use crate::emit::Emitter;
 use crate::executor::Executor;
+use crate::journal::Journal;
 use crate::messages::{parse_to_agent, Assign, Envelope, FromAgent, ToAgent};
 use crate::outbox::Outbox;
 
@@ -98,6 +100,12 @@ pub struct AgentOptions {
     pub policy: ConnectionPolicy,
     /// HTTP proxy to reach the endpoint through (the mesh sidecar).
     pub proxy: Option<String>,
+    /// The local SQLite journal (write-ahead: what the server has not
+    /// acknowledged is re-sent after a restart). `None` keeps it in memory
+    /// only. Needs the `wal` feature.
+    pub journal_path: Option<std::path::PathBuf>,
+    /// Acknowledged journal entries older than this are deleted; `None` keeps them.
+    pub journal_retention: Option<Duration>,
 }
 
 impl AgentOptions {
@@ -109,6 +117,8 @@ impl AgentOptions {
             force: false,
             policy: ConnectionPolicy::default(),
             proxy: None,
+            journal_path: Some("agent_data.db".into()),
+            journal_retention: Some(Duration::from_secs(7 * 24 * 3600)),
         }
     }
 }
@@ -136,9 +146,15 @@ pub struct Agent {
     executor: Executor,
     tokens: Arc<dyn TokenLoader>,
     outbox: Arc<Outbox>,
+    /// Numbers every report of the session in front of the outbox.
+    journal: Arc<Journal>,
     activation: Arc<Mutex<Activation>>,
     activation_changed: Arc<tokio::sync::Notify>,
     session_id: String,
+    #[cfg(feature = "wal")]
+    store: Option<crate::store::HistoryStore>,
+    /// Earlier sessions' unacknowledged entries are loaded once.
+    backlog_loaded: std::sync::atomic::AtomicBool,
 }
 
 impl Agent {
@@ -147,19 +163,42 @@ impl Agent {
         // One session per agent: REGISTER announces it, SESSION_INIT and every
         // STATE_PATCH carry it.
         let session_id = uuid::Uuid::new_v4().to_string();
+        #[cfg(feature = "wal")]
+        let store = options.journal_path.as_ref().and_then(|path| match crate::store::HistoryStore::open(path) {
+            Ok(store) => Some(store),
+            Err(e) => {
+                tracing::error!("could not open the journal at {}: {e:#}; keeping it in memory", path.display());
+                None
+            }
+        });
+        #[cfg(feature = "wal")]
+        let sink = store
+            .clone()
+            .map(|s| Arc::new(s) as Arc<dyn crate::journal::JournalSink>);
+        #[cfg(not(feature = "wal"))]
+        let sink = None;
+        let journal = Arc::new(Journal::new(outbox.clone(), sink, Some(session_id.clone())));
         Self {
             options,
-            executor: Executor::with_session(registry, ctx, outbox.clone(), None, Some(session_id.clone())),
+            executor: Executor::with_session(registry, ctx, journal.clone(), None, Some(session_id.clone())),
             tokens,
             outbox,
+            journal,
             activation: Arc::default(),
             activation_changed: Arc::default(),
             session_id,
+            #[cfg(feature = "wal")]
+            store,
+            backlog_loaded: Default::default(),
         }
     }
 
     pub fn executor(&self) -> &Executor {
         &self.executor
+    }
+
+    pub fn journal(&self) -> &Journal {
+        &self.journal
     }
 
     /// What this agent registers.
@@ -173,6 +212,7 @@ impl Agent {
     /// Call [`Agent::shutdown`] afterwards to run shutdown hooks.
     pub async fn run(&self) -> Result<(), AgentError> {
         fakts::install_crypto_provider();
+        self.load_backlog().await;
         let policy = self.options.policy.clone();
         let mut attempt = 0usize;
         loop {
@@ -199,9 +239,43 @@ impl Agent {
         }
     }
 
-    /// Run shutdown hooks and flush state changes.
+    /// Run shutdown hooks and flush state changes and the journal.
     pub async fn shutdown(&self) {
         self.executor.teardown().await;
+        self.journal.flush(crate::executor::FLUSH_TIMEOUT).await;
+    }
+
+    /// Once: queue what earlier sessions of this agent never got acknowledged
+    /// (from the local journal) ahead of this session, and start pruning.
+    async fn load_backlog(&self) {
+        if self.backlog_loaded.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
+        #[cfg(feature = "wal")]
+        if let Some(store) = &self.store {
+            match store.unacked_entries(Some(&self.session_id)).await {
+                Ok(entries) if !entries.is_empty() => {
+                    tracing::info!("re-sending {} journal entries of earlier sessions", entries.len());
+                    self.outbox.preload(entries);
+                }
+                Ok(_) => {}
+                Err(e) => tracing::warn!("could not read the journal backlog: {e:#}"),
+            }
+            if let Some(retention) = self.options.journal_retention {
+                let store = store.clone();
+                tokio::spawn(async move {
+                    loop {
+                        let before = chrono::Utc::now().timestamp_millis() - retention.as_millis() as i64;
+                        match store.prune_acked(before).await {
+                            Ok(0) => {}
+                            Ok(n) => tracing::debug!("pruned {n} acknowledged journal entries"),
+                            Err(e) => tracing::warn!("could not prune the journal: {e:#}"),
+                        }
+                        tokio::time::sleep(Duration::from_secs(3600)).await;
+                    }
+                });
+            }
+        }
     }
 
     /// Start activation after the first INIT; later INITs do nothing.
@@ -241,6 +315,10 @@ impl Agent {
 
     /// Run now if activated, else hold until activation is done.
     fn assign(&self, assign: Assign) {
+        if !self.executor.is_running(&assign.task) && !self.executor.has_finished(&assign.task) {
+            self.journal
+                .record_assign(&assign, &crate::executor::action_key(&assign));
+        }
         let mut activation = self.activation.lock().expect("activation lock");
         match &mut *activation {
             Activation::Done => {
@@ -333,6 +411,7 @@ impl Agent {
                     agent,
                     inquiries,
                     diagnostics,
+                    journal,
                     ..
                 } => {
                     tracing::info!(
@@ -348,6 +427,7 @@ impl Agent {
                             d.path.map(|p| format!(" at {p}")).unwrap_or_default()
                         );
                     }
+                    self.outbox.set_journal(journal);
                     self.outbox.attach(tx.clone());
                     self.outbox.resend_unacked();
                     self.answer_inquiries(inquiries.into_iter().map(|i| i.task));
@@ -385,6 +465,25 @@ impl Agent {
             ToAgent::Pause { task } => self.executor.pause(&task),
             ToAgent::Resume { task, step } => self.executor.resume(&task, step),
             ToAgent::EventAck { event, seq, .. } => self.outbox.ack(event.as_deref(), seq),
+            ToAgent::JournalAck { journal_session, pos } => {
+                self.outbox.journal_ack(&journal_session, pos);
+                #[cfg(feature = "wal")]
+                if let Some(store) = self.store.clone() {
+                    tokio::spawn(async move {
+                        if let Err(e) = store.set_acked(&journal_session, pos).await {
+                            tracing::warn!("could not record the journal ack: {e:#}");
+                        }
+                    });
+                }
+            }
+            ToAgent::Collect { drawers } => {
+                for drawer in drawers {
+                    self.executor.shelf().remove(&drawer);
+                }
+            }
+            ToAgent::Shelved { error: Some(e) } | ToAgent::Unshelved { error: Some(e) } => {
+                tracing::warn!("the server could not record a drawer: {e}")
+            }
             ToAgent::Unknown => tracing::debug!("ignoring an unsupported message"),
             other => tracing::debug!("ignoring {other:?}"),
         }
@@ -399,10 +498,13 @@ impl Agent {
             .and_then(|v| v.get("task"))
             .and_then(|t| t.as_str());
         match task {
-            Some(task) => self.outbox.send(FromAgent::Critical {
-                task: task.to_owned(),
-                error: format!("malformed ASSIGN: {error}"),
-            }),
+            Some(task) => self.journal.emit(
+                FromAgent::Critical {
+                    task: task.to_owned(),
+                    error: format!("malformed ASSIGN: {error}"),
+                },
+                None,
+            ),
             None => tracing::warn!("could not parse a server frame: {error}"),
         }
     }
@@ -410,16 +512,22 @@ impl Agent {
     fn answer_inquiries(&self, tasks: impl Iterator<Item = String>) {
         for task in tasks {
             if self.executor.is_running(&task) {
-                self.outbox.send(FromAgent::Progress {
-                    task,
-                    progress: None,
-                    message: Some("still running".into()),
-                });
+                self.journal.emit(
+                    FromAgent::Progress {
+                        task,
+                        progress: None,
+                        message: Some("still running".into()),
+                    },
+                    None,
+                );
             } else if !self.executor.has_finished(&task) {
-                self.outbox.send(FromAgent::Critical {
-                    task,
-                    error: "the agent restarted and lost this task".into(),
-                });
+                self.journal.emit(
+                    FromAgent::Critical {
+                        task,
+                        error: "the agent restarted and lost this task".into(),
+                    },
+                    None,
+                );
             }
         }
     }

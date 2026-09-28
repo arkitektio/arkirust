@@ -1,5 +1,5 @@
 //! Opening the agent websocket, optionally through an HTTP proxy (the mesh
-//! sidecar's `--outbound-http-proxy-listen`).
+//! node's local proxy).
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;

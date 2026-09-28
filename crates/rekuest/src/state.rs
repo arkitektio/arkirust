@@ -21,6 +21,7 @@ use serde_json::{Map, Value};
 use tokio::sync::mpsc;
 
 use crate::emit::Emitter;
+use crate::journal::TaskGate;
 use crate::messages::FromAgent;
 use crate::ports::Port;
 
@@ -51,14 +52,18 @@ pub enum StateError {
     Serialize { state: String, message: String },
     #[error("this task is not running on an agent, so it has no states")]
     NoAgent,
+    #[error("the task has ended; its state changes are no longer accepted")]
+    TaskClosed,
 }
 
 /// Who changes a state: which task (if any) and which locks it holds.
-/// `locks: None` means unrestricted (initialization).
+/// `locks: None` means unrestricted (initialization). With a `gate`, changes
+/// are refused once the task has ended (see [`crate::journal`]).
 #[derive(Debug, Clone, Default)]
 pub struct Mutation {
     pub task_id: Option<String>,
     pub locks: Option<Vec<String>>,
+    pub gate: Option<TaskGate>,
 }
 
 impl Mutation {
@@ -67,6 +72,7 @@ impl Mutation {
         Self {
             task_id: None,
             locks: Some(vec![]),
+            gate: None,
         }
     }
 }
@@ -169,6 +175,12 @@ impl<T: StateType> StateCell<T> {
     }
 
     fn update<R>(&self, mutation: &Mutation, f: impl FnOnce(&mut T) -> R) -> Result<R, StateError> {
+        // Checked before anything changes, and held until the change is
+        // published: a task's end is never followed by one of its changes.
+        let _pass = match &mutation.gate {
+            Some(gate) => Some(gate.enter().ok_or(StateError::TaskClosed)?),
+            None => None,
+        };
         if let Some(held) = &mutation.locks {
             let missing: Vec<String> = T::REQUIRED_LOCKS
                 .iter()
@@ -727,6 +739,7 @@ mod tests {
         let task = Mutation {
             task_id: Some("t1".into()),
             locks: Some(vec!["camera".into()]),
+            gate: None,
         };
         let camera = hub.state_mut::<Camera>(task).unwrap();
         camera.update(|c| c.exposure_ms = 20.0).unwrap();
@@ -777,6 +790,30 @@ mod tests {
         let err = unlocked.update(|c| c.exposure_ms = 2.0).unwrap_err();
         assert!(matches!(err, StateError::MissingLocks { .. }));
         assert_eq!(unlocked.get().exposure_ms, 1.0, "a refused change is not applied");
+    }
+
+    #[tokio::test]
+    async fn refuses_changes_after_the_task_ended() {
+        let hub = StateHub::new(vec![StateDeclaration::of(Some(Camera {
+            exposure_ms: 1.0,
+            tags: vec![],
+        }))]);
+        hub.apply_initial_values().unwrap();
+        let recorder = Arc::new(Recorder::default());
+        hub.start_session("s".into(), recorder.clone(), None).await.unwrap();
+        let gate = TaskGate::default();
+        let camera = hub
+            .state_mut::<Camera>(Mutation {
+                task_id: Some("t".into()),
+                locks: Some(vec!["camera".into()]),
+                gate: Some(gate.clone()),
+            })
+            .unwrap();
+        camera.update(|c| c.exposure_ms = 2.0).unwrap();
+        gate.close();
+        assert_eq!(camera.update(|c| c.exposure_ms = 3.0).unwrap_err(), StateError::TaskClosed);
+        assert_eq!(camera.get().exposure_ms, 2.0, "a refused change is not applied");
+        assert_eq!(hub.revision().1, 1);
     }
 
     #[tokio::test]

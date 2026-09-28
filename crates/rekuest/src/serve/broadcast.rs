@@ -7,6 +7,7 @@ use std::sync::Mutex;
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::emit::Emitter;
+use crate::journal::{stamp, JournalEntry, Route};
 use crate::messages::{Envelope, FromAgent};
 
 /// What a subscriber asked for; `None` means everything of that kind.
@@ -17,10 +18,25 @@ pub(crate) struct Filters {
     pub lock_keys: Option<HashSet<String>>,
 }
 
+impl Filters {
+    /// Whether a journal subscriber gets an entry routed this way.
+    pub(crate) fn admits(&self, route: Route<'_>) -> bool {
+        match route {
+            Route::State(name) => allows(&self.state_keys, name),
+            Route::Lock(key) => allows(&self.lock_keys, key),
+            Route::Action(key) => allows(&self.action_keys, key),
+            Route::Everyone => true,
+        }
+    }
+}
+
 struct Subscriber {
     id: u64,
     filters: Filters,
     tx: UnboundedSender<String>,
+    /// Opted into the journal: frames carry `pos`, and session-wide entries
+    /// (`SESSION_INIT`, `STATE_SNAPSHOT`, `ASSIGN`) are included.
+    journal: bool,
 }
 
 /// Routes each message to the subscribers whose filters match, as the Python
@@ -28,11 +44,15 @@ struct Subscriber {
 /// * `STATE_PATCH` by state name, `LOCK`/`UNLOCK` by lock key;
 /// * everything else by the action key of its (still managed) task. Messages
 ///   without one, such as `SESSION_INIT` and `STATE_SNAPSHOT`, reach nobody.
+///
+/// Journal subscribers get the same frames plus `pos`/`journal_session`, and
+/// also the session-wide ones.
 #[derive(Default)]
 pub struct Broadcaster {
     subscribers: Mutex<Vec<Subscriber>>,
     next_id: AtomicU64,
-    seq: AtomicU64,
+    /// Numbered under the subscribers lock, so frames go out in `seq` order.
+    seq: Mutex<u64>,
 }
 
 impl std::fmt::Debug for Broadcaster {
@@ -47,49 +67,81 @@ fn allows(filter: &Option<HashSet<String>>, key: &str) -> bool {
     filter.as_ref().is_none_or(|keys| keys.contains(key))
 }
 
+/// How the Python transport routes a message; `None` reaches nobody.
+fn legacy_route<'a>(message: &'a FromAgent, action_key: Option<&'a str>) -> Option<Route<'a>> {
+    if message.is_journal_only() {
+        return None;
+    }
+    match message {
+        FromAgent::Shelve { .. } | FromAgent::Unshelve { .. } => None,
+        FromAgent::StatePatch { state_name, .. } => Some(Route::State(state_name)),
+        FromAgent::Lock { key, .. } | FromAgent::Unlock { key } => Some(Route::Lock(key)),
+        _ => action_key.map(Route::Action),
+    }
+}
+
 impl Broadcaster {
-    pub(crate) fn subscribe(&self, filters: Filters, tx: UnboundedSender<String>) -> u64 {
+    pub(crate) fn subscribe(&self, filters: Filters, tx: UnboundedSender<String>, journal: bool) -> u64 {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
-        self.subscribers
-            .lock()
-            .expect("subscribers")
-            .push(Subscriber { id, filters, tx });
+        self.subscribers.lock().expect("subscribers").push(Subscriber {
+            id,
+            filters,
+            tx,
+            journal,
+        });
         id
     }
 
     pub(crate) fn unsubscribe(&self, id: u64) {
         self.subscribers.lock().expect("subscribers").retain(|s| s.id != id);
     }
+
+    fn deliver(&self, message: FromAgent, action_key: Option<&str>, entry: Option<&JournalEntry>) {
+        let mut subscribers = self.subscribers.lock().expect("subscribers");
+        let mut envelope = Envelope::new(message);
+        if let Some(entry) = entry {
+            envelope.id = entry.message_id.clone();
+        }
+        // Numbered even when nobody is listening, as in Python.
+        if envelope.message.is_event() {
+            let mut seq = self.seq.lock().expect("seq");
+            *seq += 1;
+            envelope.seq = Some(*seq);
+        }
+        let legacy = legacy_route(&envelope.message, action_key);
+        let journal_route = entry.map(JournalEntry::route).or(legacy);
+
+        let mut plain: Option<String> = None;
+        let mut stamped: Option<String> = None;
+        subscribers.retain(|s| {
+            let text = if s.journal {
+                if !journal_route.is_some_and(|r| s.filters.admits(r)) {
+                    return true;
+                }
+                stamped.get_or_insert_with(|| {
+                    let mut frame = serde_json::to_value(&envelope).expect("messages serialize");
+                    if let Some(entry) = entry {
+                        stamp(&mut frame, entry);
+                    }
+                    frame.to_string()
+                })
+            } else {
+                if !legacy.is_some_and(|r| s.filters.admits(r)) {
+                    return true;
+                }
+                plain.get_or_insert_with(|| serde_json::to_string(&envelope).expect("messages serialize"))
+            };
+            s.tx.send(text.clone()).is_ok()
+        });
+    }
 }
 
 impl Emitter for Broadcaster {
     fn emit(&self, message: FromAgent, action_key: Option<&str>) {
-        let matches: Box<dyn Fn(&Filters) -> bool> = match &message {
-            FromAgent::StatePatch { state_name, .. } => {
-                let name = state_name.clone();
-                Box::new(move |f: &Filters| allows(&f.state_keys, &name))
-            }
-            FromAgent::Lock { key, .. } | FromAgent::Unlock { key } => {
-                let key = key.clone();
-                Box::new(move |f: &Filters| allows(&f.lock_keys, &key))
-            }
-            _ => match action_key {
-                Some(key) => {
-                    let key = key.to_owned();
-                    Box::new(move |f: &Filters| allows(&f.action_keys, &key))
-                }
-                None => return,
-            },
-        };
+        self.deliver(message, action_key, None)
+    }
 
-        let mut envelope = Envelope::new(message);
-        if envelope.message.is_event() {
-            envelope.seq = Some(self.seq.fetch_add(1, Ordering::SeqCst) + 1);
-        }
-        let text = serde_json::to_string(&envelope).expect("messages serialize");
-        self.subscribers
-            .lock()
-            .expect("subscribers")
-            .retain(|s| !matches(&s.filters) || s.tx.send(text.clone()).is_ok());
+    fn emit_entry(&self, message: FromAgent, action_key: Option<&str>, entry: &JournalEntry) {
+        self.deliver(message, action_key, Some(entry))
     }
 }

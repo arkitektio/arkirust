@@ -25,14 +25,20 @@
 //! | `GET /tasks`, `/tasks/{id}`, `/states`, `/states/{interface}`, `/locks` | what is going on |
 //! | `GET /schemas/{implementations,states,locks,bloks}` | the declaration |
 //! | `GET /session_info`, `/states/checkout`, `/states/segments`, … | state history |
+//! | `GET /journal`, `/journal/{session}`, `/journal/{session}/at/{pos}`, `/tasks/{id}/events` | the journal: every report in order, and the world at any position |
 //! | `GET /openapi.json`, `/docs` | API description |
+//!
+//! A websocket client that sends `"journal": true` in its INIT opts into the
+//! journal: its INIT gets a `journal` object (the watermark and the states,
+//! tasks and locks exactly as of it), every frame after carries `pos` and
+//! `journal_session`, and with `"resume_after": N` it first gets the entries
+//! it missed after `N`. Without the flag, frames are exactly Python's.
 
 // Handler helpers return a ready `Response` as their error, as axum handlers do.
 #![allow(clippy::result_large_err)]
 
 mod broadcast;
 mod schema;
-mod store;
 #[cfg(feature = "testing")]
 pub mod testing;
 
@@ -51,12 +57,13 @@ use serde_json::{json, Map, Value};
 
 use crate::action::Registry;
 use crate::context::Context;
-use crate::executor::Executor;
+use crate::executor::{Executor, FLUSH_TIMEOUT};
+use crate::journal::{Fold, Journal, JournalEntry, JournalSink};
 use crate::messages::Assign;
 use crate::state::Sink;
 
 pub use broadcast::Broadcaster;
-pub use store::{HistoryStore, PatchEvent, SessionBoundary, Snapshot, StateAt, TaskBoundary};
+pub use crate::store::{EntryQuery, HistoryStore, PatchEvent, SessionBoundary, Snapshot, StateAt, TaskBoundary};
 
 /// The first frame a websocket client sends.
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -71,6 +78,16 @@ pub struct SubscriptionInit {
     pub lock_keys: Option<Vec<String>>,
     #[serde(default)]
     pub token: Option<String>,
+    /// Opt into the journal (`pos` on every frame, a consistent INIT).
+    #[serde(default)]
+    pub journal: bool,
+    /// With `journal`: first replay the entries after this position.
+    #[serde(default)]
+    pub resume_after: Option<u64>,
+    /// With `resume_after`: the session the position belongs to. Required
+    /// unless resuming from 0; a mismatch answers `resync: true`.
+    #[serde(default)]
+    pub session_id: Option<String>,
 }
 
 /// What an auth hook authenticates.
@@ -118,6 +135,8 @@ pub struct ServeOptions {
     pub add_locks: bool,
     pub add_tasks: bool,
     pub add_task_details: bool,
+    /// Serve the journal routes (`/journal…`, `/tasks/{id}/events`).
+    pub add_journal: bool,
     /// Serve `/openapi.json` and a Swagger page at `/docs`.
     pub openapi: bool,
     pub title: String,
@@ -141,6 +160,7 @@ impl Default for ServeOptions {
             add_locks: true,
             add_tasks: true,
             add_task_details: true,
+            add_journal: true,
             openapi: true,
             title: "Arkitekt App".into(),
             version: "0.1.0".into(),
@@ -178,6 +198,7 @@ impl std::fmt::Debug for ServeOptions {
 pub struct LocalAgent {
     executor: Executor,
     broadcaster: Arc<Broadcaster>,
+    journal: Arc<Journal>,
     store: HistoryStore,
 }
 
@@ -195,7 +216,8 @@ impl LocalAgent {
 
     /// Cancel background hooks, run shutdown hooks and flush the history.
     pub async fn shutdown(&self) {
-        self.executor.teardown().await
+        self.executor.teardown().await;
+        self.journal.flush(FLUSH_TIMEOUT).await;
     }
 
     pub fn executor(&self) -> &Executor {
@@ -204,6 +226,10 @@ impl LocalAgent {
 
     pub fn history(&self) -> &HistoryStore {
         &self.store
+    }
+
+    pub fn journal(&self) -> &Journal {
+        &self.journal
     }
 
     fn current_session(&self) -> Option<String> {
@@ -236,15 +262,21 @@ pub fn configure(
         History::Store(store) => store.clone(),
     };
     let broadcaster = Arc::new(Broadcaster::default());
+    let journal = Arc::new(Journal::new(
+        broadcaster.clone(),
+        Some(Arc::new(store.clone()) as Arc<dyn JournalSink>),
+        None,
+    ));
     let executor = Executor::new(
         registry,
         ctx,
-        broadcaster.clone(),
+        journal.clone(),
         Some(Arc::new(store.clone()) as Arc<dyn Sink>),
     );
     let agent = LocalAgent {
         executor,
         broadcaster,
+        journal,
         store,
     };
     let openapi = build_openapi(&agent, &options);
@@ -280,6 +312,15 @@ pub fn configure(
     }
     if o.add_task_details {
         routes = routes.route(&format!("{}/{{task_id}}", o.tasks_path), get(get_task));
+    }
+    if o.add_journal {
+        routes = routes
+            .route("/journal", get(journal_info))
+            .route("/journal/{session_id}", get(journal_entries))
+            .route("/journal/{session_id}/at", get(journal_at_time))
+            .route("/journal/{session_id}/at/{pos}", get(journal_at))
+            .route(&format!("{}/{{task_id}}/events", o.tasks_path), get(task_events));
+        taken.insert("/journal".into());
     }
     if o.add_states {
         routes = routes.route(&o.states_path, get(list_states));
@@ -513,6 +554,11 @@ fn http_user(shared: &Shared, headers: &HeaderMap, uri: &Uri) -> Result<String, 
 async fn submit(shared: &Shared, payload: Map<String, Value>, interface: Option<String>, user: String) -> Result<String, Response> {
     let assign = build_assign(payload, interface, user).ok_or_else(internal_error)?;
     let task = assign.task.clone();
+    // The task's first entry: what it was asked to do.
+    shared
+        .agent
+        .journal
+        .record_assign(&assign, &crate::executor::action_key(&assign));
     shared.agent.executor.assign(assign);
     Ok(task)
 }
@@ -650,25 +696,42 @@ async fn handle_socket(shared: Arc<Shared>, mut socket: WebSocket) {
     }
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-    let id = shared.agent.broadcaster.subscribe(
-        broadcast::Filters {
-            action_keys: key_set(&init.action_keys),
-            state_keys: key_set(&init.state_keys),
-            lock_keys: key_set(&init.lock_keys),
-        },
-        tx,
-    );
-
+    let filters = broadcast::Filters {
+        action_keys: key_set(&init.action_keys),
+        state_keys: key_set(&init.state_keys),
+        lock_keys: key_set(&init.lock_keys),
+    };
     let agent = &shared.agent;
+    let (id, journal) = if init.journal {
+        let (id, opening) = journal_opening(agent, &init, filters, tx).await;
+        (id, Some(opening))
+    } else {
+        (agent.broadcaster.subscribe(filters, tx, false), None)
+    };
+
     let tasks = agent.executor.task_views(raw_set(&init.action_keys).as_ref());
-    let first = json!({
+    let mut first = json!({
         "type": "INIT",
         "tasks": { "count": tasks.len(), "tasks": tasks },
         "states": state_collection(agent, raw_set(&init.state_keys).as_ref()),
         "locks": lock_collection(agent, raw_set(&init.lock_keys).as_ref()),
     });
+    let backlog = match journal {
+        Some((info, backlog)) => {
+            first["journal"] = info;
+            backlog
+        }
+        None => vec![],
+    };
 
-    if socket.send(Message::Text(first.to_string().into())).await.is_ok() {
+    let mut open = socket.send(Message::Text(first.to_string().into())).await.is_ok();
+    for entry in backlog {
+        if !open {
+            break;
+        }
+        open = socket.send(Message::Text(entry.frame().to_string().into())).await.is_ok();
+    }
+    if open {
         loop {
             tokio::select! {
                 frame = rx.recv() => match frame {
@@ -687,6 +750,102 @@ async fn handle_socket(shared: Arc<Shared>, mut socket: WebSocket) {
         }
     }
     agent.broadcaster.unsubscribe(id);
+}
+
+/// Subscribe a journal client at the current watermark. Returns the
+/// subscription, the INIT's `journal` object (the world exactly as of the
+/// watermark) and the entries to replay (those after `resume_after`).
+async fn journal_opening(
+    agent: &LocalAgent,
+    init: &SubscriptionInit,
+    filters: broadcast::Filters,
+    tx: tokio::sync::mpsc::UnboundedSender<String>,
+) -> (u64, (Value, Vec<Arc<JournalEntry>>)) {
+    // Under the journal lock: live frames after the watermark queue up in
+    // `tx`, so nothing is missed or sent twice.
+    let (id, watermark, fold, recent) = agent.journal.locked(|view| {
+        let watermark = view.watermark();
+        let recent = match (&watermark, init.resume_after) {
+            (Some(wm), Some(after)) if after <= wm.pos => view.recent(after, wm.pos),
+            _ => None,
+        };
+        let id = agent.broadcaster.subscribe(filters.clone(), tx, true);
+        (id, watermark, view.fold().clone(), recent)
+    });
+
+    let Some(wm) = watermark else {
+        let info = json!({ "session_id": null, "pos": 0, "global_rev": 0, "resync": init.resume_after.is_some() });
+        return (id, (info, vec![]));
+    };
+
+    // A position means nothing without its session (the agent may have
+    // restarted since): resuming needs the session, except from the start.
+    let resync = init.resume_after.is_some_and(|after| {
+        let same_session = init.session_id.as_ref().is_some_and(|s| *s == wm.session_id);
+        after > wm.pos || (after > 0 && !same_session)
+    });
+    let backlog: Vec<Arc<JournalEntry>> = match (init.resume_after, resync) {
+        (Some(after), false) => match recent {
+            Some(recent) => recent,
+            None => {
+                agent.journal.flush_to(wm.pos, FLUSH_TIMEOUT).await;
+                let query = EntryQuery {
+                    after,
+                    until: Some(wm.pos),
+                    ..Default::default()
+                };
+                match agent.store.journal_entries(&wm.session_id, query).await {
+                    Ok(entries) => entries.into_iter().map(Arc::new).collect(),
+                    Err(e) => {
+                        tracing::error!("could not read the journal to resume a subscriber: {e:#}");
+                        vec![]
+                    }
+                }
+            }
+        },
+        _ => vec![],
+    };
+    let backlog = backlog.into_iter().filter(|e| filters.admits(e.route())).collect();
+
+    let mut info = world_json(
+        &fold,
+        raw_set(&init.action_keys).as_ref(),
+        raw_set(&init.state_keys).as_ref(),
+        raw_set(&init.lock_keys).as_ref(),
+    );
+    info["session_id"] = json!(wm.session_id);
+    info["pos"] = json!(wm.pos);
+    info["global_rev"] = json!(wm.global_rev);
+    info["resync"] = json!(resync);
+    (id, (info, backlog))
+}
+
+/// States, tasks and locks of a fold, optionally only some keys.
+fn world_json(
+    fold: &Fold,
+    action_keys: Option<&HashSet<String>>,
+    state_keys: Option<&HashSet<String>>,
+    lock_keys: Option<&HashSet<String>>,
+) -> Value {
+    let states: Map<String, Value> = fold
+        .states
+        .iter()
+        .filter(|(name, _)| state_keys.is_none_or(|k| k.contains(*name)))
+        .map(|(name, value)| (name.clone(), value.clone()))
+        .collect();
+    let tasks: Map<String, Value> = fold
+        .tasks
+        .iter()
+        .filter(|(_, task)| action_keys.is_none_or(|k| task.action_key.as_ref().is_some_and(|a| k.contains(a))))
+        .map(|(id, task)| (id.clone(), json!(task)))
+        .collect();
+    let locks: Map<String, Value> = fold
+        .locks
+        .iter()
+        .filter(|(key, _)| lock_keys.is_none_or(|k| k.contains(*key)))
+        .map(|(key, task)| (key.clone(), json!(task)))
+        .collect();
+    json!({ "states": states, "tasks": tasks, "locks": locks })
 }
 
 // ------------------------------------------------------------------ views --
@@ -830,7 +989,8 @@ macro_rules! tri {
 }
 
 async fn session_info(State(shared): S) -> Response {
-    Json(json!({ "current_session": shared.agent.current_session() })).into_response()
+    let pos = shared.agent.journal.watermark().map(|wm| wm.pos);
+    Json(json!({ "current_session": shared.agent.current_session(), "current_pos": pos })).into_response()
 }
 
 async fn task_boundaries(State(shared): S, Path(correlation_id): Path<String>, Query(query): Query<Vec<(String, String)>>) -> Response {
@@ -989,6 +1149,134 @@ async fn snapshots_around(
     }
 }
 
+// ---------------------------------------------------------------- journal --
+
+fn opt_filter(query: &[(String, String)], name: &str) -> Option<Vec<String>> {
+    normalize_filter(&query_values(query, name))
+}
+
+/// `current` resolves to the running session.
+fn journal_session(agent: &LocalAgent, session_id: String) -> Result<String, Response> {
+    if session_id == "current" {
+        resolve_session(agent, None)
+    } else {
+        Ok(session_id)
+    }
+}
+
+async fn journal_info(State(shared): S) -> Response {
+    match shared.agent.journal.watermark() {
+        Some(wm) => Json(wm).into_response(),
+        None => detail(StatusCode::NOT_FOUND, "No active session"),
+    }
+}
+
+async fn journal_entries(State(shared): S, Path(session_id): Path<String>, Query(query): Query<Vec<(String, String)>>) -> Response {
+    let agent = &shared.agent;
+    let session = tri!(journal_session(agent, session_id));
+    let after = tri!(int_param("query", "after", query_one(&query, "after"), Some(0), Some(0)));
+    let limit = tri!(int_param("query", "limit", query_one(&query, "limit"), Some(1000), Some(1)));
+    let until = match query_one(&query, "until") {
+        Some(raw) => Some(tri!(int_param("query", "until", Some(raw), None, Some(0))) as u64),
+        None => None,
+    };
+    if agent.journal.watermark().is_some_and(|wm| wm.session_id == session) {
+        agent.journal.flush(FLUSH_TIMEOUT).await;
+    }
+    let entries = agent
+        .store
+        .journal_entries(
+            &session,
+            EntryQuery {
+                after: after as u64,
+                until,
+                limit: Some(limit as u64),
+                kinds: opt_filter(&query, "kinds"),
+                task_id: query_one(&query, "task_id"),
+                action_keys: opt_filter(&query, "action_keys"),
+                state_keys: opt_filter(&query, "state_keys"),
+                lock_keys: opt_filter(&query, "lock_keys"),
+            },
+        )
+        .await;
+    match entries {
+        Ok(entries) => {
+            let last = entries.last().map(|e| e.pos);
+            Json(json!({ "session_id": session, "after": after, "last_pos": last, "entries": entries })).into_response()
+        }
+        Err(e) => storage_error(e),
+    }
+}
+
+async fn world_response(agent: &LocalAgent, session: &str, pos: u64) -> Response {
+    if agent.journal.watermark().is_some_and(|wm| wm.session_id == session) {
+        agent.journal.flush_to(pos, FLUSH_TIMEOUT).await;
+    }
+    match agent.store.journal_world(session, pos).await {
+        Ok(Some((entry, fold))) => {
+            let mut world = world_json(&fold, None, None, None);
+            world["session_id"] = json!(session);
+            world["pos"] = json!(entry.pos);
+            world["global_rev"] = json!(entry.global_rev);
+            world["timepoint"] = json!(entry.timepoint);
+            world["entry"] = json!(entry);
+            Json(world).into_response()
+        }
+        Ok(None) => detail(StatusCode::NOT_FOUND, "No journal entry at that position"),
+        Err(e) => storage_error(e),
+    }
+}
+
+async fn journal_at(State(shared): S, Path((session_id, pos)): Path<(String, String)>) -> Response {
+    let session = tri!(journal_session(&shared.agent, session_id));
+    let pos = tri!(int_param("path", "pos", Some(pos), None, Some(1)));
+    world_response(&shared.agent, &session, pos as u64).await
+}
+
+/// `?timestamp=` as epoch milliseconds or RFC 3339.
+fn parse_timestamp(raw: &str) -> Option<i64> {
+    raw.trim().parse::<i64>().ok().or_else(|| {
+        chrono::DateTime::parse_from_rfc3339(raw.trim())
+            .ok()
+            .map(|t| t.timestamp_millis())
+    })
+}
+
+async fn journal_at_time(State(shared): S, Path(session_id): Path<String>, Query(query): Query<Vec<(String, String)>>) -> Response {
+    let agent = &shared.agent;
+    let session = tri!(journal_session(agent, session_id));
+    let Some(raw) = query_one(&query, "timestamp") else {
+        return invalid("query", "timestamp", "missing", "Field required", Value::Null, None);
+    };
+    let Some(ms) = parse_timestamp(&raw) else {
+        return invalid("query", "timestamp", "datetime_parsing", "Input should be a valid datetime", json!(raw), None);
+    };
+    if agent.journal.watermark().is_some_and(|wm| wm.session_id == session) {
+        agent.journal.flush(FLUSH_TIMEOUT).await;
+    }
+    match agent.store.journal_pos_at_time(&session, ms).await {
+        Ok(Some(pos)) => world_response(agent, &session, pos).await,
+        Ok(None) => detail(StatusCode::NOT_FOUND, "No journal entry at or before that time"),
+        Err(e) => storage_error(e),
+    }
+}
+
+async fn task_events(State(shared): S, Path(task_id): Path<String>) -> Response {
+    shared.agent.journal.flush(FLUSH_TIMEOUT).await;
+    match shared.agent.store.journal_task_entries(&task_id).await {
+        Ok(entries) if entries.is_empty() => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "Task not found", "task_id": task_id })),
+        )
+            .into_response(),
+        Ok(entries) => {
+            let fold = Fold::from_entries(&entries);
+            Json(json!({ "task_id": task_id, "task": fold.tasks.get(&task_id), "entries": entries })).into_response()
+        }
+        Err(e) => storage_error(e),
+    }
+}
+
 // ---------------------------------------------------------------- openapi --
 
 fn build_openapi(agent: &LocalAgent, options: &ServeOptions) -> Value {
@@ -1014,6 +1302,13 @@ fn build_openapi(agent: &LocalAgent, options: &ServeOptions) -> Value {
     paths.insert(format!("{}/{{task_id}}", options.tasks_path), listing("Get task details", &["Tasks", "Task Details"]));
     paths.insert(options.states_path.clone(), listing("List states", &["States"]));
     paths.insert(options.locks_path.clone(), listing("List locks", &["Locks"]));
+    if options.add_journal {
+        paths.insert("/journal".into(), listing("The journal's current position", &["Journal"]));
+        paths.insert("/journal/{session_id}".into(), listing("Journal entries in order", &["Journal"]));
+        paths.insert("/journal/{session_id}/at/{pos}".into(), listing("States, tasks and locks at a position", &["Journal"]));
+        paths.insert("/journal/{session_id}/at".into(), listing("States, tasks and locks at a time", &["Journal"]));
+        paths.insert(format!("{}/{{task_id}}/events", options.tasks_path), listing("Every journal entry of a task", &["Journal", "Tasks"]));
+    }
 
     if options.add_implementations {
         for implementation in registry.implementations() {

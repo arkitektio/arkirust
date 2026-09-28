@@ -6,6 +6,7 @@ use serde_json::{Map, Value};
 use tokio::sync::Notify;
 
 use crate::emit::Emitter;
+use crate::journal::TaskGate;
 use crate::messages::{Assign, FromAgent, LogLevel};
 use crate::state::{Mutation, StateError, StateHub, StateMut, StateRef, StateType};
 
@@ -67,6 +68,7 @@ pub struct Task {
     brk: Arc<Break>,
     hub: Option<Arc<StateHub>>,
     locks: Vec<String>,
+    gate: TaskGate,
 }
 
 impl std::fmt::Debug for Task {
@@ -83,6 +85,7 @@ impl Task {
         brk: Arc<Break>,
         hub: Arc<StateHub>,
         locks: Vec<String>,
+        gate: TaskGate,
     ) -> Self {
         Self {
             id: assignment.task.clone(),
@@ -92,6 +95,7 @@ impl Task {
             brk,
             hub: Some(hub),
             locks,
+            gate,
         }
     }
 
@@ -107,6 +111,7 @@ impl Task {
             brk: Arc::default(),
             hub: None,
             locks: vec![],
+            gate: TaskGate::default(),
         }
     }
 
@@ -132,7 +137,13 @@ impl Task {
         self.assignment.as_ref().map(|a| a.org.as_str())
     }
 
+    /// Reports after the task's end (a cancelled task still running up to
+    /// its next `.await`) are dropped.
     fn emit(&self, message: FromAgent) {
+        let Some(_pass) = self.gate.enter() else {
+            tracing::debug!(task = %self.id, "dropping a report after the task ended: {message:?}");
+            return;
+        };
         match &self.emitter {
             Some(emitter) => emitter.emit(message, self.action_key.as_deref()),
             None => tracing::info!(task = %self.id, "{message:?}"),
@@ -175,12 +186,49 @@ impl Task {
         true
     }
 
+    /// The current time, recorded in the journal (a durable-action effect:
+    /// a replay would return the recorded time instead of reading the clock).
+    pub fn now(&self) -> chrono::DateTime<chrono::Utc> {
+        let now = chrono::Utc::now();
+        self.emit(FromAgent::Now {
+            task: self.id.clone(),
+            effect_id: String::new(),
+            value: now.timestamp_micros() as f64 / 1e6,
+        });
+        now
+    }
+
+    /// `n` random bytes, recorded in the journal (a durable-action effect).
+    pub fn random_bytes(&self, n: usize) -> Vec<u8> {
+        use rand::RngCore;
+        let mut bytes = vec![0u8; n];
+        rand::thread_rng().fill_bytes(&mut bytes);
+        self.emit(FromAgent::Random {
+            task: self.id.clone(),
+            effect_id: String::new(),
+            value: hex::encode(&bytes),
+        });
+        bytes
+    }
+
+    /// Sleep, recording the deadline in the journal (a durable-action effect).
+    pub async fn sleep(&self, duration: std::time::Duration) {
+        let until = chrono::Utc::now() + chrono::Duration::from_std(duration).unwrap_or_default();
+        self.emit(FromAgent::Sleep {
+            task: self.id.clone(),
+            effect_id: String::new(),
+            until: until.timestamp_micros() as f64 / 1e6,
+        });
+        tokio::time::sleep(duration).await;
+    }
+
     /// A handle to change a state, holding this task's locks. Used by `#[action]`.
     #[doc(hidden)]
     pub fn state_mut<T: StateType>(&self) -> Result<StateMut<T>, StateError> {
         self.hub.as_ref().ok_or(StateError::NoAgent)?.state_mut(Mutation {
             task_id: Some(self.id.clone()),
             locks: Some(self.locks.clone()),
+            gate: Some(self.gate.clone()),
         })
     }
 

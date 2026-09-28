@@ -20,8 +20,10 @@ use crate::action::{ActionError, Concurrency, Registry};
 use crate::context::Context;
 use crate::emit::Emitter;
 use crate::hooks::{Background, Startup};
+use crate::journal::TaskGate;
 use crate::locks::{LockTable, LockView};
 use crate::messages::{Assign, FromAgent};
+use crate::shelf::Shelf;
 use crate::state::{Sink, StateHub};
 use crate::task::{Break, Task};
 
@@ -61,6 +63,7 @@ struct Managed {
     actor_id: String,
     brk: Arc<Break>,
     abort: Option<AbortHandle>,
+    gate: TaskGate,
 }
 
 #[derive(Default)]
@@ -102,6 +105,7 @@ struct Inner {
     sink: Option<Arc<dyn Sink>>,
     hub: Arc<StateHub>,
     locks: LockTable,
+    shelf: Shelf,
     serial: HashMap<String, Arc<tokio::sync::Mutex<()>>>,
     actor_ids: HashMap<String, String>,
     tasks: Mutex<Tasks>,
@@ -151,6 +155,13 @@ impl Executor {
             .iter()
             .map(|a| (a.interface(), uuid::Uuid::new_v4().to_string()))
             .collect();
+        // Memory structures shrink onto (and expand from) the shelf in the context.
+        let shelf = Shelf::new(emitter.clone());
+        let ctx = {
+            let mut builder = ctx.to_builder();
+            builder.insert(shelf.clone());
+            builder.build()
+        };
         Self {
             inner: Arc::new(Inner {
                 registry,
@@ -159,6 +170,7 @@ impl Executor {
                 sink,
                 hub,
                 locks,
+                shelf,
                 serial,
                 actor_ids,
                 tasks: Mutex::default(),
@@ -183,6 +195,11 @@ impl Executor {
 
     pub fn locks(&self) -> &LockTable {
         &self.inner.locks
+    }
+
+    /// Values kept in memory for memory-structure ports.
+    pub fn shelf(&self) -> &Shelf {
+        &self.inner.shelf
     }
 
     pub fn is_activated(&self) -> bool {
@@ -333,6 +350,7 @@ impl Executor {
         }
         let assign = Arc::new(assign);
         let locks = action.locks();
+        let gate = TaskGate::default();
         let task = Task::new(
             assign.clone(),
             inner.emitter.clone(),
@@ -340,6 +358,7 @@ impl Executor {
             brk.clone(),
             inner.hub.clone(),
             locks.clone(),
+            gate.clone(),
         );
         tasks.managed.insert(
             task_id.clone(),
@@ -349,6 +368,7 @@ impl Executor {
                 actor_id,
                 brk,
                 abort: None,
+                gate: gate.clone(),
             },
         );
 
@@ -357,14 +377,16 @@ impl Executor {
         let id = task_id.clone();
         let run = async move {
             let inner = &this.inner;
-            this.emit(
-                FromAgent::Progress {
-                    task: id.clone(),
-                    progress: Some(0),
-                    message: Some("Queued for running".into()),
-                },
-                Some(&key),
-            );
+            if let Some(_pass) = gate.enter() {
+                this.emit(
+                    FromAgent::Progress {
+                        task: id.clone(),
+                        progress: Some(0),
+                        message: Some("Queued for running".into()),
+                    },
+                    Some(&key),
+                );
+            }
             let _serial = match serial {
                 Some(serial) => Some(serial.lock_owned().await),
                 None => None,
@@ -389,6 +411,7 @@ impl Executor {
             {
                 let mut tasks = inner.tasks.lock().expect("tasks lock");
                 if tasks.managed.contains_key(&id) {
+                    gate.close();
                     this.emit(event, Some(&key));
                     tasks.finish(&id);
                 }
@@ -424,6 +447,9 @@ impl Executor {
         if let Some(abort) = &managed.abort {
             abort.abort();
         }
+        // Waits for a report or state change the task is making right now;
+        // after this, the task can report nothing more.
+        managed.gate.close();
         self.emit(report(task.to_owned()), Some(&key));
         tasks.finish(task);
     }

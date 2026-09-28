@@ -26,14 +26,18 @@ mod definition;
 mod emit;
 pub mod executor;
 mod hooks;
+pub mod journal;
 mod locks;
 pub mod messages;
 mod outbox;
 mod port_type;
 mod ports;
+pub mod shelf;
 pub mod state;
 #[cfg(feature = "serve")]
 pub mod serve;
+#[cfg(feature = "wal")]
+pub mod store;
 mod task;
 pub mod transport;
 
@@ -44,11 +48,13 @@ pub use crate::definition::{ActionKind, AgentDeclaration, Definition, Implementa
 pub use crate::emit::{Emitter, NullEmitter};
 pub use crate::executor::{Executor, StateView, TaskView};
 pub use crate::hooks::{Background, Shutdown, Startup};
+pub use crate::journal::{Journal, JournalEntry, TaskGate};
 pub use crate::locks::{LockTable, LockView};
 pub use crate::state::{Mutation, Sink, StateError, StateHub, StateMut, StateRef, StateType};
 pub use crate::messages::LogLevel;
 pub use crate::port_type::{unwrap_reference, PortError, PortType, Structure};
 pub use crate::ports::{widgets, Choice, Port, PortKind};
+pub use crate::shelf::{Memory, MemoryStructure, Shelf};
 pub use crate::task::Task;
 pub use rekuest_macros::{action, State};
 

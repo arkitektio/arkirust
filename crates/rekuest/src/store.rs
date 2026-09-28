@@ -7,6 +7,11 @@
 //! The schema, the SQL and the time format are those of the Python sink, so
 //! a database written by one can be read by the other. An in-memory store
 //! (`HistoryStore::memory()`) uses the same code on `:memory:`.
+//!
+//! The store also keeps the agent's [journal](crate::journal): every task
+//! event, lock change and state message in one order (`journal` table). It
+//! is written by the [`Journal`](crate::journal::Journal) and read by the
+//! journal routes.
 
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -16,6 +21,9 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 use serde_json::{Map, Value};
 
+use crate::journal::{Fold, JournalEntry, JournalSink};
+pub use crate::journal::iso_from_ms;
+use crate::journal::now_ms;
 use crate::state::{apply_op, PublishedPatch, Sink};
 
 const SCHEMA: &str = "
@@ -50,6 +58,27 @@ CREATE INDEX IF NOT EXISTS idx_patches_state_time ON state_patches(state_id, eve
 CREATE INDEX IF NOT EXISTS idx_snapshots_state_time ON state_snapshots(state_id, event_time);
 CREATE INDEX IF NOT EXISTS idx_patches_correlation ON state_patches(state_id, correlation_id);
 CREATE INDEX IF NOT EXISTS idx_patches_session ON state_patches(state_id, session_id);
+CREATE TABLE IF NOT EXISTS journal (
+    session_id TEXT NOT NULL,
+    pos INTEGER NOT NULL,
+    global_rev INTEGER NOT NULL,
+    event_time INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    task_id TEXT,
+    action_key TEXT,
+    subject TEXT,
+    message_id TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    PRIMARY KEY (session_id, pos),
+    FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+);
+CREATE INDEX IF NOT EXISTS idx_journal_task ON journal(task_id, session_id, pos);
+CREATE INDEX IF NOT EXISTS idx_journal_time ON journal(session_id, event_time);
+CREATE INDEX IF NOT EXISTS idx_journal_kind ON journal(session_id, kind, pos);
+CREATE TABLE IF NOT EXISTS journal_sync (
+    session_id TEXT PRIMARY KEY,
+    acked_pos INTEGER NOT NULL DEFAULT 0
+);
 ";
 
 /// Columns added after the first release; older databases are migrated.
@@ -57,24 +86,9 @@ const MIGRATIONS: &[(&str, &str, &str)] = &[
     ("state_snapshots", "global_revision", "INTEGER NOT NULL DEFAULT 0"),
     ("state_patches", "global_current_rev", "INTEGER NOT NULL DEFAULT 0"),
     ("state_patches", "global_future_rev", "INTEGER NOT NULL DEFAULT 0"),
+    ("journal", "step", "INTEGER"),
 ];
 
-/// Milliseconds since the epoch (truncated), as the Python sink stores times.
-fn now_ms() -> i64 {
-    chrono::Utc::now().timestamp_millis()
-}
-
-/// ISO 8601 with `Z`, microseconds only when non-zero (pydantic's format).
-pub fn iso_from_ms(ms: i64) -> String {
-    let Some(dt) = chrono::DateTime::from_timestamp_millis(ms) else {
-        return String::new();
-    };
-    if dt.timestamp_subsec_micros() == 0 {
-        dt.format("%Y-%m-%dT%H:%M:%SZ").to_string()
-    } else {
-        dt.format("%Y-%m-%dT%H:%M:%S%.6fZ").to_string()
-    }
-}
 
 /// A state's value at a revision.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -202,6 +216,8 @@ impl HistoryStore {
     }
 
     fn from_connection(conn: Connection) -> anyhow::Result<Self> {
+        // Several processes may share a file (an app and its restarted self).
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
         conn.execute_batch(SCHEMA)?;
         for (table, column, definition) in MIGRATIONS {
             let exists = {
@@ -565,10 +581,270 @@ impl Sink for HistoryStore {
     }
 
     async fn is_caught_up_to(&self, global_rev: u64) -> anyhow::Result<bool> {
+        let session = self.session_or_current(None);
         let max: Option<i64> = self
-            .with(|conn| conn.query_row("SELECT MAX(global_future_rev) FROM state_patches", [], |row| row.get(0)))
+            .with(move |conn| match session {
+                Some(session) => conn.query_row(
+                    "SELECT MAX(global_future_rev) FROM state_patches WHERE session_id = ?",
+                    params![session],
+                    |row| row.get(0),
+                ),
+                None => conn.query_row("SELECT MAX(global_future_rev) FROM state_patches", [], |row| row.get(0)),
+            })
             .await?;
         Ok(max.unwrap_or(0) >= global_rev as i64)
+    }
+}
+
+#[async_trait]
+impl JournalSink for HistoryStore {
+    async fn write_entries(&self, entries: &[Arc<JournalEntry>]) -> anyhow::Result<()> {
+        let entries = entries.to_vec();
+        self.with(move |conn| {
+            let tx = conn.unchecked_transaction()?;
+            if let Some(first) = entries.first() {
+                // A remote agent's sessions are not created by the store; order them by first entry.
+                tx.execute(
+                    "INSERT OR IGNORE INTO sessions (session_id, created_at) VALUES (?, ?)",
+                    params![first.session_id, first.event_time],
+                )?;
+            }
+            {
+                let mut stmt = tx.prepare_cached(&format!(
+                    "INSERT OR IGNORE INTO journal ({JOURNAL_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                ))?;
+                for e in &entries {
+                    stmt.execute(params![
+                        e.session_id,
+                        e.pos as i64,
+                        e.global_rev as i64,
+                        e.event_time,
+                        e.kind,
+                        e.task_id,
+                        e.action_key,
+                        e.subject,
+                        e.message_id,
+                        e.payload.to_string(),
+                        e.step.map(|s| s as i64),
+                    ])?;
+                }
+            }
+            tx.commit()
+        })
+        .await
+    }
+}
+
+const JOURNAL_COLUMNS: &str =
+    "session_id, pos, global_rev, event_time, kind, task_id, action_key, subject, message_id, payload, step";
+
+/// Kinds that belong to the whole session rather than to a task, state or lock.
+const SESSION_KINDS: &str = "'SESSION_INIT', 'STATE_SNAPSHOT'";
+/// Kinds that carry state values.
+const STATE_KINDS: &str = "'SESSION_INIT', 'STATE_SNAPSHOT', 'STATE_PATCH'";
+
+fn entry_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<JournalEntry> {
+    let event_time: i64 = row.get(3)?;
+    let payload: String = row.get(9)?;
+    Ok(JournalEntry {
+        session_id: row.get(0)?,
+        pos: row.get::<_, i64>(1)? as u64,
+        global_rev: row.get::<_, i64>(2)? as u64,
+        timepoint: iso_from_ms(event_time),
+        event_time,
+        kind: row.get(4)?,
+        task_id: row.get(5)?,
+        step: row.get::<_, Option<i64>>(10)?.map(|s| s as u64),
+        action_key: row.get(6)?,
+        subject: row.get(7)?,
+        message_id: row.get(8)?,
+        payload: serde_json::from_str(&payload).unwrap_or(Value::Null),
+    })
+}
+
+/// Which journal entries to read. Key filters route as the websocket does.
+#[derive(Debug, Clone, Default)]
+pub struct EntryQuery {
+    /// Entries after this position.
+    pub after: u64,
+    /// Up to and including this position.
+    pub until: Option<u64>,
+    pub limit: Option<u64>,
+    pub kinds: Option<Vec<String>>,
+    pub task_id: Option<String>,
+    pub action_keys: Option<Vec<String>>,
+    pub state_keys: Option<Vec<String>>,
+    pub lock_keys: Option<Vec<String>>,
+}
+
+fn in_list(column: &str, values: &[String], args: &mut Vec<rusqlite::types::Value>) -> String {
+    args.extend(values.iter().cloned().map(Into::into));
+    format!("{column} IN ({})", vec!["?"; values.len()].join(", "))
+}
+
+impl HistoryStore {
+    /// The server has persisted everything of `session_id` up to `pos`. Never lowers it.
+    pub async fn set_acked(&self, session_id: &str, pos: u64) -> anyhow::Result<()> {
+        let session_id = session_id.to_owned();
+        self.with(move |conn| {
+            conn.execute(
+                "INSERT INTO journal_sync (session_id, acked_pos) VALUES (?1, ?2) \
+                 ON CONFLICT(session_id) DO UPDATE SET acked_pos = MAX(acked_pos, excluded.acked_pos)",
+                params![session_id, pos as i64],
+            )
+        })
+        .await
+        .map(|_| ())
+    }
+
+    /// Entries the server has not acknowledged, of every session but `except`,
+    /// oldest session first, each in order.
+    pub async fn unacked_entries(&self, except: Option<&str>) -> anyhow::Result<Vec<JournalEntry>> {
+        let except = except.map(str::to_owned).unwrap_or_default();
+        self.with(move |conn| {
+            let columns = JOURNAL_COLUMNS
+                .split(", ")
+                .map(|c| format!("j.{c}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let mut stmt = conn.prepare(&format!(
+                "SELECT {columns} FROM journal j \
+                 LEFT JOIN journal_sync y ON y.session_id = j.session_id \
+                 LEFT JOIN sessions s ON s.session_id = j.session_id \
+                 WHERE j.session_id != ?1 AND j.pos > COALESCE(y.acked_pos, 0) \
+                 ORDER BY COALESCE(s.created_at, 0), j.session_id, j.pos"
+            ))?;
+            let rows = stmt.query_map(params![except], entry_from_row)?;
+            rows.collect()
+        })
+        .await
+    }
+
+    /// Delete acknowledged entries recorded before `before_ms`. Returns how many.
+    pub async fn prune_acked(&self, before_ms: i64) -> anyhow::Result<usize> {
+        self.with(move |conn| {
+            conn.execute(
+                "DELETE FROM journal WHERE event_time < ?1 AND pos <= \
+                 COALESCE((SELECT acked_pos FROM journal_sync y WHERE y.session_id = journal.session_id), 0)",
+                params![before_ms],
+            )
+        })
+        .await
+    }
+
+    /// Journal entries of a session, in order.
+    pub async fn journal_entries(&self, session_id: &str, query: EntryQuery) -> anyhow::Result<Vec<JournalEntry>> {
+        let session_id = session_id.to_owned();
+        self.with(move |conn| {
+            let mut args: Vec<rusqlite::types::Value> = vec![session_id.into(), (query.after as i64).into()];
+            let mut sql = format!("SELECT {JOURNAL_COLUMNS} FROM journal WHERE session_id = ? AND pos > ?");
+            if let Some(until) = query.until {
+                sql.push_str(" AND pos <= ?");
+                args.push((until as i64).into());
+            }
+            if let Some(kinds) = query.kinds.as_ref().filter(|k| !k.is_empty()) {
+                sql.push_str(&format!(" AND {}", in_list("kind", kinds, &mut args)));
+            }
+            if let Some(task) = query.task_id {
+                sql.push_str(" AND task_id = ?");
+                args.push(task.into());
+            }
+            if query.action_keys.is_some() || query.state_keys.is_some() || query.lock_keys.is_some() {
+                let keyed = |column: &str, keys: &Option<Vec<String>>, args: &mut Vec<rusqlite::types::Value>| match keys {
+                    Some(keys) if !keys.is_empty() => in_list(column, keys, args),
+                    _ => "1".to_owned(),
+                };
+                let state = keyed("subject", &query.state_keys, &mut args);
+                let lock = keyed("subject", &query.lock_keys, &mut args);
+                let action = keyed("action_key", &query.action_keys, &mut args);
+                sql.push_str(&format!(
+                    " AND ((kind = 'STATE_PATCH' AND {state}) OR (kind IN ('LOCK', 'UNLOCK') AND {lock}) \
+                     OR kind IN ({SESSION_KINDS}) OR (kind NOT IN ('STATE_PATCH', 'LOCK', 'UNLOCK', {SESSION_KINDS}) \
+                     AND (action_key IS NULL OR {action})))"
+                ));
+            }
+            sql.push_str(" ORDER BY pos ASC");
+            if let Some(limit) = query.limit {
+                sql.push_str(" LIMIT ?");
+                args.push((limit as i64).into());
+            }
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt.query_map(rusqlite::params_from_iter(args), entry_from_row)?;
+            rows.collect()
+        })
+        .await
+    }
+
+    /// Every entry of one task, in order.
+    pub async fn journal_task_entries(&self, task_id: &str) -> anyhow::Result<Vec<JournalEntry>> {
+        let task_id = task_id.to_owned();
+        self.with(move |conn| {
+            let mut stmt =
+                conn.prepare(&format!("SELECT {JOURNAL_COLUMNS} FROM journal WHERE task_id = ? ORDER BY session_id, pos"))?;
+            let rows = stmt.query_map(params![task_id], entry_from_row)?;
+            rows.collect()
+        })
+        .await
+    }
+
+    /// The last position of a session at or before `ms` (epoch milliseconds).
+    pub async fn journal_pos_at_time(&self, session_id: &str, ms: i64) -> anyhow::Result<Option<u64>> {
+        let session_id = session_id.to_owned();
+        self.with(move |conn| {
+            conn.query_row(
+                "SELECT MAX(pos) FROM journal WHERE session_id = ? AND event_time <= ?",
+                params![session_id, ms],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+        })
+        .await
+        .map(|pos| pos.map(|p| p as u64))
+    }
+
+    /// The last position of a session.
+    pub async fn journal_last_pos(&self, session_id: &str) -> anyhow::Result<Option<u64>> {
+        let session_id = session_id.to_owned();
+        self.with(move |conn| {
+            conn.query_row("SELECT MAX(pos) FROM journal WHERE session_id = ?", params![session_id], |row| {
+                row.get::<_, Option<i64>>(0)
+            })
+        })
+        .await
+        .map(|pos| pos.map(|p| p as u64))
+    }
+
+    /// The entry at `pos` and the world as of it: states replayed from the
+    /// last snapshot entry, tasks and locks folded from every entry before.
+    pub async fn journal_world(&self, session_id: &str, pos: u64) -> anyhow::Result<Option<(JournalEntry, Fold)>> {
+        let session_id = session_id.to_owned();
+        self.with(move |conn| {
+            let at = conn
+                .query_row(
+                    &format!("SELECT {JOURNAL_COLUMNS} FROM journal WHERE session_id = ? AND pos = ?"),
+                    params![session_id, pos as i64],
+                    entry_from_row,
+                )
+                .optional()?;
+            let Some(at) = at else { return Ok(None) };
+            let anchor: i64 = conn
+                .query_row(
+                    &format!(
+                        "SELECT COALESCE(MAX(pos), 0) FROM journal WHERE session_id = ? AND pos <= ? AND kind IN ({SESSION_KINDS})"
+                    ),
+                    params![session_id, pos as i64],
+                    |row| row.get(0),
+                )?;
+            let mut fold = Fold::default();
+            let mut stmt = conn.prepare(&format!(
+                "SELECT {JOURNAL_COLUMNS} FROM journal WHERE session_id = ?1 AND pos <= ?2 \
+                 AND ((kind IN ({STATE_KINDS}) AND pos >= ?3) OR kind NOT IN ({STATE_KINDS})) ORDER BY pos ASC"
+            ))?;
+            for entry in stmt.query_map(params![session_id, pos as i64, anchor], entry_from_row)? {
+                fold.apply(&entry?);
+            }
+            Ok(Some((at, fold)))
+        })
+        .await
     }
 }
 
