@@ -20,8 +20,15 @@ jobs:
         with:
           go-version-file: crates/mesh/tests/harness/go.mod
           cache-dependency-path: crates/mesh/tests/harness/go.sum
-      # webrtc-sys (lovekit's `livekit` feature, in --all-features) needs clang++.
-      - run: sudo apt-get update && sudo apt-get install -y clang
+      # webrtc-sys (lovekit's `livekit` feature, in --all-features) needs
+      # clang++ 21 or later (its prebuilt libwebrtc uses Chromium's libc++);
+      # Ubuntu's is older, so take it from apt.llvm.org.
+      - name: clang 21
+        run: |
+          wget -qO llvm.sh https://apt.llvm.org/llvm.sh
+          sudo bash llvm.sh 21
+          echo "CC=clang-21" >> "$GITHUB_ENV"
+          echo "CXX=clang++-21" >> "$GITHUB_ENV"
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --all-features
       - run: cargo test --workspace
