@@ -1,0 +1,37 @@
+# Firmware: an ESP32 / ESP32-S3 joins the mesh with arkitekt-mesh and talks
+# to a peer. Not part of the workspace, not published; see README.md.
+[package]
+name = "esp32-mesh"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[[bin]]
+name = "esp32-mesh"
+harness = false
+
+[dependencies]
+arkitekt-mesh = { path = "../../crates/mesh", default-features = false, features = ["tokio"] }
+esp-idf-svc = "0.53"
+log = "0.4"
+# No ring on ESP-IDF: a pure-Rust TLS provider (alpha).
+rustls = { version = "0.23", default-features = false, features = ["std"] }
+rustls-rustcrypto = "0.0.2-alpha"
+serde_json = "1"
+tokio = { version = "1", default-features = false, features = ["rt", "time", "io-util"] }
+
+[build-dependencies]
+embuild = "0.33"
+
+[profile.release]
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+debug = false
+
+[profile.dev]
+# Unoptimized Rust is too large and too slow for the chip.
+opt-level = "s"
+debug = true

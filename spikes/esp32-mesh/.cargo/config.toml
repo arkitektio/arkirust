@@ -1,0 +1,6 @@
+# ESP32-C6 (RISC-V, ESP-IDF std). Tier 3: nightly and build-std.
+[build]
+target = "riscv32imac-esp-espidf"
+
+[unstable]
+build-std = ["std", "panic_abort"]
