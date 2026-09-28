@@ -28,7 +28,12 @@ async fn main() -> anyhow::Result<()> {
                 _ => Err(Unauthorized("bad credentials".into())),
             },
         });
-    let (router, agent) = configure(axum::Router::new(), twin::registry(), Context::default(), options)?;
+    let (router, agent) = configure(
+        axum::Router::new(),
+        twin::registry(),
+        Context::default(),
+        options,
+    )?;
     agent.start().await?;
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
     axum::serve(listener, router)

@@ -103,7 +103,11 @@ impl JournalEntry {
     }
 
     pub fn route(&self) -> Route<'_> {
-        match (self.kind.as_str(), self.subject.as_deref(), self.action_key.as_deref()) {
+        match (
+            self.kind.as_str(),
+            self.subject.as_deref(),
+            self.action_key.as_deref(),
+        ) {
             ("STATE_PATCH", Some(state), _) => Route::State(state),
             ("LOCK" | "UNLOCK", Some(key), _) => Route::Lock(key),
             ("STATE_SNAPSHOT" | "SESSION_INIT", _, _) => Route::Everyone,
@@ -122,12 +126,18 @@ impl JournalEntry {
 pub fn stamp(frame: &mut Value, entry: &JournalEntry) {
     if let Value::Object(map) = frame {
         map.insert("pos".into(), Value::from(entry.pos));
-        map.insert("journal_session".into(), Value::String(entry.session_id.clone()));
+        map.insert(
+            "journal_session".into(),
+            Value::String(entry.session_id.clone()),
+        );
     }
 }
 
 pub fn is_terminal_kind(kind: &str) -> bool {
-    matches!(kind, "COMPLETED" | "FAILED" | "CRITICAL" | "CANCELLED" | "INTERRUPTED")
+    matches!(
+        kind,
+        "COMPLETED" | "FAILED" | "CRITICAL" | "CANCELLED" | "INTERRUPTED"
+    )
 }
 
 fn subject_of(message: &FromAgent) -> Option<String> {
@@ -215,28 +225,33 @@ impl Fold {
             _ => {}
         }
 
-        let Some(task_id) = &entry.task_id else { return };
+        let Some(task_id) = &entry.task_id else {
+            return;
+        };
         if matches!(entry.kind.as_str(), "STATE_PATCH" | "LOCK" | "UNLOCK") {
             if let Some(task) = self.tasks.get_mut(task_id) {
                 task.last_pos = task.last_pos.max(entry.pos);
             }
             return;
         }
-        let task = self.tasks.entry(task_id.clone()).or_insert_with(|| TaskFold {
-            task: task_id.clone(),
-            action_key: entry.action_key.clone(),
-            interface: None,
-            reference: None,
-            status: "ASSIGNED".into(),
-            done: false,
-            progress: None,
-            message: None,
-            error: None,
-            yields: 0,
-            last_returns: None,
-            first_pos: entry.pos,
-            last_pos: entry.pos,
-        });
+        let task = self
+            .tasks
+            .entry(task_id.clone())
+            .or_insert_with(|| TaskFold {
+                task: task_id.clone(),
+                action_key: entry.action_key.clone(),
+                interface: None,
+                reference: None,
+                status: "ASSIGNED".into(),
+                done: false,
+                progress: None,
+                message: None,
+                error: None,
+                yields: 0,
+                last_returns: None,
+                first_pos: entry.pos,
+                last_pos: entry.pos,
+            });
         task.last_pos = entry.pos;
         if task.action_key.is_none() {
             task.action_key = entry.action_key.clone();
@@ -307,7 +322,9 @@ pub struct TaskGate {
 
 impl std::fmt::Debug for TaskGate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TaskGate").field("closed", &self.is_closed()).finish()
+        f.debug_struct("TaskGate")
+            .field("closed", &self.is_closed())
+            .finish()
     }
 }
 
@@ -396,7 +413,11 @@ impl JournalView<'_> {
     }
 }
 
-fn recent(ring: &VecDeque<Arc<JournalEntry>>, after: u64, until: u64) -> Option<Vec<Arc<JournalEntry>>> {
+fn recent(
+    ring: &VecDeque<Arc<JournalEntry>>,
+    after: u64,
+    until: u64,
+) -> Option<Vec<Arc<JournalEntry>>> {
     if after >= until {
         return Some(vec![]);
     }
@@ -404,7 +425,12 @@ fn recent(ring: &VecDeque<Arc<JournalEntry>>, after: u64, until: u64) -> Option<
     if first > after + 1 {
         return None;
     }
-    Some(ring.iter().filter(|e| e.pos > after && e.pos <= until).cloned().collect())
+    Some(
+        ring.iter()
+            .filter(|e| e.pos > after && e.pos <= until)
+            .cloned()
+            .collect(),
+    )
 }
 
 #[derive(Default)]
@@ -442,7 +468,11 @@ impl std::fmt::Debug for Journal {
 impl Journal {
     /// A journal in front of `inner`. Without `session`, entries start with
     /// the first `SESSION_INIT`; messages before it are passed on unrecorded.
-    pub fn new(inner: Arc<dyn Emitter>, sink: Option<Arc<dyn JournalSink>>, session: Option<String>) -> Self {
+    pub fn new(
+        inner: Arc<dyn Emitter>,
+        sink: Option<Arc<dyn JournalSink>>,
+        session: Option<String>,
+    ) -> Self {
         Self {
             inner,
             state: Mutex::new(JournalState {
@@ -485,7 +515,12 @@ impl Journal {
             return true;
         }
         let mut durable = self.durable.subscribe();
-        let reached = async move { durable.wait_for(|(s, p)| *s == session && *p >= pos).await.is_ok() };
+        let reached = async move {
+            durable
+                .wait_for(|(s, p)| *s == session && *p >= pos)
+                .await
+                .is_ok()
+        };
         match tokio::time::timeout(timeout, reached).await {
             Ok(true) => true,
             _ => {
@@ -632,7 +667,8 @@ impl Emitter for Journal {
                 }
                 state.global_rev = 0;
             }
-            FromAgent::StatePatch { global_rev, .. } | FromAgent::StateSnapshot { global_rev, .. } => {
+            FromAgent::StatePatch { global_rev, .. }
+            | FromAgent::StateSnapshot { global_rev, .. } => {
                 state.global_rev = *global_rev;
             }
             _ => {}
@@ -654,8 +690,19 @@ impl Emitter for Journal {
             }
         }
         let payload = serde_json::to_value(&message).unwrap_or(Value::Null);
-        let kind = payload.get("type").and_then(Value::as_str).unwrap_or_default().to_owned();
-        match self.append(&mut state, &kind, task_id, action_key.map(str::to_owned), subject_of(&message), payload) {
+        let kind = payload
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        match self.append(
+            &mut state,
+            &kind,
+            task_id,
+            action_key.map(str::to_owned),
+            subject_of(&message),
+            payload,
+        ) {
             Some(entry) => self.inner.emit_entry(message, action_key, &entry),
             None => self.inner.emit(message, action_key),
         }
@@ -665,7 +712,11 @@ impl Emitter for Journal {
 /// The wire `type` of a message.
 pub fn kind_of(message: &FromAgent) -> String {
     match serde_json::to_value(message) {
-        Ok(Value::Object(map)) => map.get("type").and_then(Value::as_str).unwrap_or_default().to_owned(),
+        Ok(Value::Object(map)) => map
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
         _ => String::new(),
     }
 }
@@ -684,7 +735,10 @@ mod tests {
             self.0.lock().unwrap().push((kind_of(&message), None));
         }
         fn emit_entry(&self, _: FromAgent, _: Option<&str>, entry: &JournalEntry) {
-            self.0.lock().unwrap().push((entry.kind.clone(), Some(entry.pos)));
+            self.0
+                .lock()
+                .unwrap()
+                .push((entry.kind.clone(), Some(entry.pos)));
         }
     }
 
@@ -716,7 +770,14 @@ mod tests {
         let recorder = Arc::new(Recorder::default());
         let journal = Journal::new(recorder.clone(), None, None);
 
-        journal.emit(FromAgent::Progress { task: "early".into(), progress: None, message: None }, None);
+        journal.emit(
+            FromAgent::Progress {
+                task: "early".into(),
+                progress: None,
+                message: None,
+            },
+            None,
+        );
         journal.emit(session_init("s"), None);
         journal.record_assign(
             &Assign {
@@ -740,22 +801,46 @@ mod tests {
             },
             "set",
         );
-        journal.emit(FromAgent::Lock { key: "cam".into(), task: "t".into() }, None);
+        journal.emit(
+            FromAgent::Lock {
+                key: "cam".into(),
+                task: "t".into(),
+            },
+            None,
+        );
         journal.emit(patch(1, "t"), None);
-        journal.emit(FromAgent::Yield { task: "t".into(), returns: Map::new() }, Some("set"));
+        journal.emit(
+            FromAgent::Yield {
+                task: "t".into(),
+                returns: Map::new(),
+            },
+            Some("set"),
+        );
         journal.emit(FromAgent::Completed { task: "t".into() }, Some("set"));
         journal.emit(FromAgent::Unlock { key: "cam".into() }, None);
 
         let seen = recorder.0.lock().unwrap().clone();
-        assert_eq!(seen[0], ("PROGRESS".into(), None), "nothing is recorded before the session");
+        assert_eq!(
+            seen[0],
+            ("PROGRESS".into(), None),
+            "nothing is recorded before the session"
+        );
         let kinds: Vec<(String, Option<u64>)> = seen[1..].to_vec();
         assert_eq!(
             kinds,
-            ["SESSION_INIT", "ASSIGN", "LOCK", "STATE_PATCH", "YIELD", "COMPLETED", "UNLOCK"]
-                .iter()
-                .enumerate()
-                .map(|(i, k)| (k.to_string(), Some(i as u64 + 1)))
-                .collect::<Vec<_>>()
+            [
+                "SESSION_INIT",
+                "ASSIGN",
+                "LOCK",
+                "STATE_PATCH",
+                "YIELD",
+                "COMPLETED",
+                "UNLOCK"
+            ]
+            .iter()
+            .enumerate()
+            .map(|(i, k)| (k.to_string(), Some(i as u64 + 1)))
+            .collect::<Vec<_>>()
         );
 
         journal.locked(|view| {
@@ -764,21 +849,45 @@ mod tests {
             let fold = view.fold();
             assert_eq!(fold.states["Camera"], json!({"exposure": 2}));
             let task = &fold.tasks["t"];
-            assert_eq!((task.status.as_str(), task.done, task.yields), ("COMPLETED", true, 1));
+            assert_eq!(
+                (task.status.as_str(), task.done, task.yields),
+                ("COMPLETED", true, 1)
+            );
             assert_eq!(task.reference.as_deref(), Some("r"));
             assert!(fold.locks.is_empty());
             let recent = view.recent(0, 7).unwrap();
             assert_eq!(recent.len(), 7);
-            assert!(recent[1].payload.get("token").is_none(), "secrets are not recorded");
-            assert_eq!(recent[6].task_id.as_deref(), Some("t"), "UNLOCK names the holder");
+            assert!(
+                recent[1].payload.get("token").is_none(),
+                "secrets are not recorded"
+            );
+            assert_eq!(
+                recent[6].task_id.as_deref(),
+                Some("t"),
+                "UNLOCK names the holder"
+            );
             assert_eq!(recent[6].action_key.as_deref(), Some("set"));
             assert_eq!(recent[3].global_rev, 1);
-            assert_eq!(view.recent(2, 4).unwrap().iter().map(|e| e.pos).collect::<Vec<_>>(), vec![3, 4]);
+            assert_eq!(
+                view.recent(2, 4)
+                    .unwrap()
+                    .iter()
+                    .map(|e| e.pos)
+                    .collect::<Vec<_>>(),
+                vec![3, 4]
+            );
         });
 
         // A new session starts over.
         journal.emit(session_init("s2"), None);
-        assert_eq!(journal.watermark().unwrap(), Watermark { session_id: "s2".into(), pos: 1, global_rev: 0 });
+        assert_eq!(
+            journal.watermark().unwrap(),
+            Watermark {
+                session_id: "s2".into(),
+                pos: 1,
+                global_rev: 0
+            }
+        );
     }
 
     #[tokio::test]
@@ -798,15 +907,25 @@ mod tests {
         let hub = StateHub::new(vec![StateDeclaration::of(Some(Tags { tags: vec![] }))]);
         hub.apply_initial_values().unwrap();
         let journal = Arc::new(Journal::new(Arc::new(crate::emit::NullEmitter), None, None));
-        hub.start_session("s".into(), journal.clone(), None).await.unwrap();
+        hub.start_session("s".into(), journal.clone(), None)
+            .await
+            .unwrap();
         let tags = hub.state_mut::<Tags>(Mutation::default()).unwrap();
         for i in 0..SNAPSHOT_INTERVAL + 2 {
             tags.update(|t| t.tags.push(i)).unwrap();
         }
         journal.locked(|view| {
             assert_eq!(view.fold().states["Tags"], hub.value("Tags").unwrap());
-            let replayed = Fold::from_entries(view.recent(0, view.watermark().unwrap().pos).unwrap().iter().map(|e| &**e));
-            assert_eq!(replayed.states["Tags"]["tags"].as_array().unwrap().len(), SNAPSHOT_INTERVAL as usize + 2);
+            let replayed = Fold::from_entries(
+                view.recent(0, view.watermark().unwrap().pos)
+                    .unwrap()
+                    .iter()
+                    .map(|e| &**e),
+            );
+            assert_eq!(
+                replayed.states["Tags"]["tags"].as_array().unwrap().len(),
+                SNAPSHOT_INTERVAL as usize + 2
+            );
         });
     }
 
@@ -862,14 +981,22 @@ mod tests {
             }
         }
         let sink = Arc::new(Collect::default());
-        let journal = Arc::new(Journal::new(Arc::new(crate::emit::NullEmitter), Some(sink.clone()), Some("s".into())));
+        let journal = Arc::new(Journal::new(
+            Arc::new(crate::emit::NullEmitter),
+            Some(sink.clone()),
+            Some("s".into()),
+        ));
         let mut handles = vec![];
         for t in 0..8 {
             let journal = journal.clone();
             handles.push(tokio::spawn(async move {
                 for i in 0..50 {
                     journal.emit(
-                        FromAgent::Log { task: format!("t{t}"), message: i.to_string(), level: Default::default() },
+                        FromAgent::Log {
+                            task: format!("t{t}"),
+                            message: i.to_string(),
+                            level: Default::default(),
+                        },
                         None,
                     );
                     tokio::task::yield_now().await;

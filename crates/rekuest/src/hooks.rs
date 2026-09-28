@@ -72,12 +72,11 @@ impl Startup {
     /// Provide a context (any shared value, e.g. a device handle) that actions
     /// take with `#[inject]`.
     pub fn set_context<T: Clone + Send + Sync + 'static>(&self, value: T) {
-        self.contexts
-            .lock()
-            .expect("context edits")
-            .push(Box::new(move |builder: &mut ContextBuilder| {
+        self.contexts.lock().expect("context edits").push(Box::new(
+            move |builder: &mut ContextBuilder| {
                 builder.insert(value);
-            }));
+            },
+        ));
     }
 }
 

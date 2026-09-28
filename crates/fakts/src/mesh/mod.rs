@@ -32,12 +32,12 @@ use crate::error::{FaktsError, Result};
 mod native;
 mod sidecar;
 
-#[cfg(feature = "mesh-native")]
-pub use native::NativeNode;
 /// One ICE server entry for a WebRTC client: the node's TURN relay
 /// ([`Fakts::mesh_turn`](crate::Fakts::mesh_turn)).
 #[cfg(feature = "mesh-relay")]
 pub use mesh::driver::TurnInfo;
+#[cfg(feature = "mesh-native")]
+pub use native::NativeNode;
 pub use sidecar::Sidecar;
 
 /// What runs the mesh node.

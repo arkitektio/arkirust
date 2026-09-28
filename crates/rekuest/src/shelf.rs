@@ -36,7 +36,9 @@ pub struct Shelf {
 
 impl std::fmt::Debug for Shelf {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Shelf").field("values", &self.len()).finish()
+        f.debug_struct("Shelf")
+            .field("values", &self.len())
+            .finish()
     }
 }
 
@@ -51,7 +53,12 @@ impl Shelf {
     }
 
     /// Keep `value` and return the id it is referenced by. Records `SHELVE`.
-    pub fn put<T: Send + Sync + 'static>(&self, identifier: &str, value: Arc<T>, label: Option<String>) -> String {
+    pub fn put<T: Send + Sync + 'static>(
+        &self,
+        identifier: &str,
+        value: Arc<T>,
+        label: Option<String>,
+    ) -> String {
         let id = uuid::Uuid::new_v4().simple().to_string();
         self.inner
             .values
@@ -74,13 +81,25 @@ impl Shelf {
 
     /// The value shelved under `id`, if it is a `T`.
     pub fn get<T: Send + Sync + 'static>(&self, id: &str) -> Option<Arc<T>> {
-        let value = self.inner.values.lock().expect("shelf lock").get(id).cloned()?;
+        let value = self
+            .inner
+            .values
+            .lock()
+            .expect("shelf lock")
+            .get(id)
+            .cloned()?;
         value.downcast::<T>().ok()
     }
 
     /// Drop a value. Records `UNSHELVE` if there was one.
     pub fn remove(&self, id: &str) -> bool {
-        let removed = self.inner.values.lock().expect("shelf lock").remove(id).is_some();
+        let removed = self
+            .inner
+            .values
+            .lock()
+            .expect("shelf lock")
+            .remove(id)
+            .is_some();
         if removed {
             self.inner.emitter.emit(
                 FromAgent::Unshelve {
@@ -202,13 +221,17 @@ mod tests {
         let reference = Memory::new(Frame(vec![1, 2])).shrink(&ctx).await.unwrap();
         let id = reference["object"].as_str().unwrap().to_owned();
         assert_eq!(id.len(), 32, "a uuid the agent minted");
-        let back = Memory::<Frame>::expand(reference.clone(), &ctx).await.unwrap();
+        let back = Memory::<Frame>::expand(reference.clone(), &ctx)
+            .await
+            .unwrap();
         assert_eq!(*back, Frame(vec![1, 2]));
 
         assert!(shelf.remove(&id));
         assert!(Memory::<Frame>::expand(reference, &ctx).await.is_err());
         let messages = recorder.0.lock().unwrap();
-        assert!(matches!(&messages[0], FromAgent::Shelve { resource_id, reference, .. } if *resource_id == id && *reference == id));
+        assert!(
+            matches!(&messages[0], FromAgent::Shelve { resource_id, reference, .. } if *resource_id == id && *reference == id)
+        );
         assert!(matches!(&messages[1], FromAgent::Unshelve { drawer, .. } if *drawer == id));
         assert_eq!(journal.watermark().unwrap().pos, 2);
     }

@@ -21,9 +21,9 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 use serde_json::{Map, Value};
 
-use crate::journal::{Fold, JournalEntry, JournalSink};
 pub use crate::journal::iso_from_ms;
 use crate::journal::now_ms;
+use crate::journal::{Fold, JournalEntry, JournalSink};
 use crate::state::{apply_op, PublishedPatch, Sink};
 
 const SCHEMA: &str = "
@@ -83,12 +83,23 @@ CREATE TABLE IF NOT EXISTS journal_sync (
 
 /// Columns added after the first release; older databases are migrated.
 const MIGRATIONS: &[(&str, &str, &str)] = &[
-    ("state_snapshots", "global_revision", "INTEGER NOT NULL DEFAULT 0"),
-    ("state_patches", "global_current_rev", "INTEGER NOT NULL DEFAULT 0"),
-    ("state_patches", "global_future_rev", "INTEGER NOT NULL DEFAULT 0"),
+    (
+        "state_snapshots",
+        "global_revision",
+        "INTEGER NOT NULL DEFAULT 0",
+    ),
+    (
+        "state_patches",
+        "global_current_rev",
+        "INTEGER NOT NULL DEFAULT 0",
+    ),
+    (
+        "state_patches",
+        "global_future_rev",
+        "INTEGER NOT NULL DEFAULT 0",
+    ),
     ("journal", "step", "INTEGER"),
 ];
-
 
 /// A state's value at a revision.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -155,7 +166,12 @@ fn replay(anchor: Snapshot, patches: &[PatchEvent]) -> Snapshot {
     for event in patches {
         let op = event.patch["op"].as_str().unwrap_or_default();
         let path = event.patch["path"].as_str().unwrap_or_default();
-        apply_op(&mut data, op, path, event.patch.get("value").unwrap_or(&Value::Null));
+        apply_op(
+            &mut data,
+            op,
+            path,
+            event.patch.get("value").unwrap_or(&Value::Null),
+        );
     }
     match patches.last() {
         Some(last) => Snapshot {
@@ -187,7 +203,11 @@ fn patch_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<PatchEvent> {
         timepoint: iso_from_ms(row.get(3)?),
         correlation_id: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
         session_id: row.get(5)?,
-        patch: patch_document(&op, &path, value.and_then(|v| serde_json::from_str(&v).ok())),
+        patch: patch_document(
+            &op,
+            &path,
+            value.and_then(|v| serde_json::from_str(&v).ok()),
+        ),
     })
 }
 
@@ -229,7 +249,9 @@ impl HistoryStore {
                 names.iter().any(|name| name == column)
             };
             if !exists {
-                conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"))?;
+                conn.execute_batch(&format!(
+                    "ALTER TABLE {table} ADD COLUMN {column} {definition}"
+                ))?;
             }
         }
         Ok(Self {
@@ -287,7 +309,11 @@ impl HistoryStore {
         .await
     }
 
-    pub async fn task_boundaries(&self, correlation_id: &str, state_id: Option<&str>) -> anyhow::Result<Option<TaskBoundary>> {
+    pub async fn task_boundaries(
+        &self,
+        correlation_id: &str,
+        state_id: Option<&str>,
+    ) -> anyhow::Result<Option<TaskBoundary>> {
         let id = correlation_id.to_owned();
         Ok(self
             .boundaries("correlation_id", id.clone(), state_id.map(str::to_owned))
@@ -301,7 +327,11 @@ impl HistoryStore {
             }))
     }
 
-    pub async fn session_boundaries(&self, session_id: &str, state_id: Option<&str>) -> anyhow::Result<Option<SessionBoundary>> {
+    pub async fn session_boundaries(
+        &self,
+        session_id: &str,
+        state_id: Option<&str>,
+    ) -> anyhow::Result<Option<SessionBoundary>> {
         let id = session_id.to_owned();
         Ok(self
             .boundaries("session_id", id.clone(), state_id.map(str::to_owned))
@@ -325,7 +355,8 @@ impl HistoryStore {
     ) -> anyhow::Result<Vec<PatchEvent>> {
         let (state_id, session_id) = (state_id.map(str::to_owned), session_id.map(str::to_owned));
         self.with(move |conn| {
-            let mut sql = format!("SELECT {PATCH_COLUMNS} FROM state_patches WHERE global_current_rev >= ?");
+            let mut sql =
+                format!("SELECT {PATCH_COLUMNS} FROM state_patches WHERE global_current_rev >= ?");
             let mut args: Vec<rusqlite::types::Value> = vec![after.into()];
             if let Some(state) = state_id {
                 sql.push_str(" AND state_id = ?");
@@ -388,7 +419,9 @@ impl HistoryStore {
                 None => (format!("SELECT DISTINCT state_id FROM {table}"), vec![]),
             };
             let mut stmt = conn.prepare(&sql)?;
-            for id in stmt.query_map(rusqlite::params_from_iter(args), |row| row.get::<_, String>(0))? {
+            for id in stmt.query_map(rusqlite::params_from_iter(args), |row| {
+                row.get::<_, String>(0)
+            })? {
                 ids.insert(id?);
             }
         }
@@ -401,7 +434,11 @@ impl HistoryStore {
         state_id: &str,
         session_id: Option<&str>,
     ) -> rusqlite::Result<Option<Snapshot>> {
-        let session_filter = if session_id.is_some() { " AND session_id = ?3" } else { "" };
+        let session_filter = if session_id.is_some() {
+            " AND session_id = ?3"
+        } else {
+            ""
+        };
         let sql = format!(
             "SELECT global_revision, event_time, session_id, state_data FROM state_snapshots \
              WHERE state_id = ?1 AND global_revision <= ?2{session_filter} ORDER BY global_revision DESC LIMIT 1"
@@ -417,8 +454,12 @@ impl HistoryStore {
             })
         };
         let anchor = match session_id {
-            Some(session) => stmt.query_row(params![state_id, revision, session], map).optional()?,
-            None => stmt.query_row(params![state_id, revision], map).optional()?,
+            Some(session) => stmt
+                .query_row(params![state_id, revision, session], map)
+                .optional()?,
+            None => stmt
+                .query_row(params![state_id, revision], map)
+                .optional()?,
         };
         let Some(anchor) = anchor else {
             return Ok(None);
@@ -432,10 +473,16 @@ impl HistoryStore {
         let mut stmt = conn.prepare(&sql)?;
         let patches: Vec<PatchEvent> = match session_id {
             Some(session) => stmt
-                .query_map(params![state_id, anchor.global_revision, revision, session], patch_from_row)?
+                .query_map(
+                    params![state_id, anchor.global_revision, revision, session],
+                    patch_from_row,
+                )?
                 .collect::<rusqlite::Result<_>>()?,
             None => stmt
-                .query_map(params![state_id, anchor.global_revision, revision], patch_from_row)?
+                .query_map(
+                    params![state_id, anchor.global_revision, revision],
+                    patch_from_row,
+                )?
                 .collect::<rusqlite::Result<_>>()?,
         };
         Ok(Some(replay(anchor, &patches)))
@@ -451,11 +498,16 @@ impl HistoryStore {
         let (state_id, session_id) = (state_id.map(str::to_owned), session_id.map(str::to_owned));
         self.with(move |conn| {
             Ok(match state_id {
-                Some(state) => Self::state_at_revision(conn, revision, &state, session_id.as_deref())?.map(StateAt::Single),
+                Some(state) => {
+                    Self::state_at_revision(conn, revision, &state, session_id.as_deref())?
+                        .map(StateAt::Single)
+                }
                 None => {
                     let mut all = vec![];
                     for state in Self::state_ids(conn, session_id.as_deref())? {
-                        if let Some(snapshot) = Self::state_at_revision(conn, revision, &state, session_id.as_deref())? {
+                        if let Some(snapshot) =
+                            Self::state_at_revision(conn, revision, &state, session_id.as_deref())?
+                        {
                             all.push(snapshot);
                         }
                     }
@@ -536,8 +588,15 @@ impl Sink for HistoryStore {
         Ok(session_id)
     }
 
-    async fn dump_snapshot(&self, session_id: &str, global_rev: u64, snapshots: &Map<String, Value>) -> anyhow::Result<()> {
-        let session_id = self.session_or_current(Some(session_id)).unwrap_or_default();
+    async fn dump_snapshot(
+        &self,
+        session_id: &str,
+        global_rev: u64,
+        snapshots: &Map<String, Value>,
+    ) -> anyhow::Result<()> {
+        let session_id = self
+            .session_or_current(Some(session_id))
+            .unwrap_or_default();
         let rows: Vec<(String, String)> = snapshots
             .iter()
             .map(|(state, data)| (state.clone(), data.to_string()))
@@ -558,7 +617,9 @@ impl Sink for HistoryStore {
 
     async fn write_patch(&self, patch: &PublishedPatch) -> anyhow::Result<()> {
         let patch = patch.clone();
-        let session_id = self.session_or_current(Some(&patch.session_id)).unwrap_or_default();
+        let session_id = self
+            .session_or_current(Some(&patch.session_id))
+            .unwrap_or_default();
         self.with(move |conn| {
             conn.execute(
                 "INSERT INTO state_patches (state_id, global_current_rev, global_future_rev, event_time, \
@@ -589,7 +650,11 @@ impl Sink for HistoryStore {
                     params![session],
                     |row| row.get(0),
                 ),
-                None => conn.query_row("SELECT MAX(global_future_rev) FROM state_patches", [], |row| row.get(0)),
+                None => conn.query_row(
+                    "SELECT MAX(global_future_rev) FROM state_patches",
+                    [],
+                    |row| row.get(0),
+                ),
             })
             .await?;
         Ok(max.unwrap_or(0) >= global_rev as i64)
@@ -733,7 +798,11 @@ impl HistoryStore {
     }
 
     /// Journal entries of a session, in order.
-    pub async fn journal_entries(&self, session_id: &str, query: EntryQuery) -> anyhow::Result<Vec<JournalEntry>> {
+    pub async fn journal_entries(
+        &self,
+        session_id: &str,
+        query: EntryQuery,
+    ) -> anyhow::Result<Vec<JournalEntry>> {
         let session_id = session_id.to_owned();
         self.with(move |conn| {
             let mut args: Vec<rusqlite::types::Value> = vec![session_id.into(), (query.after as i64).into()];
@@ -779,8 +848,9 @@ impl HistoryStore {
     pub async fn journal_task_entries(&self, task_id: &str) -> anyhow::Result<Vec<JournalEntry>> {
         let task_id = task_id.to_owned();
         self.with(move |conn| {
-            let mut stmt =
-                conn.prepare(&format!("SELECT {JOURNAL_COLUMNS} FROM journal WHERE task_id = ? ORDER BY session_id, pos"))?;
+            let mut stmt = conn.prepare(&format!(
+                "SELECT {JOURNAL_COLUMNS} FROM journal WHERE task_id = ? ORDER BY session_id, pos"
+            ))?;
             let rows = stmt.query_map(params![task_id], entry_from_row)?;
             rows.collect()
         })
@@ -788,7 +858,11 @@ impl HistoryStore {
     }
 
     /// The last position of a session at or before `ms` (epoch milliseconds).
-    pub async fn journal_pos_at_time(&self, session_id: &str, ms: i64) -> anyhow::Result<Option<u64>> {
+    pub async fn journal_pos_at_time(
+        &self,
+        session_id: &str,
+        ms: i64,
+    ) -> anyhow::Result<Option<u64>> {
         let session_id = session_id.to_owned();
         self.with(move |conn| {
             conn.query_row(
@@ -805,9 +879,11 @@ impl HistoryStore {
     pub async fn journal_last_pos(&self, session_id: &str) -> anyhow::Result<Option<u64>> {
         let session_id = session_id.to_owned();
         self.with(move |conn| {
-            conn.query_row("SELECT MAX(pos) FROM journal WHERE session_id = ?", params![session_id], |row| {
-                row.get::<_, Option<i64>>(0)
-            })
+            conn.query_row(
+                "SELECT MAX(pos) FROM journal WHERE session_id = ?",
+                params![session_id],
+                |row| row.get::<_, Option<i64>>(0),
+            )
         })
         .await
         .map(|pos| pos.map(|p| p as u64))
@@ -815,7 +891,11 @@ impl HistoryStore {
 
     /// The entry at `pos` and the world as of it: states replayed from the
     /// last snapshot entry, tasks and locks folded from every entry before.
-    pub async fn journal_world(&self, session_id: &str, pos: u64) -> anyhow::Result<Option<(JournalEntry, Fold)>> {
+    pub async fn journal_world(
+        &self,
+        session_id: &str,
+        pos: u64,
+    ) -> anyhow::Result<Option<(JournalEntry, Fold)>> {
         let session_id = session_id.to_owned();
         self.with(move |conn| {
             let at = conn
@@ -853,7 +933,14 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn patch(session: &str, rev: u64, op: &str, path: &str, value: Value, task: &str) -> PublishedPatch {
+    fn patch(
+        session: &str,
+        rev: u64,
+        op: &str,
+        path: &str,
+        value: Value,
+        task: &str,
+    ) -> PublishedPatch {
         PublishedPatch {
             session_id: session.into(),
             global_rev: rev,
@@ -873,44 +960,80 @@ mod tests {
         let mut baseline = Map::new();
         baseline.insert("Camera".into(), json!({"exposure": 1, "tags": []}));
         store.dump_snapshot(&session, 0, &baseline).await.unwrap();
-        store.write_patch(&patch(&session, 1, "replace", "/exposure", json!(2), "t1")).await.unwrap();
-        store.write_patch(&patch(&session, 2, "add", "/tags/0", json!("a"), "t2")).await.unwrap();
-        store.write_patch(&patch(&session, 3, "remove", "/tags/0", Value::Null, "t2")).await.unwrap();
+        store
+            .write_patch(&patch(&session, 1, "replace", "/exposure", json!(2), "t1"))
+            .await
+            .unwrap();
+        store
+            .write_patch(&patch(&session, 2, "add", "/tags/0", json!("a"), "t2"))
+            .await
+            .unwrap();
+        store
+            .write_patch(&patch(&session, 3, "remove", "/tags/0", Value::Null, "t2"))
+            .await
+            .unwrap();
 
-        let Some(StateAt::Single(at2)) = store.state_at(2, Some("Camera"), Some(&session)).await.unwrap() else {
+        let Some(StateAt::Single(at2)) = store
+            .state_at(2, Some("Camera"), Some(&session))
+            .await
+            .unwrap()
+        else {
             panic!()
         };
         assert_eq!(at2.data, json!({"exposure": 2, "tags": ["a"]}));
         assert_eq!(at2.global_revision, 2);
         assert_eq!(at2.timepoint, "2023-11-14T22:13:22Z");
 
-        let Some(StateAt::Many(all)) = store.state_at(3, None, Some(&session)).await.unwrap() else {
+        let Some(StateAt::Many(all)) = store.state_at(3, None, Some(&session)).await.unwrap()
+        else {
             panic!()
         };
         assert_eq!(all[0].data, json!({"exposure": 2, "tags": []}));
 
         let between = store.between(0, 2, None, Some(&session)).await.unwrap();
         assert_eq!(between.len(), 2);
-        assert_eq!(between[1].patch, json!({"op": "add", "path": "/tags/0", "value": "a"}));
-        let forward = store.forward_events(2, None, Some(&session), 100).await.unwrap();
+        assert_eq!(
+            between[1].patch,
+            json!({"op": "add", "path": "/tags/0", "value": "a"})
+        );
+        let forward = store
+            .forward_events(2, None, Some(&session), 100)
+            .await
+            .unwrap();
         assert_eq!(forward.len(), 1, "after 2 is exactly the patch 2 -> 3");
         assert_eq!(forward[0].patch, json!({"op": "remove", "path": "/tags/0"}));
 
         let task = store.task_boundaries("t2", None).await.unwrap().unwrap();
-        assert_eq!((task.start_global_revision, task.end_global_revision), (1, 3));
+        assert_eq!(
+            (task.start_global_revision, task.end_global_revision),
+            (1, 3)
+        );
         assert!(store.task_boundaries("nope", None).await.unwrap().is_none());
-        let bounds = store.session_boundaries(&session, None).await.unwrap().unwrap();
-        assert_eq!((bounds.start_global_revision, bounds.end_global_revision), (0, 3));
+        let bounds = store
+            .session_boundaries(&session, None)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            (bounds.start_global_revision, bounds.end_global_revision),
+            (0, 3)
+        );
 
         assert!(store.is_caught_up_to(3).await.unwrap());
         assert!(!store.is_caught_up_to(4).await.unwrap());
-        let around = store.snapshots_around(1, None, Some(&session), 1, 1).await.unwrap();
+        let around = store
+            .snapshots_around(1, None, Some(&session), 1, 1)
+            .await
+            .unwrap();
         assert_eq!(around.len(), 1);
     }
 
     #[test]
     fn iso_format() {
-        assert_eq!(iso_from_ms(1_700_000_000_123), "2023-11-14T22:13:20.123000Z");
+        assert_eq!(
+            iso_from_ms(1_700_000_000_123),
+            "2023-11-14T22:13:20.123000Z"
+        );
         assert_eq!(iso_from_ms(1_700_000_000_000), "2023-11-14T22:13:20Z");
     }
 }

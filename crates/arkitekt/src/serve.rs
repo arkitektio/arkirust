@@ -17,11 +17,12 @@
 use tokio::net::ToSocketAddrs;
 
 pub use rekuest::journal::{Fold, Journal, JournalEntry, Watermark};
-pub use rekuest::serve::{
-    AuthHook, AuthRequest, EntryQuery, History, HistoryStore, LocalAgent, ServeOptions, SubscriptionInit, Unauthorized,
-};
 #[cfg(feature = "testing")]
 pub use rekuest::serve::testing::{AgentTestClient, AssignmentResult, Event};
+pub use rekuest::serve::{
+    AuthHook, AuthRequest, EntryQuery, History, HistoryStore, LocalAgent, ServeOptions,
+    SubscriptionInit, Unauthorized,
+};
 
 use crate::app::App;
 use crate::runtime::{ConnectOptions, Runtime};
@@ -36,7 +37,9 @@ pub struct Served {
 
 impl std::fmt::Debug for Served {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Served").field("runtime", &self.runtime).finish_non_exhaustive()
+        f.debug_struct("Served")
+            .field("runtime", &self.runtime)
+            .finish_non_exhaustive()
     }
 }
 
@@ -72,7 +75,11 @@ impl Served {
 ///
 /// Services are connected first (authenticating only if some service needs
 /// it), then startup hooks run and the session opens.
-pub async fn serve(app: App, router: axum::Router, options: ServeOptions) -> anyhow::Result<Served> {
+pub async fn serve(
+    app: App,
+    router: axum::Router,
+    options: ServeOptions,
+) -> anyhow::Result<Served> {
     serve_with(app, router, options, ConnectOptions::default()).await
 }
 
@@ -95,5 +102,9 @@ pub async fn serve_with(
         options,
     )?;
     agent.start().await?;
-    Ok(Served { router, agent, runtime })
+    Ok(Served {
+        router,
+        agent,
+        runtime,
+    })
 }

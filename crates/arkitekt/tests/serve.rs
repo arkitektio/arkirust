@@ -52,21 +52,48 @@ async fn serves_an_app_with_hooks() {
         .action(increment);
 
     let router = axum::Router::new().route("/health", get(|| async { "ok" }));
-    let served = serve(app, router, ServeOptions::default().history(History::Memory))
-        .await
-        .expect("an app without services serves without authenticating");
+    let served = serve(
+        app,
+        router,
+        ServeOptions::default().history(History::Memory),
+    )
+    .await
+    .expect("an app without services serves without authenticating");
     assert!(served.runtime.fakts().is_none());
     let (router, agent, _runtime) = served.into_parts();
 
     let mut client = AgentTestClient::serve(router, &agent).await.unwrap();
-    assert_eq!(client.init()["states"]["states"]["Counter"]["value"]["value"], 100);
-    let health = client.http().get(format!("{}/health", client.base_url())).send().await.unwrap();
+    assert_eq!(
+        client.init()["states"]["states"]["Counter"]["value"]["value"],
+        100
+    );
+    let health = client
+        .http()
+        .get(format!("{}/health", client.base_url()))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(health.text().await.unwrap(), "ok");
 
-    let task = client.assign("increment", json!({}), true).await.unwrap().task_id;
-    let events = client.collect_until_end_state(&task, Duration::from_secs(5)).await.unwrap();
+    let task = client
+        .assign("increment", json!({}), true)
+        .await
+        .unwrap()
+        .task_id;
+    let events = client
+        .collect_until_end_state(&task, Duration::from_secs(5))
+        .await
+        .unwrap();
     assert!(events.last().unwrap().is_done(), "{events:?}");
-    assert_eq!(events.iter().find(|e| e.is_yield()).unwrap().returns().unwrap()["return0"], 105);
+    assert_eq!(
+        events
+            .iter()
+            .find(|e| e.is_yield())
+            .unwrap()
+            .returns()
+            .unwrap()["return0"],
+        105
+    );
 
     let state = client.get("/states/Counter").await.unwrap();
     assert_eq!(state, json!({ "revision": 1, "state": { "value": 105 } }));

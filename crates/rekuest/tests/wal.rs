@@ -88,13 +88,22 @@ async fn connect(db: &std::path::Path) -> (Arc<Agent>, Ws) {
     let mut options = AgentOptions::new(format!("ws://{}/agi", listener.local_addr().unwrap()));
     options.name = Some("wal:1".into());
     options.journal_path = Some(db.to_owned());
-    let agent = Arc::new(Agent::new(options, registry(), Context::default(), Arc::new(StaticToken)));
+    let agent = Arc::new(Agent::new(
+        options,
+        registry(),
+        Context::default(),
+        Arc::new(StaticToken),
+    ));
     let runner = agent.clone();
     tokio::spawn(async move { runner.run().await });
     let (stream, _) = listener.accept().await.unwrap();
     let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
     assert_eq!(recv(&mut ws).await["type"], "REGISTER");
-    send(&mut ws, json!({"type": "INIT", "agent": "a1", "journal": true})).await;
+    send(
+        &mut ws,
+        json!({"type": "INIT", "agent": "a1", "journal": true}),
+    )
+    .await;
     (agent, ws)
 }
 
@@ -103,7 +112,11 @@ async fn until_end(ws: &mut Ws, task: &str) -> Vec<Value> {
     let mut frames = vec![];
     loop {
         let frame = recv(ws).await;
-        let done = frame["task"] == task && matches!(frame["type"].as_str(), Some("COMPLETED" | "FAILED" | "CRITICAL"));
+        let done = frame["task"] == task
+            && matches!(
+                frame["type"].as_str(),
+                Some("COMPLETED" | "FAILED" | "CRITICAL")
+            );
         frames.push(frame);
         if done {
             return frames;
@@ -124,10 +137,22 @@ async fn unacknowledged_entries_survive_a_restart() {
     send(&mut ws, assign("t1", "stamp")).await;
     let frames = until_end(&mut ws, "t1").await;
     let kinds: Vec<&str> = frames.iter().map(|f| f["type"].as_str().unwrap()).collect();
-    assert_eq!(kinds, ["ASSIGN", "PROGRESS", "NOW", "RANDOM", "YIELD", "COMPLETED"]);
-    assert!(frames[0].get("token").is_none(), "the echo carries no token");
-    assert_eq!(frames[2]["effect_id"], "t1:3", "effects are addressed by task and step");
-    let steps: Vec<u64> = frames.iter().map(|f| f["task_step"].as_u64().unwrap()).collect();
+    assert_eq!(
+        kinds,
+        ["ASSIGN", "PROGRESS", "NOW", "RANDOM", "YIELD", "COMPLETED"]
+    );
+    assert!(
+        frames[0].get("token").is_none(),
+        "the echo carries no token"
+    );
+    assert_eq!(
+        frames[2]["effect_id"], "t1:3",
+        "effects are addressed by task and step"
+    );
+    let steps: Vec<u64> = frames
+        .iter()
+        .map(|f| f["task_step"].as_u64().unwrap())
+        .collect();
     assert_eq!(steps, [1, 2, 3, 4, 5, 6]);
     let sent_positions: Vec<u64> = std::iter::once(&session_init)
         .chain(&frames)
@@ -157,7 +182,11 @@ async fn unacknowledged_entries_survive_a_restart() {
 
     let (_third, mut ws) = connect(&db).await;
     let frame = recv(&mut ws).await;
-    assert_ne!(frame["journal_session"], first_session.as_str(), "acknowledged entries are not re-sent");
+    assert_ne!(
+        frame["journal_session"],
+        first_session.as_str(),
+        "acknowledged entries are not re-sent"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -167,17 +196,26 @@ async fn a_shelved_value_is_announced_before_it_is_referenced() {
     assert_eq!(recv(&mut ws).await["type"], "SESSION_INIT");
     send(&mut ws, assign("t1", "capture")).await;
     let frames = until_end(&mut ws, "t1").await;
-    let shelve = frames.iter().position(|f| f["type"] == "SHELVE").expect("a SHELVE");
+    let shelve = frames
+        .iter()
+        .position(|f| f["type"] == "SHELVE")
+        .expect("a SHELVE");
     let yielded = frames.iter().position(|f| f["type"] == "YIELD").unwrap();
     assert!(shelve < yielded);
     let id = frames[shelve]["resource_id"].as_str().unwrap().to_owned();
     assert_eq!(frames[shelve]["ref"], id.as_str());
-    assert_eq!(frames[yielded]["returns"]["return0"], json!({"__identifier": "@test/frame", "object": id}));
+    assert_eq!(
+        frames[yielded]["returns"]["return0"],
+        json!({"__identifier": "@test/frame", "object": id})
+    );
     assert_eq!(agent.executor().shelf().len(), 1);
 
     // The server collects it: dropped, and UNSHELVE is recorded.
     send(&mut ws, json!({"type": "COLLECT", "drawers": [id]})).await;
     let unshelve = recv(&mut ws).await;
-    assert_eq!((unshelve["type"].as_str(), unshelve["drawer"].as_str()), (Some("UNSHELVE"), Some(id.as_str())));
+    assert_eq!(
+        (unshelve["type"].as_str(), unshelve["drawer"].as_str()),
+        (Some("UNSHELVE"), Some(id.as_str()))
+    );
     assert!(agent.executor().shelf().is_empty());
 }

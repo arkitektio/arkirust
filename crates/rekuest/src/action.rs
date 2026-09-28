@@ -98,8 +98,18 @@ pub struct Registry {
 impl std::fmt::Debug for Registry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Registry")
-            .field("actions", &self.actions.iter().map(|a| a.interface()).collect::<Vec<_>>())
-            .field("states", &self.states.iter().map(|s| &s.name).collect::<Vec<_>>())
+            .field(
+                "actions",
+                &self
+                    .actions
+                    .iter()
+                    .map(|a| a.interface())
+                    .collect::<Vec<_>>(),
+            )
+            .field(
+                "states",
+                &self.states.iter().map(|s| &s.name).collect::<Vec<_>>(),
+            )
             .field("hooks", &self.hooks)
             .finish()
     }
@@ -163,7 +173,10 @@ impl Registry {
     }
 
     pub fn get(&self, interface: &str) -> Option<Arc<dyn Action>> {
-        self.actions.iter().find(|a| a.interface() == interface).cloned()
+        self.actions
+            .iter()
+            .find(|a| a.interface() == interface)
+            .cloned()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -204,7 +217,11 @@ impl Registry {
     }
 
     /// The declaration sent in `REGISTER`.
-    pub fn declaration(&self, name: Option<String>, description: Option<String>) -> AgentDeclaration {
+    pub fn declaration(
+        &self,
+        name: Option<String>,
+        description: Option<String>,
+    ) -> AgentDeclaration {
         let mut declaration = AgentDeclaration {
             name,
             description,

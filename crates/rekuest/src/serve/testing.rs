@@ -17,7 +17,8 @@ use tokio_tungstenite::tungstenite::Message;
 
 use super::LocalAgent;
 
-type Ws = tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+type Ws =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
 /// One websocket frame.
 #[derive(Debug, Clone, PartialEq)]
@@ -39,7 +40,10 @@ impl Event {
     }
 
     pub fn is_end_state(&self) -> bool {
-        matches!(self.event_type(), "COMPLETED" | "FAILED" | "CRITICAL" | "CANCELLED" | "INTERRUPTED")
+        matches!(
+            self.event_type(),
+            "COMPLETED" | "FAILED" | "CRITICAL" | "CANCELLED" | "INTERRUPTED"
+        )
     }
 
     pub fn is_yield(&self) -> bool {
@@ -82,7 +86,9 @@ pub struct AgentTestClient {
 
 impl std::fmt::Debug for AgentTestClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AgentTestClient").field("base_url", &self.base_url).finish()
+        f.debug_struct("AgentTestClient")
+            .field("base_url", &self.base_url)
+            .finish()
     }
 }
 
@@ -99,7 +105,11 @@ impl AgentTestClient {
     }
 
     /// Connect to an app served at `base_url`, subscribing to everything.
-    pub async fn connect(base_url: &str, ws_path: &str, token: Option<&str>) -> anyhow::Result<Self> {
+    pub async fn connect(
+        base_url: &str,
+        ws_path: &str,
+        token: Option<&str>,
+    ) -> anyhow::Result<Self> {
         let base_url = base_url.trim_end_matches('/').to_owned();
         let ws_url = format!("{}{ws_path}", base_url.replacen("http", "ws", 1));
         let (mut ws, _) = tokio_tungstenite::connect_async(&ws_url).await?;
@@ -136,7 +146,13 @@ impl AgentTestClient {
     }
 
     pub async fn get(&self, path: &str) -> anyhow::Result<Value> {
-        Ok(self.http.get(format!("{}{path}", self.base_url)).send().await?.json().await?)
+        Ok(self
+            .http
+            .get(format!("{}{path}", self.base_url))
+            .send()
+            .await?
+            .json()
+            .await?)
     }
 
     pub async fn post(&self, path: &str, body: Value) -> anyhow::Result<Value> {
@@ -152,7 +168,12 @@ impl AgentTestClient {
 
     /// Start a task through the action's own route (`POST /{interface}`) or
     /// through `POST /assign/{interface}`.
-    pub async fn assign(&self, interface: &str, args: Value, use_implementation_route: bool) -> anyhow::Result<AssignmentResult> {
+    pub async fn assign(
+        &self,
+        interface: &str,
+        args: Value,
+        use_implementation_route: bool,
+    ) -> anyhow::Result<AssignmentResult> {
         let path = if use_implementation_route {
             format!("/{interface}")
         } else {
@@ -164,10 +185,18 @@ impl AgentTestClient {
             .json(&json!({ "args": args, "interface": interface }))
             .send()
             .await?;
-        anyhow::ensure!(response.status().is_success(), "assign failed: HTTP {}", response.status());
+        anyhow::ensure!(
+            response.status().is_success(),
+            "assign failed: HTTP {}",
+            response.status()
+        );
         let body: Value = response.json().await?;
         // The action route answers `task_id`, `/assign` answers `task`.
-        let task_id = body["task_id"].as_str().or(body["task"].as_str()).unwrap_or_default().to_owned();
+        let task_id = body["task_id"]
+            .as_str()
+            .or(body["task"].as_str())
+            .unwrap_or_default()
+            .to_owned();
         Ok(AssignmentResult {
             status: body["status"].as_str().unwrap_or_default().to_owned(),
             task_id,
@@ -189,7 +218,11 @@ impl AgentTestClient {
     }
 
     /// Frames of `task` up to and including its end.
-    pub async fn collect_until_end_state(&mut self, task: &str, timeout: Duration) -> anyhow::Result<Vec<Event>> {
+    pub async fn collect_until_end_state(
+        &mut self,
+        task: &str,
+        timeout: Duration,
+    ) -> anyhow::Result<Vec<Event>> {
         let deadline = tokio::time::Instant::now() + timeout;
         let mut events = vec![];
         loop {
@@ -258,9 +291,20 @@ mod tests {
         assert_eq!(client.init()["type"], "INIT");
 
         for use_route in [true, false] {
-            let task = client.assign("double", json!({"x": 21}), use_route).await.unwrap().task_id;
-            let events = client.collect_until_end_state(&task, Duration::from_secs(5)).await.unwrap();
-            let returns = events.iter().find(|e| e.is_yield()).and_then(|e| e.returns()).unwrap();
+            let task = client
+                .assign("double", json!({"x": 21}), use_route)
+                .await
+                .unwrap()
+                .task_id;
+            let events = client
+                .collect_until_end_state(&task, Duration::from_secs(5))
+                .await
+                .unwrap();
+            let returns = events
+                .iter()
+                .find(|e| e.is_yield())
+                .and_then(|e| e.returns())
+                .unwrap();
             assert_eq!(returns["return0"], 42);
             assert!(events.last().unwrap().is_done());
         }

@@ -33,12 +33,22 @@ fn requirements_from_parameters() {
         ]
     );
     assert_eq!(plain.name(), "plain");
-    assert_eq!(plain.requirements(), vec![Requirement::new("endpoint", "live.arkitekt.plain")]);
+    assert_eq!(
+        plain.requirements(),
+        vec![Requirement::new("endpoint", "live.arkitekt.plain")]
+    );
 }
 
 #[test]
 fn manifest_collects_service_requirements() {
-    let manifest = App::new("app", "0.1.0").service(thing).service(plain).manifest(None);
-    let keys: Vec<_> = manifest.requirements.iter().map(|r| r.key.as_str()).collect();
+    let manifest = App::new("app", "0.1.0")
+        .service(thing)
+        .service(plain)
+        .manifest(None);
+    let keys: Vec<_> = manifest
+        .requirements
+        .iter()
+        .map(|r| r.key.as_str())
+        .collect();
     assert_eq!(keys, ["api", "files", "endpoint"]);
 }

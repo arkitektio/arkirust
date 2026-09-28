@@ -130,7 +130,12 @@ impl std::fmt::Debug for Executor {
 }
 
 impl Executor {
-    pub fn new(registry: Registry, ctx: Context, emitter: Arc<dyn Emitter>, sink: Option<Arc<dyn Sink>>) -> Self {
+    pub fn new(
+        registry: Registry,
+        ctx: Context,
+        emitter: Arc<dyn Emitter>,
+        sink: Option<Arc<dyn Sink>>,
+    ) -> Self {
         Self::with_session(registry, ctx, emitter, sink, None)
     }
 
@@ -235,7 +240,9 @@ impl Executor {
         for hook in &inner.registry.hooks().startup {
             tokio::time::timeout(HOOK_TIMEOUT, hook(startup.clone()))
                 .await
-                .map_err(|_| anyhow::anyhow!("a startup hook took longer than {HOOK_TIMEOUT:?}"))??;
+                .map_err(|_| {
+                    anyhow::anyhow!("a startup hook took longer than {HOOK_TIMEOUT:?}")
+                })??;
         }
         let edits = std::mem::take(&mut *startup.contexts.lock().expect("context edits"));
         if !edits.is_empty() {
@@ -273,7 +280,13 @@ impl Executor {
     /// Stop: cancel background hooks, run shutdown hooks (in reverse order),
     /// then wait (bounded) until state changes are published and persisted.
     pub async fn teardown(&self) {
-        for handle in self.inner.background.lock().expect("background lock").drain(..) {
+        for handle in self
+            .inner
+            .background
+            .lock()
+            .expect("background lock")
+            .drain(..)
+        {
             handle.abort();
         }
         if self.is_activated() {
@@ -304,7 +317,10 @@ impl Executor {
                     }
                 }
             };
-            if tokio::time::timeout(FLUSH_TIMEOUT, caught_up).await.is_err() {
+            if tokio::time::timeout(FLUSH_TIMEOUT, caught_up)
+                .await
+                .is_err()
+            {
                 tracing::warn!("the state sink did not catch up within {FLUSH_TIMEOUT:?}");
             }
         }
@@ -315,11 +331,21 @@ impl Executor {
     }
 
     pub fn is_running(&self, task: &str) -> bool {
-        self.inner.tasks.lock().expect("tasks lock").managed.contains_key(task)
+        self.inner
+            .tasks
+            .lock()
+            .expect("tasks lock")
+            .managed
+            .contains_key(task)
     }
 
     pub fn has_finished(&self, task: &str) -> bool {
-        self.inner.tasks.lock().expect("tasks lock").finished_set.contains(task)
+        self.inner
+            .tasks
+            .lock()
+            .expect("tasks lock")
+            .finished_set
+            .contains(task)
     }
 
     /// Start running an assignment.
@@ -335,7 +361,10 @@ impl Executor {
             self.emit(
                 FromAgent::Critical {
                     task: task_id,
-                    error: format!("this agent has no action with interface '{}'", assign.interface),
+                    error: format!(
+                        "this agent has no action with interface '{}'",
+                        assign.interface
+                    ),
                 },
                 None,
             );
@@ -343,7 +372,11 @@ impl Executor {
         };
 
         let key = action_key(&assign);
-        let actor_id = inner.actor_ids.get(&assign.interface).cloned().unwrap_or_default();
+        let actor_id = inner
+            .actor_ids
+            .get(&assign.interface)
+            .cloned()
+            .unwrap_or_default();
         let brk = Arc::new(Break::default());
         if assign.step == Some(true) {
             brk.arm();
@@ -391,7 +424,10 @@ impl Executor {
                 Some(serial) => Some(serial.lock_owned().await),
                 None => None,
             };
-            let held = inner.locks.acquire(&locks, &id, inner.emitter.clone()).await;
+            let held = inner
+                .locks
+                .acquire(&locks, &id, inner.emitter.clone())
+                .await;
 
             let body = rath::with_task_token(
                 assign.token.clone(),
@@ -399,8 +435,14 @@ impl Executor {
             );
             let event = match AssertUnwindSafe(body).catch_unwind().await {
                 Ok(Ok(())) => FromAgent::Completed { task: id.clone() },
-                Ok(Err(ActionError::Failed(error))) => FromAgent::Failed { task: id.clone(), error },
-                Ok(Err(ActionError::Critical(error))) => FromAgent::Critical { task: id.clone(), error },
+                Ok(Err(ActionError::Failed(error))) => FromAgent::Failed {
+                    task: id.clone(),
+                    error,
+                },
+                Ok(Err(ActionError::Critical(error))) => FromAgent::Critical {
+                    task: id.clone(),
+                    error,
+                },
                 Err(panic) => FromAgent::Critical {
                     task: id.clone(),
                     error: format!("the action panicked: {}", panic_message(&panic)),
@@ -492,7 +534,8 @@ impl Executor {
         self.emit(
             FromAgent::Critical {
                 task: task.to_owned(),
-                error: "Actors is no longer running and not managed. Probablry there was a restart".into(),
+                error: "Actors is no longer running and not managed. Probablry there was a restart"
+                    .into(),
             },
             None,
         );

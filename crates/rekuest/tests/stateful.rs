@@ -28,10 +28,15 @@ fn normalize(value: Value) -> Value {
 
 #[test]
 fn declaration_matches_python() {
-    let python: Value = serde_json::from_str(include_str!("fixtures/python_state_declaration.json")).unwrap();
-    let rust = serde_json::to_value(twin::registry().declaration(Some("twin:0.1.0".into()), None)).unwrap();
+    let python: Value =
+        serde_json::from_str(include_str!("fixtures/python_state_declaration.json")).unwrap();
+    let rust = serde_json::to_value(twin::registry().declaration(Some("twin:0.1.0".into()), None))
+        .unwrap();
 
-    assert_eq!(normalize(rust["states"].clone()), normalize(python["states"].clone()));
+    assert_eq!(
+        normalize(rust["states"].clone()),
+        normalize(python["states"].clone())
+    );
     assert_eq!(rust["locks"], python["locks"]);
 
     let by_interface = |v: &Value| -> Vec<(String, Value)> {
@@ -39,7 +44,12 @@ fn declaration_matches_python() {
             .as_array()
             .unwrap()
             .iter()
-            .map(|i| (i["interface"].as_str().unwrap().to_owned(), normalize(i.clone())))
+            .map(|i| {
+                (
+                    i["interface"].as_str().unwrap().to_owned(),
+                    normalize(i.clone()),
+                )
+            })
             .collect()
     };
     let (python, rust) = (by_interface(&python), by_interface(&rust));
@@ -52,7 +62,11 @@ fn declaration_matches_python() {
             assert_eq!(p.get(field), r.get(field), "{pi}.{field}");
         }
         for field in ["stateful", "kind", "args", "returns", "key", "name"] {
-            assert_eq!(p["definition"].get(field), r["definition"].get(field), "{pi}.definition.{field}");
+            assert_eq!(
+                p["definition"].get(field),
+                r["definition"].get(field),
+                "{pi}.definition.{field}"
+            );
         }
     }
 }
@@ -141,31 +155,63 @@ async fn states_locks_and_pauses_over_the_socket() {
     let init = recv(&mut ws).await;
     assert_eq!(init["type"], "SESSION_INIT");
     assert_eq!(init["states"]["CameraState"]["connected"], true);
-    assert!(init.get("seq").is_none(), "SESSION_INIT is not a task event");
-    assert_eq!(init["session_id"], register["session_id"], "states are published under the registered session");
+    assert!(
+        init.get("seq").is_none(),
+        "SESSION_INIT is not a task event"
+    );
+    assert_eq!(
+        init["session_id"], register["session_id"],
+        "states are published under the registered session"
+    );
 
     // A stateful action: LOCK, STATE_PATCH, YIELD, COMPLETED, then UNLOCK.
-    send(&mut ws, assign("t1", "set_exposure", json!({"exposure_ms": 20.0}), false)).await;
+    send(
+        &mut ws,
+        assign("t1", "set_exposure", json!({"exposure_ms": 20.0}), false),
+    )
+    .await;
     let frames = frames_until(&mut ws, "UNLOCK").await;
-    assert_eq!(kinds(&frames), ["LOCK", "STATE_PATCH", "YIELD", "COMPLETED", "UNLOCK"]);
+    assert_eq!(
+        kinds(&frames),
+        ["LOCK", "STATE_PATCH", "YIELD", "COMPLETED", "UNLOCK"]
+    );
     let patch = &frames[1];
     assert_eq!(
-        (&patch["op"], &patch["path"], &patch["value"], &patch["global_rev"], &patch["task_id"]),
-        (&json!("replace"), &json!("/exposure_ms"), &json!(20.0), &json!(1), &json!("t1"))
+        (
+            &patch["op"],
+            &patch["path"],
+            &patch["value"],
+            &patch["global_rev"],
+            &patch["task_id"]
+        ),
+        (
+            &json!("replace"),
+            &json!("/exposure_ms"),
+            &json!(20.0),
+            &json!(1),
+            &json!("t1")
+        )
     );
     assert!(patch["old_value"].is_null());
     assert_eq!(patch["session_id"], init["session_id"]);
 
     send(&mut ws, assign("t2", "add_tag", json!({"tag": "a"}), false)).await;
     let frames = frames_until(&mut ws, "UNLOCK").await;
-    assert_eq!((&frames[1]["op"], &frames[1]["path"]), (&json!("add"), &json!("/tags/0")));
+    assert_eq!(
+        (&frames[1]["op"], &frames[1]["path"]),
+        (&json!("add"), &json!("/tags/0"))
+    );
     assert_eq!(frames[1]["global_rev"], 2);
 
     // Stepping: PAUSED at the first pausepoint, RESUMED on resume.
     send(&mut ws, assign("t3", "pausable", json!({}), true)).await;
     let paused = frames_until(&mut ws, "PAUSED").await;
     assert_eq!(kinds(&paused), ["PAUSED"]);
-    send(&mut ws, json!({"type": "RESUME", "id": "r", "task": "t3", "step": false})).await;
+    send(
+        &mut ws,
+        json!({"type": "RESUME", "id": "r", "task": "t3", "step": false}),
+    )
+    .await;
     let frames = frames_until(&mut ws, "COMPLETED").await;
     assert_eq!(kinds(&frames), ["RESUMED", "YIELD", "COMPLETED"]);
 

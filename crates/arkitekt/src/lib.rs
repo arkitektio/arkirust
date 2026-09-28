@@ -40,9 +40,9 @@ mod service;
 
 pub use crate::app::{connect, easy, run, App};
 pub use crate::runtime::{device_id, ConnectOptions, Runtime, DEFAULT_ARKITEKT_URL};
-pub use crate::service::Service;
 #[cfg(feature = "serve")]
 pub use crate::serve::{serve, serve_with, ServeOptions, Served};
+pub use crate::service::Service;
 
 pub use fakts;
 pub use rath;
@@ -50,11 +50,11 @@ pub use rekuest;
 
 pub use async_trait::async_trait;
 pub use fakts::{Alias, Fakts, Requirement};
-pub use rekuest_macros::service;
 pub use rekuest::{
-    action, widgets, Background, Context, ContextBuilder, LogLevel, PortType, Shutdown, Startup, State, StateMut,
-    StateRef, StateType, Structure, Task,
+    action, widgets, Background, Context, ContextBuilder, LogLevel, PortType, Shutdown, Startup,
+    State, StateMut, StateRef, StateType, Structure, Task,
 };
+pub use rekuest_macros::service;
 
 /// Re-exports for generated code. Not a public API.
 #[doc(hidden)]

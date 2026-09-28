@@ -45,7 +45,10 @@ async fn start_proxy() -> (String, Arc<AtomicUsize>) {
                 let authority = text.split_whitespace().nth(1).unwrap();
                 let port: u16 = authority.rsplit(':').next().unwrap().parse().unwrap();
                 let mut upstream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
-                client.write_all(b"HTTP/1.1 200 Connection established\r\n\r\n").await.unwrap();
+                client
+                    .write_all(b"HTTP/1.1 200 Connection established\r\n\r\n")
+                    .await
+                    .unwrap();
                 let _ = tokio::io::copy_bidirectional(&mut client, &mut upstream).await;
             });
         }
@@ -77,8 +80,13 @@ async fn refused_connect_is_an_error() {
         while !head.ends_with(b"\r\n\r\n") {
             head.push(client.read_u8().await.unwrap());
         }
-        client.write_all(b"HTTP/1.1 403 Forbidden\r\n\r\n").await.unwrap();
+        client
+            .write_all(b"HTTP/1.1 403 Forbidden\r\n\r\n")
+            .await
+            .unwrap();
     });
-    let err = connect_ws("ws://meshhub.test:80/agi", Some(&proxy)).await.unwrap_err();
+    let err = connect_ws("ws://meshhub.test:80/agi", Some(&proxy))
+        .await
+        .unwrap_err();
     assert!(err.to_string().contains("403"), "{err}");
 }

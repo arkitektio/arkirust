@@ -120,7 +120,10 @@ impl Rath {
         fakts::install_crypto_provider();
         let http = alias
             .http_client_builder()
-            .and_then(|b| b.user_agent(concat!("rath-rs/", env!("CARGO_PKG_VERSION"))).build())
+            .and_then(|b| {
+                b.user_agent(concat!("rath-rs/", env!("CARGO_PKG_VERSION")))
+                    .build()
+            })
             .map_err(fakts::FaktsError::from)?;
         Ok(Self::new(alias.to_http_path(append), token_loader).with_http_client(http))
     }

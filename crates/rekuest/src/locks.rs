@@ -56,8 +56,16 @@ impl LockTable {
     }
 
     /// Take `keys` (sorted, unknown keys skipped) for `task`, waiting as needed.
-    pub(crate) async fn acquire(&self, keys: &[String], task: &str, emitter: Arc<dyn Emitter>) -> HeldLocks {
-        let mut keys: Vec<&String> = keys.iter().filter(|k| self.slots.contains_key(*k)).collect();
+    pub(crate) async fn acquire(
+        &self,
+        keys: &[String],
+        task: &str,
+        emitter: Arc<dyn Emitter>,
+    ) -> HeldLocks {
+        let mut keys: Vec<&String> = keys
+            .iter()
+            .filter(|k| self.slots.contains_key(*k))
+            .collect();
         keys.sort();
         keys.dedup();
         let mut held = HeldLocks {
@@ -133,10 +141,15 @@ mod tests {
         let table = Arc::new(LockTable::new(["a".to_owned(), "b".to_owned()]));
         let mut handles = vec![];
         for round in 0..25 {
-            for keys in [vec!["a".to_owned(), "b".to_owned()], vec!["b".to_owned(), "a".to_owned()]] {
+            for keys in [
+                vec!["a".to_owned(), "b".to_owned()],
+                vec!["b".to_owned(), "a".to_owned()],
+            ] {
                 let table = table.clone();
                 handles.push(tokio::spawn(async move {
-                    let held = table.acquire(&keys, &format!("t{round}"), Arc::new(NullEmitter)).await;
+                    let held = table
+                        .acquire(&keys, &format!("t{round}"), Arc::new(NullEmitter))
+                        .await;
                     tokio::task::yield_now().await;
                     drop(held);
                 }));
@@ -154,7 +167,13 @@ mod tests {
     #[tokio::test]
     async fn unknown_keys_are_skipped() {
         let table = LockTable::new(["a".to_owned()]);
-        let held = table.acquire(&["zzz".to_owned(), "a".to_owned()], "t", Arc::new(NullEmitter)).await;
+        let held = table
+            .acquire(
+                &["zzz".to_owned(), "a".to_owned()],
+                "t",
+                Arc::new(NullEmitter),
+            )
+            .await;
         assert_eq!(table.views(None)["a"].task_id.as_deref(), Some("t"));
         drop(held);
         assert_eq!(table.views(None)["a"].task_id, None);

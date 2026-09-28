@@ -115,9 +115,13 @@ fn string_list(array: ExprArray, what: &str) -> syn::Result<Vec<LitStr>> {
         .into_iter()
         .map(|elem| match elem {
             Expr::Lit(syn::ExprLit {
-                lit: syn::Lit::Str(s), ..
+                lit: syn::Lit::Str(s),
+                ..
             }) => Ok(s),
-            other => Err(syn::Error::new(other.span(), format!("{what} must be string literals"))),
+            other => Err(syn::Error::new(
+                other.span(),
+                format!("{what} must be string literals"),
+            )),
         })
         .collect()
 }
@@ -154,7 +158,12 @@ impl ActionOptions {
             self.parallel = match value.value().as_str() {
                 "serial" => false,
                 "parallel" => true,
-                _ => return Err(syn::Error::new(value.span(), "concurrency is \"serial\" or \"parallel\"")),
+                _ => {
+                    return Err(syn::Error::new(
+                        value.span(),
+                        "concurrency is \"serial\" or \"parallel\"",
+                    ))
+                }
             };
         } else if meta.path.is_ident("auto_locks") {
             let value: syn::LitBool = meta.value()?.parse()?;
@@ -288,7 +297,10 @@ enum ParamKind {
     Inject,
     Task,
     /// `StateMut<T>` (write) or `StateRef<T>` (read-only).
-    State { state: Type, write: bool },
+    State {
+        state: Type,
+        write: bool,
+    },
 }
 
 struct Param {
@@ -329,7 +341,9 @@ fn state_param(ty: &Type) -> Option<(Type, bool)> {
         "StateRef" => false,
         _ => return None,
     };
-    generic_types(segment).first().map(|t| ((*t).clone(), write))
+    generic_types(segment)
+        .first()
+        .map(|t| ((*t).clone(), write))
 }
 
 /// `Result<T, ..>` → `Some(T)`.
@@ -691,7 +705,11 @@ fn expand_action(options: ActionOptions, mut function: ItemFn) -> syn::Result<To
         })
         .collect();
     let stateful = !state_params.is_empty();
-    let written_states: Vec<&Type> = state_params.iter().filter(|(_, w)| *w).map(|(t, _)| *t).collect();
+    let written_states: Vec<&Type> = state_params
+        .iter()
+        .filter(|(_, w)| *w)
+        .map(|(t, _)| *t)
+        .collect();
     // As in Python, locks are inferred from every state an action takes, read-only or not.
     let lock_states: Vec<&Type> = if options.auto_locks {
         state_params.iter().map(|(t, _)| *t).collect()
@@ -841,14 +859,23 @@ fn expand_state(input: syn::DeriveInput) -> syn::Result<TokenStream2> {
             Ok(())
         })?;
     }
-    let rk = krate.as_ref().map(|p| quote!(#p)).unwrap_or_else(rekuest_path);
+    let rk = krate
+        .as_ref()
+        .map(|p| quote!(#p))
+        .unwrap_or_else(rekuest_path);
     let p = quote!(#rk::__private);
 
     let syn::Data::Struct(data) = &input.data else {
-        return Err(syn::Error::new(ident.span(), "a state must be a struct with named fields"));
+        return Err(syn::Error::new(
+            ident.span(),
+            "a state must be a struct with named fields",
+        ));
     };
     let syn::Fields::Named(fields) = &data.fields else {
-        return Err(syn::Error::new(ident.span(), "a state must be a struct with named fields"));
+        return Err(syn::Error::new(
+            ident.span(),
+            "a state must be a struct with named fields",
+        ));
     };
 
     let ports = fields.named.iter().map(|field| {

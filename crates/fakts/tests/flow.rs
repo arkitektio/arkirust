@@ -29,7 +29,8 @@ fn token_response(server: &MockServer, access: &str, refresh: &str) -> serde_jso
     });
     // Only the first (device code) token carries the mesh key.
     if refresh == "refresh-1" {
-        response["mesh"] = json!({"ionscale_auth_key": "mesh-key", "ionscale_coord_url": "https://mesh.test"});
+        response["mesh"] =
+            json!({"ionscale_auth_key": "mesh-key", "ionscale_coord_url": "https://mesh.test"});
     }
     response
 }
@@ -208,7 +209,11 @@ async fn device_code_refresh_and_cache() {
     assert!(active.mesh.is_some());
     let me = active.self_.unwrap();
     assert_eq!(
-        (me.sub.as_deref(), me.organization.as_deref(), me.hub.as_deref()),
+        (
+            me.sub.as_deref(),
+            me.organization.as_deref(),
+            me.hub.as_deref()
+        ),
         (Some("12"), Some("3"), Some("7"))
     );
 

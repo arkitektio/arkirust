@@ -316,16 +316,19 @@ impl FromAgent {
     pub fn is_journal_only(&self) -> bool {
         matches!(
             self,
-            FromAgent::Assign(_) | FromAgent::Now { .. } | FromAgent::Random { .. } | FromAgent::Sleep { .. }
+            FromAgent::Assign(_)
+                | FromAgent::Now { .. }
+                | FromAgent::Random { .. }
+                | FromAgent::Sleep { .. }
         )
     }
 
     /// Effects: their `effect_id` is `{task}:{step}`.
     pub fn effect_id_mut(&mut self) -> Option<&mut String> {
         match self {
-            FromAgent::Now { effect_id, .. } | FromAgent::Random { effect_id, .. } | FromAgent::Sleep { effect_id, .. } => {
-                Some(effect_id)
-            }
+            FromAgent::Now { effect_id, .. }
+            | FromAgent::Random { effect_id, .. }
+            | FromAgent::Sleep { effect_id, .. } => Some(effect_id),
             _ => None,
         }
     }

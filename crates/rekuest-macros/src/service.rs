@@ -65,14 +65,21 @@ fn is_named(ty: &Type, name: &str) -> bool {
 }
 
 fn parse_require(attr: &syn::Attribute) -> syn::Result<(LitStr, Option<LitStr>)> {
-    let args = attr.parse_args_with(syn::punctuated::Punctuated::<LitStr, syn::Token![,]>::parse_terminated)?;
+    let args = attr
+        .parse_args_with(syn::punctuated::Punctuated::<LitStr, syn::Token![,]>::parse_terminated)?;
     let mut args = args.into_iter();
-    let service = args
-        .next()
-        .ok_or_else(|| syn::Error::new(attr.span(), "#[require] needs the service identifier, e.g. \"live.arkitekt.mikro\""))?;
+    let service = args.next().ok_or_else(|| {
+        syn::Error::new(
+            attr.span(),
+            "#[require] needs the service identifier, e.g. \"live.arkitekt.mikro\"",
+        )
+    })?;
     let description = args.next();
     if let Some(extra) = args.next() {
-        return Err(syn::Error::new(extra.span(), "#[require] takes a service and an optional description"));
+        return Err(syn::Error::new(
+            extra.span(),
+            "#[require] takes a service and an optional description",
+        ));
     }
     Ok((service, description))
 }
@@ -85,7 +92,10 @@ fn parse_params(function: &mut ItemFn) -> syn::Result<Vec<ServiceParam>> {
             return Err(syn::Error::new(input.span(), "services cannot take self"));
         };
         let Pat::Ident(pat) = &*typed.pat else {
-            return Err(syn::Error::new(typed.pat.span(), "service parameters must be plain identifiers"));
+            return Err(syn::Error::new(
+                typed.pat.span(),
+                "service parameters must be plain identifiers",
+            ));
         };
         let key = pat.ident.to_string().trim_start_matches("r#").to_owned();
         if pat.ident == fn_ident {
@@ -140,7 +150,10 @@ fn parse_params(function: &mut ItemFn) -> syn::Result<Vec<ServiceParam>> {
     Ok(params)
 }
 
-pub(crate) fn expand_service(options: ServiceOptions, mut function: ItemFn) -> syn::Result<TokenStream2> {
+pub(crate) fn expand_service(
+    options: ServiceOptions,
+    mut function: ItemFn,
+) -> syn::Result<TokenStream2> {
     let ark = options
         .krate
         .as_ref()
@@ -149,7 +162,10 @@ pub(crate) fn expand_service(options: ServiceOptions, mut function: ItemFn) -> s
     let p = quote!(#ark::__private);
 
     if !function.sig.generics.params.is_empty() {
-        return Err(syn::Error::new(function.sig.generics.span(), "services cannot be generic"));
+        return Err(syn::Error::new(
+            function.sig.generics.span(),
+            "services cannot be generic",
+        ));
     }
     let params = parse_params(&mut function)?;
 
@@ -160,7 +176,10 @@ pub(crate) fn expand_service(options: ServiceOptions, mut function: ItemFn) -> s
 
     let returns_result = match &function.sig.output {
         ReturnType::Default => {
-            return Err(syn::Error::new(function.sig.span(), "a service returns the client it builds"))
+            return Err(syn::Error::new(
+                function.sig.span(),
+                "a service returns the client it builds",
+            ))
         }
         ReturnType::Type(_, ty) => result_inner(ty).is_some(),
     };
@@ -181,7 +200,9 @@ pub(crate) fn expand_service(options: ServiceOptions, mut function: ItemFn) -> s
     });
 
     // Bind to generated names so they cannot collide with anything in scope.
-    let locals: Vec<Ident> = (0..params.len()).map(|i| format_ident!("__ark_arg{i}")).collect();
+    let locals: Vec<Ident> = (0..params.len())
+        .map(|i| format_ident!("__ark_arg{i}"))
+        .collect();
     let bindings = params.iter().zip(&locals).map(|(param, local)| match param {
         ServiceParam::Alias { key, optional: false, .. } => quote! {
             let #local = __ark_fakts.get_alias(#key).await?;
@@ -204,14 +225,18 @@ pub(crate) fn expand_service(options: ServiceOptions, mut function: ItemFn) -> s
     } else {
         quote!(#fn_ident::call(#(#args),*))
     };
-    let call = if returns_result {
-        quote!(#call?)
-    } else {
-        call
-    };
+    let call = if returns_result { quote!(#call?) } else { call };
 
-    let doc_attrs: Vec<_> = function.attrs.iter().filter(|a| a.path().is_ident("doc")).collect();
-    let other_attrs: Vec<_> = function.attrs.iter().filter(|a| !a.path().is_ident("doc")).collect();
+    let doc_attrs: Vec<_> = function
+        .attrs
+        .iter()
+        .filter(|a| a.path().is_ident("doc"))
+        .collect();
+    let other_attrs: Vec<_> = function
+        .attrs
+        .iter()
+        .filter(|a| !a.path().is_ident("doc"))
+        .collect();
     let sig = {
         let mut sig = function.sig.clone();
         sig.ident = format_ident!("call");

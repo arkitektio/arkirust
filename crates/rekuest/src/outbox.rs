@@ -107,7 +107,10 @@ impl Outbox {
 
     /// Queue a message on the current connection (if any).
     pub fn send(&self, message: FromAgent) {
-        self.state.lock().expect("outbox lock").deliver(Envelope::new(message));
+        self.state
+            .lock()
+            .expect("outbox lock")
+            .deliver(Envelope::new(message));
     }
 
     /// Queue a journaled message: it carries the entry's id and position.
@@ -138,7 +141,11 @@ impl Outbox {
             let message: FromAgent = match serde_json::from_value(payload) {
                 Ok(message) => message,
                 Err(e) => {
-                    tracing::warn!("skipping unreadable journal entry {}/{}: {e}", entry.session_id, entry.pos);
+                    tracing::warn!(
+                        "skipping unreadable journal entry {}/{}: {e}",
+                        entry.session_id,
+                        entry.pos
+                    );
                     continue;
                 }
             };
@@ -199,11 +206,13 @@ impl Outbox {
     pub fn journal_ack(&self, session: &str, pos: u64) {
         let mut state = self.state.lock().expect("outbox lock");
         if let Some(order) = state.sessions.get(session).copied() {
-            state.retained.retain(|(o, p), _| !(*o == order && *p <= pos));
+            state
+                .retained
+                .retain(|(o, p), _| !(*o == order && *p <= pos));
         }
-        state
-            .unacked
-            .retain(|_, e| !(e.journal_session.as_deref() == Some(session) && e.pos.is_some_and(|p| p <= pos)));
+        state.unacked.retain(|_, e| {
+            !(e.journal_session.as_deref() == Some(session) && e.pos.is_some_and(|p| p <= pos))
+        });
     }
 
     #[cfg(test)]
@@ -256,12 +265,31 @@ mod tests {
         outbox.set_journal(true);
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         outbox.attach(tx);
-        journal.emit(FromAgent::Log { task: "t".into(), message: "a".into(), level: Default::default() }, None);
-        journal.emit(FromAgent::Yield { task: "t".into(), returns: Default::default() }, None);
+        journal.emit(
+            FromAgent::Log {
+                task: "t".into(),
+                message: "a".into(),
+                level: Default::default(),
+            },
+            None,
+        );
+        journal.emit(
+            FromAgent::Yield {
+                task: "t".into(),
+                returns: Default::default(),
+            },
+            None,
+        );
         let first = rx.try_recv().unwrap();
-        assert_eq!((first.pos, first.journal_session.as_deref(), first.task_step), (Some(1), Some("s"), Some(1)));
+        assert_eq!(
+            (first.pos, first.journal_session.as_deref(), first.task_step),
+            (Some(1), Some("s"), Some(1))
+        );
         let json = serde_json::to_value(&first).unwrap();
-        assert_eq!((json["pos"].as_u64(), json["journal_session"].as_str()), (Some(1), Some("s")));
+        assert_eq!(
+            (json["pos"].as_u64(), json["journal_session"].as_str()),
+            (Some(1), Some("s"))
+        );
 
         // Disconnected: kept, not dropped.
         outbox.detach();
@@ -272,8 +300,14 @@ mod tests {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         outbox.attach(tx);
         outbox.resend_unacked();
-        let resent: Vec<(Option<u64>, Option<u64>)> = std::iter::from_fn(|| rx.try_recv().ok()).map(|e| (e.pos, e.seq)).collect();
-        assert_eq!(resent, vec![(Some(2), Some(1)), (Some(3), Some(2))], "once each, in journal order");
+        let resent: Vec<(Option<u64>, Option<u64>)> = std::iter::from_fn(|| rx.try_recv().ok())
+            .map(|e| (e.pos, e.seq))
+            .collect();
+        assert_eq!(
+            resent,
+            vec![(Some(2), Some(1)), (Some(3), Some(2))],
+            "once each, in journal order"
+        );
 
         outbox.journal_ack("s", 3);
         assert_eq!((outbox.retained_len(), outbox.unacked_len()), (0, 0));
@@ -285,8 +319,18 @@ mod tests {
         let journal = Journal::new(outbox.clone(), None, Some("s".into()));
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         outbox.attach(tx);
-        journal.emit(FromAgent::Now { task: "t".into(), effect_id: String::new(), value: 1.0 }, None);
-        assert!(rx.try_recv().is_err(), "not sent while the server's journal support is unknown");
+        journal.emit(
+            FromAgent::Now {
+                task: "t".into(),
+                effect_id: String::new(),
+                value: 1.0,
+            },
+            None,
+        );
+        assert!(
+            rx.try_recv().is_err(),
+            "not sent while the server's journal support is unknown"
+        );
         outbox.set_journal(true);
         outbox.resend_unacked();
         let sent = rx.try_recv().unwrap();
@@ -297,9 +341,25 @@ mod tests {
         old.set_journal(false);
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         old.attach(tx);
-        journal.emit(FromAgent::Now { task: "t".into(), effect_id: String::new(), value: 1.0 }, None);
-        journal.emit(FromAgent::Log { task: "t".into(), message: "a".into(), level: Default::default() }, None);
-        let only: Vec<String> = std::iter::from_fn(|| rx.try_recv().ok()).map(|e| crate::journal::kind_of(&e.message)).collect();
+        journal.emit(
+            FromAgent::Now {
+                task: "t".into(),
+                effect_id: String::new(),
+                value: 1.0,
+            },
+            None,
+        );
+        journal.emit(
+            FromAgent::Log {
+                task: "t".into(),
+                message: "a".into(),
+                level: Default::default(),
+            },
+            None,
+        );
+        let only: Vec<String> = std::iter::from_fn(|| rx.try_recv().ok())
+            .map(|e| crate::journal::kind_of(&e.message))
+            .collect();
         assert_eq!(only, ["LOG"], "an old server never gets journal-only kinds");
     }
 
@@ -307,7 +367,14 @@ mod tests {
     fn earlier_sessions_are_resent_first() {
         let outbox = Arc::new(Outbox::new());
         let journal = Journal::new(outbox.clone(), None, Some("now".into()));
-        journal.emit(FromAgent::Log { task: "t".into(), message: "current".into(), level: Default::default() }, None);
+        journal.emit(
+            FromAgent::Log {
+                task: "t".into(),
+                message: "current".into(),
+                level: Default::default(),
+            },
+            None,
+        );
         let old = |session: &str, pos: u64| JournalEntry {
             session_id: session.into(),
             pos,
@@ -332,7 +399,12 @@ mod tests {
             .collect();
         assert_eq!(
             order,
-            [("a".into(), 4), ("a".into(), 5), ("b".into(), 1), ("now".into(), 1)]
+            [
+                ("a".into(), 4),
+                ("a".into(), 5),
+                ("b".into(), 1),
+                ("now".into(), 1)
+            ]
         );
         outbox.journal_ack("a", 5);
         assert_eq!(outbox.retained_len(), 2);

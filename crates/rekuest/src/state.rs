@@ -308,7 +308,12 @@ pub struct PublishedPatch {
 pub trait Sink: Send + Sync + 'static {
     /// Start a session; returns its id.
     async fn create_session(&self) -> anyhow::Result<String>;
-    async fn dump_snapshot(&self, session_id: &str, global_rev: u64, snapshots: &Map<String, Value>) -> anyhow::Result<()>;
+    async fn dump_snapshot(
+        &self,
+        session_id: &str,
+        global_rev: u64,
+        snapshots: &Map<String, Value>,
+    ) -> anyhow::Result<()>;
     async fn write_patch(&self, patch: &PublishedPatch) -> anyhow::Result<()>;
     async fn is_caught_up_to(&self, global_rev: u64) -> anyhow::Result<bool>;
 }
@@ -356,8 +361,11 @@ impl HubInner {
         }
 
         if rev.is_multiple_of(SNAPSHOT_INTERVAL) {
-            let snapshots: Map<String, Value> =
-                state.shrunk.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+            let snapshots: Map<String, Value> = state
+                .shrunk
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
             emitter.emit(
                 FromAgent::StateSnapshot {
                     session_id: state.session_id.clone(),
@@ -405,7 +413,8 @@ impl HubInner {
 
     fn persist(&self, state: &HubState, write: SinkWrite) {
         if let Some(tx) = &state.sink {
-            self.pending.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.pending
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             if tx.send(write).is_err() {
                 self.done();
             }
@@ -413,7 +422,11 @@ impl HubInner {
     }
 
     fn done(&self) {
-        if self.pending.fetch_sub(1, std::sync::atomic::Ordering::SeqCst) == 1 {
+        if self
+            .pending
+            .fetch_sub(1, std::sync::atomic::Ordering::SeqCst)
+            == 1
+        {
             self.drained.notify_waiters();
         }
     }
@@ -429,7 +442,14 @@ pub struct StateHub {
 impl std::fmt::Debug for StateHub {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StateHub")
-            .field("states", &self.declarations.iter().map(|d| &d.name).collect::<Vec<_>>())
+            .field(
+                "states",
+                &self
+                    .declarations
+                    .iter()
+                    .map(|d| &d.name)
+                    .collect::<Vec<_>>(),
+            )
             .finish_non_exhaustive()
     }
 }
@@ -489,7 +509,9 @@ impl StateHub {
     }
 
     pub fn state_ref<T: StateType>(&self) -> Result<StateRef<T>, StateError> {
-        Ok(StateRef { cell: self.cell::<T>()? })
+        Ok(StateRef {
+            cell: self.cell::<T>()?,
+        })
     }
 
     /// Apply the declared initial values.
@@ -510,7 +532,13 @@ impl StateHub {
 
     /// The published value of a state (None if it has none yet).
     pub fn value(&self, name: &str) -> Option<Value> {
-        self.inner.state.lock().expect("hub lock").shrunk.get(name).cloned()
+        self.inner
+            .state
+            .lock()
+            .expect("hub lock")
+            .shrunk
+            .get(name)
+            .cloned()
     }
 
     /// Open a session: check every state has a value, publish SESSION_INIT
@@ -537,7 +565,12 @@ impl StateHub {
         let baseline: Map<String, Value> = self
             .declarations
             .iter()
-            .map(|d| (d.name.clone(), self.cells[&d.name].value_json().unwrap_or(Value::Null)))
+            .map(|d| {
+                (
+                    d.name.clone(),
+                    self.cells[&d.name].value_json().unwrap_or(Value::Null),
+                )
+            })
             .collect();
 
         // Sent even without states (`states: {}`), as in Python: it opens the session.
@@ -649,12 +682,16 @@ impl<T: StateType> std::fmt::Debug for StateMut<T> {
 impl<T: StateType> StateMut<T> {
     /// A copy of the current value.
     pub fn get(&self) -> T {
-        self.cell.get().expect("states are initialized before actions run")
+        self.cell
+            .get()
+            .expect("states are initialized before actions run")
     }
 
     /// Read without copying.
     pub fn read<R>(&self, f: impl FnOnce(&T) -> R) -> R {
-        self.cell.read(f).expect("states are initialized before actions run")
+        self.cell
+            .read(f)
+            .expect("states are initialized before actions run")
     }
 
     /// Change the state. The difference is published as `STATE_PATCH`es,
@@ -676,7 +713,9 @@ pub struct StateRef<T: StateType> {
 
 impl<T: StateType> Clone for StateRef<T> {
     fn clone(&self) -> Self {
-        Self { cell: self.cell.clone() }
+        Self {
+            cell: self.cell.clone(),
+        }
     }
 }
 
@@ -688,11 +727,15 @@ impl<T: StateType> std::fmt::Debug for StateRef<T> {
 
 impl<T: StateType> StateRef<T> {
     pub fn get(&self) -> T {
-        self.cell.get().expect("states are initialized before actions run")
+        self.cell
+            .get()
+            .expect("states are initialized before actions run")
     }
 
     pub fn read<R>(&self, f: impl FnOnce(&T) -> R) -> R {
-        self.cell.read(f).expect("states are initialized before actions run")
+        self.cell
+            .read(f)
+            .expect("states are initialized before actions run")
     }
 }
 
@@ -734,7 +777,9 @@ mod tests {
         }))]);
         hub.apply_initial_values().unwrap();
         let recorder = Arc::new(Recorder::default());
-        hub.start_session("s".into(), recorder.clone(), None).await.unwrap();
+        hub.start_session("s".into(), recorder.clone(), None)
+            .await
+            .unwrap();
 
         let task = Mutation {
             task_id: Some("t1".into()),
@@ -747,7 +792,9 @@ mod tests {
         hub.flush(std::time::Duration::from_secs(1)).await;
 
         let messages = recorder.0.lock().unwrap().clone();
-        assert!(matches!(&messages[0], FromAgent::SessionInit { states, .. } if states["Camera"]["exposure_ms"] == 10.0));
+        assert!(
+            matches!(&messages[0], FromAgent::SessionInit { states, .. } if states["Camera"]["exposure_ms"] == 10.0)
+        );
         let patches: Vec<(u64, String, String, Value)> = messages
             .iter()
             .filter_map(|m| match m {
@@ -768,11 +815,19 @@ mod tests {
         assert_eq!(
             patches,
             vec![
-                (1, "replace".into(), "/exposure_ms".into(), serde_json::json!(20.0)),
+                (
+                    1,
+                    "replace".into(),
+                    "/exposure_ms".into(),
+                    serde_json::json!(20.0)
+                ),
                 (2, "add".into(), "/tags/0".into(), serde_json::json!("a")),
             ]
         );
-        assert_eq!(hub.value("Camera").unwrap()["tags"], serde_json::json!(["a"]));
+        assert_eq!(
+            hub.value("Camera").unwrap()["tags"],
+            serde_json::json!(["a"])
+        );
         assert_eq!(hub.revision().1, 2);
     }
 
@@ -789,7 +844,11 @@ mod tests {
         let unlocked = hub.state_mut::<Camera>(Mutation::unlocked()).unwrap();
         let err = unlocked.update(|c| c.exposure_ms = 2.0).unwrap_err();
         assert!(matches!(err, StateError::MissingLocks { .. }));
-        assert_eq!(unlocked.get().exposure_ms, 1.0, "a refused change is not applied");
+        assert_eq!(
+            unlocked.get().exposure_ms,
+            1.0,
+            "a refused change is not applied"
+        );
     }
 
     #[tokio::test]
@@ -800,7 +859,9 @@ mod tests {
         }))]);
         hub.apply_initial_values().unwrap();
         let recorder = Arc::new(Recorder::default());
-        hub.start_session("s".into(), recorder.clone(), None).await.unwrap();
+        hub.start_session("s".into(), recorder.clone(), None)
+            .await
+            .unwrap();
         let gate = TaskGate::default();
         let camera = hub
             .state_mut::<Camera>(Mutation {
@@ -811,8 +872,15 @@ mod tests {
             .unwrap();
         camera.update(|c| c.exposure_ms = 2.0).unwrap();
         gate.close();
-        assert_eq!(camera.update(|c| c.exposure_ms = 3.0).unwrap_err(), StateError::TaskClosed);
-        assert_eq!(camera.get().exposure_ms, 2.0, "a refused change is not applied");
+        assert_eq!(
+            camera.update(|c| c.exposure_ms = 3.0).unwrap_err(),
+            StateError::TaskClosed
+        );
+        assert_eq!(
+            camera.get().exposure_ms,
+            2.0,
+            "a refused change is not applied"
+        );
         assert_eq!(hub.revision().1, 1);
     }
 
@@ -834,7 +902,9 @@ mod tests {
         }))]);
         hub.apply_initial_values().unwrap();
         let recorder = Arc::new(Recorder::default());
-        hub.start_session("s".into(), recorder.clone(), None).await.unwrap();
+        hub.start_session("s".into(), recorder.clone(), None)
+            .await
+            .unwrap();
         let camera = hub.state_mut::<Camera>(Mutation::default()).unwrap();
         for i in 1..=SNAPSHOT_INTERVAL {
             camera.update(|c| c.exposure_ms = i as f64).unwrap();
@@ -846,7 +916,12 @@ mod tests {
             .position(|m| matches!(m, FromAgent::StateSnapshot { global_rev: 60, .. }))
             .expect("a snapshot at 60");
         // The snapshot precedes the patch with the same revision and already contains it.
-        assert!(matches!(&messages[snapshot_at + 1], FromAgent::StatePatch { global_rev: 60, .. }));
-        assert!(matches!(&messages[snapshot_at], FromAgent::StateSnapshot { snapshots, .. } if snapshots["Camera"]["exposure_ms"] == 60.0));
+        assert!(matches!(
+            &messages[snapshot_at + 1],
+            FromAgent::StatePatch { global_rev: 60, .. }
+        ));
+        assert!(
+            matches!(&messages[snapshot_at], FromAgent::StateSnapshot { snapshots, .. } if snapshots["Camera"]["exposure_ms"] == 60.0)
+        );
     }
 }

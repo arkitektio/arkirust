@@ -126,7 +126,10 @@ pub(crate) fn port_to_json_schema(port: &Port) -> Value {
             schema.insert("type".into(), json!("array"));
             schema.insert(
                 "items".into(),
-                port.children.first().map(port_to_json_schema).unwrap_or_else(|| json!({})),
+                port.children
+                    .first()
+                    .map(port_to_json_schema)
+                    .unwrap_or_else(|| json!({})),
             );
         }
         PortKind::Dict | PortKind::Structure => {
@@ -152,14 +155,20 @@ pub(crate) fn port_to_json_schema(port: &Port) -> Value {
             }
         }
         _ => {
-            schema.insert("type".into(), json!(["string", "number", "boolean", "object", "array", "null"]));
+            schema.insert(
+                "type".into(),
+                json!(["string", "number", "boolean", "object", "array", "null"]),
+            );
         }
     }
     if let Some(identifier) = &port.identifier {
         schema.insert("x-identifier".into(), json!(identifier));
     }
     if let Some(choices) = port.choices.as_ref().filter(|c| !c.is_empty()) {
-        schema.insert("enum".into(), Value::Array(choices.iter().map(|c| c.value.clone()).collect()));
+        schema.insert(
+            "enum".into(),
+            Value::Array(choices.iter().map(|c| c.value.clone()).collect()),
+        );
     }
     if let Some(default) = &port.default {
         schema.insert("default".into(), default.clone());
@@ -177,7 +186,10 @@ pub(crate) fn schema_from_ports(ports: &[Port], title: &str) -> Value {
     if ports.is_empty() {
         return json!({ "type": "object", "title": title, "properties": {} });
     }
-    let properties: Map<String, Value> = ports.iter().map(|p| (p.key.clone(), port_to_json_schema(p))).collect();
+    let properties: Map<String, Value> = ports
+        .iter()
+        .map(|p| (p.key.clone(), port_to_json_schema(p)))
+        .collect();
     let required: Vec<&str> = ports
         .iter()
         .filter(|p| !p.nullable && p.default.is_none())

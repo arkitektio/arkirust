@@ -62,8 +62,10 @@ use crate::journal::{Fold, Journal, JournalEntry, JournalSink};
 use crate::messages::Assign;
 use crate::state::Sink;
 
+pub use crate::store::{
+    EntryQuery, HistoryStore, PatchEvent, SessionBoundary, Snapshot, StateAt, TaskBoundary,
+};
 pub use broadcast::Broadcaster;
-pub use crate::store::{EntryQuery, HistoryStore, PatchEvent, SessionBoundary, Snapshot, StateAt, TaskBoundary};
 
 /// The first frame a websocket client sends.
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -94,7 +96,10 @@ pub struct SubscriptionInit {
 #[derive(Debug)]
 pub enum AuthRequest<'a> {
     /// An HTTP command (`/assign`).
-    Http { headers: &'a HeaderMap, uri: &'a Uri },
+    Http {
+        headers: &'a HeaderMap,
+        uri: &'a Uri,
+    },
     /// A websocket subscription (its first frame).
     WebSocket(&'a SubscriptionInit),
 }
@@ -204,7 +209,9 @@ pub struct LocalAgent {
 
 impl std::fmt::Debug for LocalAgent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LocalAgent").field("executor", &self.executor).finish()
+        f.debug_struct("LocalAgent")
+            .field("executor", &self.executor)
+            .finish()
     }
 }
 
@@ -290,7 +297,10 @@ pub fn configure(
     let mut routes: Router<Arc<Shared>> = Router::new()
         .route(&o.ws_path, get(ws_endpoint))
         .route(&o.assign_path, post(assign_base))
-        .route(&format!("{}/{{interface}}", o.assign_path), post(assign_interface))
+        .route(
+            &format!("{}/{{interface}}", o.assign_path),
+            post(assign_interface),
+        )
         .route("/cancel", post(cancel))
         .route("/pause", post(pause))
         .route("/resume", post(resume))
@@ -319,7 +329,10 @@ pub fn configure(
             .route("/journal/{session_id}", get(journal_entries))
             .route("/journal/{session_id}/at", get(journal_at_time))
             .route("/journal/{session_id}/at/{pos}", get(journal_at))
-            .route(&format!("{}/{{task_id}}/events", o.tasks_path), get(task_events));
+            .route(
+                &format!("{}/{{task_id}}/events", o.tasks_path),
+                get(task_events),
+            );
         taken.insert("/journal".into());
     }
     if o.add_states {
@@ -330,7 +343,10 @@ pub fn configure(
         let fixed = ["checkout", "segments", "session_boundaries"];
         for declaration in agent.executor.registry().states() {
             if fixed.contains(&declaration.name.as_str()) {
-                tracing::warn!("state '{}' would shadow a history route; not adding its route", declaration.name);
+                tracing::warn!(
+                    "state '{}' would shadow a history route; not adding its route",
+                    declaration.name
+                );
                 continue;
             }
             let name = declaration.name.clone();
@@ -343,14 +359,29 @@ pub fn configure(
             .route("/session_info", get(session_info))
             .route("/task_boundaries/{correlation_id}", get(task_boundaries))
             .route("/active_session_boundaries", get(active_session_boundaries))
-            .route(&format!("{}/session_boundaries", o.states_path), get(state_session_boundaries))
+            .route(
+                &format!("{}/session_boundaries", o.states_path),
+                get(state_session_boundaries),
+            )
             .route("/session_boundaries/{session_id}", get(session_boundaries))
             .route(&format!("{}/checkout", o.states_path), get(checkout))
             .route(&format!("{}/segments", o.states_path), get(segments))
-            .route("/state_at_global/{session_id}/{target_revision}", get(state_at_global))
-            .route("/current_state_at_global/{target_revision}", get(current_state_at_global))
-            .route("/forward_events/{session_id}/{after_global_revision}", get(forward_events))
-            .route("/snapshots_around/{session_id}/{target_revision}", get(snapshots_around));
+            .route(
+                "/state_at_global/{session_id}/{target_revision}",
+                get(state_at_global),
+            )
+            .route(
+                "/current_state_at_global/{target_revision}",
+                get(current_state_at_global),
+            )
+            .route(
+                "/forward_events/{session_id}/{after_global_revision}",
+                get(forward_events),
+            )
+            .route(
+                "/snapshots_around/{session_id}/{target_revision}",
+                get(snapshots_around),
+            );
         taken.extend(
             [
                 "/session_info",
@@ -377,7 +408,10 @@ pub fn configure(
                 continue;
             }
             let interface = action.interface();
-            routes = routes.route(&path, post(move |state: S, body: Bytes| implementation_endpoint(state, interface, body)));
+            routes = routes.route(
+                &path,
+                post(move |state: S, body: Bytes| implementation_endpoint(state, interface, body)),
+            );
         }
     }
     if o.add_schema {
@@ -388,7 +422,9 @@ pub fn configure(
             .route("/schemas/bloks", get(schema_bloks));
     }
     if o.openapi {
-        routes = routes.route("/openapi.json", get(openapi_json)).route("/docs", get(docs_page));
+        routes = routes
+            .route("/openapi.json", get(openapi_json))
+            .route("/docs", get(docs_page));
     }
 
     Ok((router.merge(routes.with_state(shared)), agent))
@@ -426,26 +462,60 @@ fn normalize_filter(values: &[String]) -> Option<Vec<String>> {
 }
 
 fn query_values(query: &[(String, String)], name: &str) -> Vec<String> {
-    query.iter().filter(|(k, _)| k == name).map(|(_, v)| v.clone()).collect()
+    query
+        .iter()
+        .filter(|(k, _)| k == name)
+        .map(|(_, v)| v.clone())
+        .collect()
 }
 
 fn query_one(query: &[(String, String)], name: &str) -> Option<String> {
-    query.iter().rev().find(|(k, _)| k == name).map(|(_, v)| v.clone())
+    query
+        .iter()
+        .rev()
+        .find(|(k, _)| k == name)
+        .map(|(_, v)| v.clone())
 }
 
 /// FastAPI's 422 body for one invalid parameter.
-fn invalid(location: &str, name: &str, kind: &str, msg: &str, input: Value, ctx: Option<Value>) -> Response {
+fn invalid(
+    location: &str,
+    name: &str,
+    kind: &str,
+    msg: &str,
+    input: Value,
+    ctx: Option<Value>,
+) -> Response {
     let mut error = json!({ "type": kind, "loc": [location, name], "msg": msg, "input": input });
     if let Some(ctx) = ctx {
         error["ctx"] = ctx;
     }
-    (StatusCode::UNPROCESSABLE_ENTITY, Json(json!({ "detail": [error] }))).into_response()
+    (
+        StatusCode::UNPROCESSABLE_ENTITY,
+        Json(json!({ "detail": [error] })),
+    )
+        .into_response()
 }
 
 /// An integer parameter with FastAPI's validation (`required`, `ge`).
-fn int_param(location: &str, name: &str, raw: Option<String>, default: Option<i64>, ge: Option<i64>) -> Result<i64, Response> {
+fn int_param(
+    location: &str,
+    name: &str,
+    raw: Option<String>,
+    default: Option<i64>,
+    ge: Option<i64>,
+) -> Result<i64, Response> {
     let Some(raw) = raw else {
-        return default.ok_or_else(|| invalid(location, name, "missing", "Field required", Value::Null, None));
+        return default.ok_or_else(|| {
+            invalid(
+                location,
+                name,
+                "missing",
+                "Field required",
+                Value::Null,
+                None,
+            )
+        });
     };
     let value: i64 = raw.trim().parse().map_err(|_| {
         invalid(
@@ -491,7 +561,11 @@ const ALLOWED_ASSIGN_FIELDS: &[&str] = &[
 ];
 
 /// `build_assign_input` + `build_assign_message`. `None` is a 500 in Python.
-fn build_assign(mut payload: Map<String, Value>, interface: Option<String>, user: String) -> Option<Assign> {
+fn build_assign(
+    mut payload: Map<String, Value>,
+    interface: Option<String>,
+    user: String,
+) -> Option<Assign> {
     if let Some(interface) = interface {
         payload.insert("interface".into(), Value::String(interface));
     }
@@ -499,7 +573,10 @@ fn build_assign(mut payload: Map<String, Value>, interface: Option<String>, user
         payload.remove(field);
     }
     payload.entry("capture").or_insert(Value::Bool(false));
-    if payload.keys().any(|k| !ALLOWED_ASSIGN_FIELDS.contains(&k.as_str())) {
+    if payload
+        .keys()
+        .any(|k| !ALLOWED_ASSIGN_FIELDS.contains(&k.as_str()))
+    {
         return None;
     }
     let args = match payload.get("args")? {
@@ -547,11 +624,17 @@ fn http_user(shared: &Shared, headers: &HeaderMap, uri: &Uri) -> Result<String, 
     match &shared.auth {
         None => Ok("anonymous".into()),
         // No `WWW-Authenticate`: it would make browsers pop their own login dialog.
-        Some(hook) => hook(AuthRequest::Http { headers, uri }).map_err(|_| detail(StatusCode::UNAUTHORIZED, "Not authorized")),
+        Some(hook) => hook(AuthRequest::Http { headers, uri })
+            .map_err(|_| detail(StatusCode::UNAUTHORIZED, "Not authorized")),
     }
 }
 
-async fn submit(shared: &Shared, payload: Map<String, Value>, interface: Option<String>, user: String) -> Result<String, Response> {
+async fn submit(
+    shared: &Shared,
+    payload: Map<String, Value>,
+    interface: Option<String>,
+    user: String,
+) -> Result<String, Response> {
     let assign = build_assign(payload, interface, user).ok_or_else(internal_error)?;
     let task = assign.task.clone();
     // The task's first entry: what it was asked to do.
@@ -571,14 +654,22 @@ async fn assign_base(State(shared): S, headers: HeaderMap, uri: Uri, body: Bytes
     let Some(mut payload) = parse_object(&body) else {
         return internal_error();
     };
-    let interface = payload.remove("interface").and_then(|v| v.as_str().map(str::to_owned));
+    let interface = payload
+        .remove("interface")
+        .and_then(|v| v.as_str().map(str::to_owned));
     match submit(&shared, payload, interface, user).await {
         Ok(task) => Json(json!({ "status": "submitted", "task": task })).into_response(),
         Err(response) => response,
     }
 }
 
-async fn assign_interface(State(shared): S, Path(interface): Path<String>, headers: HeaderMap, uri: Uri, body: Bytes) -> Response {
+async fn assign_interface(
+    State(shared): S,
+    Path(interface): Path<String>,
+    headers: HeaderMap,
+    uri: Uri,
+    body: Bytes,
+) -> Response {
     let user = match http_user(&shared, &headers, &uri) {
         Ok(user) => user,
         Err(response) => return response,
@@ -605,7 +696,10 @@ async fn implementation_endpoint(State(shared): S, interface: String, body: Byte
 /// `{"task": "..."}` with only the allowed extra keys.
 fn control_task(body: &Bytes, allowed: &[&str]) -> Option<(String, Map<String, Value>)> {
     let payload = parse_object(body)?;
-    if payload.keys().any(|k| k != "task" && !allowed.contains(&k.as_str())) {
+    if payload
+        .keys()
+        .any(|k| k != "task" && !allowed.contains(&k.as_str()))
+    {
         return None;
     }
     let task = payload.get("task")?.as_str()?.to_owned();
@@ -638,7 +732,9 @@ async fn resume(State(shared): S, body: Bytes) -> Response {
 }
 
 async fn step(State(shared): S, body: Bytes) -> Response {
-    let Some(task) = parse_object(&body).and_then(|p| p.get("task").and_then(|t| t.as_str().map(str::to_owned))) else {
+    let Some(task) =
+        parse_object(&body).and_then(|p| p.get("task").and_then(|t| t.as_str().map(str::to_owned)))
+    else {
         return internal_error();
     };
     shared.agent.executor.resume(&task, true);
@@ -652,13 +748,21 @@ async fn ws_endpoint(State(shared): S, ws: WebSocketUpgrade) -> Response {
 }
 
 fn key_set(values: &Option<Vec<String>>) -> Option<HashSet<String>> {
-    let set: HashSet<String> = values.iter().flatten().filter(|v| !v.is_empty()).cloned().collect();
+    let set: HashSet<String> = values
+        .iter()
+        .flatten()
+        .filter(|v| !v.is_empty())
+        .cloned()
+        .collect();
     (!set.is_empty()).then_some(set)
 }
 
 /// The INIT snapshot uses the raw lists (no splitting, empty strings kept), as in Python.
 fn raw_set(values: &Option<Vec<String>>) -> Option<HashSet<String>> {
-    values.as_ref().filter(|v| !v.is_empty()).map(|v| v.iter().cloned().collect())
+    values
+        .as_ref()
+        .filter(|v| !v.is_empty())
+        .map(|v| v.iter().cloned().collect())
 }
 
 async fn handle_socket(shared: Arc<Shared>, mut socket: WebSocket) {
@@ -709,7 +813,9 @@ async fn handle_socket(shared: Arc<Shared>, mut socket: WebSocket) {
         (agent.broadcaster.subscribe(filters, tx, false), None)
     };
 
-    let tasks = agent.executor.task_views(raw_set(&init.action_keys).as_ref());
+    let tasks = agent
+        .executor
+        .task_views(raw_set(&init.action_keys).as_ref());
     let mut first = json!({
         "type": "INIT",
         "tasks": { "count": tasks.len(), "tasks": tasks },
@@ -724,12 +830,18 @@ async fn handle_socket(shared: Arc<Shared>, mut socket: WebSocket) {
         None => vec![],
     };
 
-    let mut open = socket.send(Message::Text(first.to_string().into())).await.is_ok();
+    let mut open = socket
+        .send(Message::Text(first.to_string().into()))
+        .await
+        .is_ok();
     for entry in backlog {
         if !open {
             break;
         }
-        open = socket.send(Message::Text(entry.frame().to_string().into())).await.is_ok();
+        open = socket
+            .send(Message::Text(entry.frame().to_string().into()))
+            .await
+            .is_ok();
     }
     if open {
         loop {
@@ -781,7 +893,10 @@ async fn journal_opening(
     // A position means nothing without its session (the agent may have
     // restarted since): resuming needs the session, except from the start.
     let resync = init.resume_after.is_some_and(|after| {
-        let same_session = init.session_id.as_ref().is_some_and(|s| *s == wm.session_id);
+        let same_session = init
+            .session_id
+            .as_ref()
+            .is_some_and(|s| *s == wm.session_id);
         after > wm.pos || (after > 0 && !same_session)
     });
     let backlog: Vec<Arc<JournalEntry>> = match (init.resume_after, resync) {
@@ -805,7 +920,10 @@ async fn journal_opening(
         },
         _ => vec![],
     };
-    let backlog = backlog.into_iter().filter(|e| filters.admits(e.route())).collect();
+    let backlog = backlog
+        .into_iter()
+        .filter(|e| filters.admits(e.route()))
+        .collect();
 
     let mut info = world_json(
         &fold,
@@ -836,7 +954,9 @@ fn world_json(
     let tasks: Map<String, Value> = fold
         .tasks
         .iter()
-        .filter(|(_, task)| action_keys.is_none_or(|k| task.action_key.as_ref().is_some_and(|a| k.contains(a))))
+        .filter(|(_, task)| {
+            action_keys.is_none_or(|k| task.action_key.as_ref().is_some_and(|a| k.contains(a)))
+        })
         .map(|(id, task)| (id.clone(), json!(task)))
         .collect();
     let locks: Map<String, Value> = fold
@@ -867,7 +987,8 @@ fn lock_collection(agent: &LocalAgent, keys: Option<&HashSet<String>>) -> Value 
 }
 
 async fn list_tasks(State(shared): S, Query(query): Query<Vec<(String, String)>>) -> Response {
-    let keys = normalize_filter(&query_values(&query, "action_keys")).map(|k| k.into_iter().collect::<HashSet<_>>());
+    let keys = normalize_filter(&query_values(&query, "action_keys"))
+        .map(|k| k.into_iter().collect::<HashSet<_>>());
     let tasks = shared.agent.executor.task_views(keys.as_ref());
     Json(json!({ "count": tasks.len(), "tasks": tasks })).into_response()
 }
@@ -884,7 +1005,8 @@ async fn get_task(State(shared): S, Path(task_id): Path<String>) -> Response {
 }
 
 async fn list_states(State(shared): S, Query(query): Query<Vec<(String, String)>>) -> Response {
-    let keys = normalize_filter(&query_values(&query, "state_keys")).map(|k| k.into_iter().collect::<HashSet<_>>());
+    let keys = normalize_filter(&query_values(&query, "state_keys"))
+        .map(|k| k.into_iter().collect::<HashSet<_>>());
     Json(state_collection(&shared.agent, keys.as_ref())).into_response()
 }
 
@@ -904,7 +1026,8 @@ async fn current_state(State(shared): S, interface: String) -> Response {
 }
 
 async fn list_locks(State(shared): S, Query(query): Query<Vec<(String, String)>>) -> Response {
-    let keys = normalize_filter(&query_values(&query, "lock_keys")).map(|k| k.into_iter().collect::<HashSet<_>>());
+    let keys = normalize_filter(&query_values(&query, "lock_keys"))
+        .map(|k| k.into_iter().collect::<HashSet<_>>());
     Json(lock_collection(&shared.agent, keys.as_ref())).into_response()
 }
 
@@ -919,7 +1042,8 @@ async fn schema_implementations(State(shared): S) -> Response {
         .iter()
         .map(|i| (i.interface.clone(), schema::api_implementation(i)))
         .collect();
-    Json(json!({ "count": implementations.len(), "implementations": implementations })).into_response()
+    Json(json!({ "count": implementations.len(), "implementations": implementations }))
+        .into_response()
 }
 
 async fn schema_states(State(shared): S) -> Response {
@@ -959,11 +1083,24 @@ fn resolve_session(agent: &LocalAgent, session_id: Option<String>) -> Result<Str
         .ok_or_else(|| detail(StatusCode::NOT_FOUND, "No active session"))
 }
 
-fn resolve_state_keys(agent: &LocalAgent, query: &[(String, String)]) -> Result<Option<Vec<String>>, Response> {
+fn resolve_state_keys(
+    agent: &LocalAgent,
+    query: &[(String, String)],
+) -> Result<Option<Vec<String>>, Response> {
     let keys = normalize_filter(&query_values(query, "state_keys"));
     if let Some(keys) = &keys {
-        let known: HashSet<&str> = agent.executor.registry().states().iter().map(|s| s.name.as_str()).collect();
-        let missing: Vec<&str> = keys.iter().map(String::as_str).filter(|k| !known.contains(k)).collect();
+        let known: HashSet<&str> = agent
+            .executor
+            .registry()
+            .states()
+            .iter()
+            .map(|s| s.name.as_str())
+            .collect();
+        let missing: Vec<&str> = keys
+            .iter()
+            .map(String::as_str)
+            .filter(|k| !known.contains(k))
+            .collect();
         if !missing.is_empty() {
             return Err(detail(
                 StatusCode::UNPROCESSABLE_ENTITY,
@@ -990,53 +1127,103 @@ macro_rules! tri {
 
 async fn session_info(State(shared): S) -> Response {
     let pos = shared.agent.journal.watermark().map(|wm| wm.pos);
-    Json(json!({ "current_session": shared.agent.current_session(), "current_pos": pos })).into_response()
+    Json(json!({ "current_session": shared.agent.current_session(), "current_pos": pos }))
+        .into_response()
 }
 
-async fn task_boundaries(State(shared): S, Path(correlation_id): Path<String>, Query(query): Query<Vec<(String, String)>>) -> Response {
+async fn task_boundaries(
+    State(shared): S,
+    Path(correlation_id): Path<String>,
+    Query(query): Query<Vec<(String, String)>>,
+) -> Response {
     let state_id = query_one(&query, "state_id");
-    match shared.agent.store.task_boundaries(&correlation_id, state_id.as_deref()).await {
+    match shared
+        .agent
+        .store
+        .task_boundaries(&correlation_id, state_id.as_deref())
+        .await
+    {
         Ok(Some(boundary)) => Json(boundary).into_response(),
         Ok(None) => detail(StatusCode::NOT_FOUND, "Task boundaries not found"),
         Err(e) => storage_error(e),
     }
 }
 
-async fn session_boundary_response(agent: &LocalAgent, session_id: &str, state_id: Option<String>) -> Response {
-    match agent.store.session_boundaries(session_id, state_id.as_deref()).await {
+async fn session_boundary_response(
+    agent: &LocalAgent,
+    session_id: &str,
+    state_id: Option<String>,
+) -> Response {
+    match agent
+        .store
+        .session_boundaries(session_id, state_id.as_deref())
+        .await
+    {
         Ok(Some(boundary)) => Json(boundary).into_response(),
         Ok(None) => detail(StatusCode::NOT_FOUND, "Session boundaries not found"),
         Err(e) => storage_error(e),
     }
 }
 
-async fn active_session_boundaries(State(shared): S, Query(query): Query<Vec<(String, String)>>) -> Response {
+async fn active_session_boundaries(
+    State(shared): S,
+    Query(query): Query<Vec<(String, String)>>,
+) -> Response {
     let session = tri!(resolve_session(&shared.agent, None));
     session_boundary_response(&shared.agent, &session, query_one(&query, "state_id")).await
 }
 
-async fn state_session_boundaries(State(shared): S, Query(query): Query<Vec<(String, String)>>) -> Response {
-    let session = tri!(resolve_session(&shared.agent, query_one(&query, "session_id")));
+async fn state_session_boundaries(
+    State(shared): S,
+    Query(query): Query<Vec<(String, String)>>,
+) -> Response {
+    let session = tri!(resolve_session(
+        &shared.agent,
+        query_one(&query, "session_id")
+    ));
     session_boundary_response(&shared.agent, &session, query_one(&query, "state_id")).await
 }
 
-async fn session_boundaries(State(shared): S, Path(session_id): Path<String>, Query(query): Query<Vec<(String, String)>>) -> Response {
+async fn session_boundaries(
+    State(shared): S,
+    Path(session_id): Path<String>,
+    Query(query): Query<Vec<(String, String)>>,
+) -> Response {
     session_boundary_response(&shared.agent, &session_id, query_one(&query, "state_id")).await
 }
 
 async fn checkout(State(shared): S, Query(query): Query<Vec<(String, String)>>) -> Response {
     let agent = &shared.agent;
-    let revision = tri!(int_param("query", "global_revision_id", query_one(&query, "global_revision_id"), None, Some(0)));
-    let recent = tri!(int_param("query", "recent_patch_count", query_one(&query, "recent_patch_count"), Some(5), Some(0)));
+    let revision = tri!(int_param(
+        "query",
+        "global_revision_id",
+        query_one(&query, "global_revision_id"),
+        None,
+        Some(0)
+    ));
+    let recent = tri!(int_param(
+        "query",
+        "recent_patch_count",
+        query_one(&query, "recent_patch_count"),
+        Some(5),
+        Some(0)
+    ));
     let keys = tri!(resolve_state_keys(agent, &query));
     let session = tri!(resolve_session(agent, query_one(&query, "session_id")));
 
     let mut states = Map::new();
     for declaration in agent.executor.registry().states() {
-        if keys.as_ref().is_some_and(|k| !k.contains(&declaration.name)) {
+        if keys
+            .as_ref()
+            .is_some_and(|k| !k.contains(&declaration.name))
+        {
             continue;
         }
-        let value = match agent.store.state_at(revision, Some(&declaration.name), Some(&session)).await {
+        let value = match agent
+            .store
+            .state_at(revision, Some(&declaration.name), Some(&session))
+            .await
+        {
             Ok(Some(StateAt::Single(snapshot))) => Some(snapshot.data),
             Ok(_) => None,
             Err(e) => return storage_error(e),
@@ -1054,7 +1241,11 @@ async fn checkout(State(shared): S, Query(query): Query<Vec<(String, String)>>) 
     let recent_patches = if recent == 0 {
         vec![]
     } else {
-        let events = match agent.store.between(0, revision, keys.clone(), Some(&session)).await {
+        let events = match agent
+            .store
+            .between(0, revision, keys.clone(), Some(&session))
+            .await
+        {
             Ok(events) => events,
             Err(e) => return storage_error(e),
         };
@@ -1073,8 +1264,20 @@ async fn checkout(State(shared): S, Query(query): Query<Vec<(String, String)>>) 
 
 async fn segments(State(shared): S, Query(query): Query<Vec<(String, String)>>) -> Response {
     let agent = &shared.agent;
-    let from = tri!(int_param("query", "from_global_revision_id", query_one(&query, "from_global_revision_id"), None, Some(0)));
-    let to = tri!(int_param("query", "to_global_revision_id", query_one(&query, "to_global_revision_id"), None, Some(0)));
+    let from = tri!(int_param(
+        "query",
+        "from_global_revision_id",
+        query_one(&query, "from_global_revision_id"),
+        None,
+        Some(0)
+    ));
+    let to = tri!(int_param(
+        "query",
+        "to_global_revision_id",
+        query_one(&query, "to_global_revision_id"),
+        None,
+        Some(0)
+    ));
     let keys = tri!(resolve_state_keys(agent, &query));
     let session = tri!(resolve_session(agent, query_one(&query, "session_id")));
     match agent.store.between(from, to, keys, Some(&session)).await {
@@ -1088,10 +1291,22 @@ async fn segments(State(shared): S, Query(query): Query<Vec<(String, String)>>) 
     }
 }
 
-async fn state_at_response(agent: &LocalAgent, revision: i64, state_id: Option<String>, session: &str) -> Response {
-    match agent.store.state_at(revision, state_id.as_deref(), Some(session)).await {
+async fn state_at_response(
+    agent: &LocalAgent,
+    revision: i64,
+    state_id: Option<String>,
+    session: &str,
+) -> Response {
+    match agent
+        .store
+        .state_at(revision, state_id.as_deref(), Some(session))
+        .await
+    {
         Ok(Some(at)) => Json(at).into_response(),
-        Ok(None) => detail(StatusCode::NOT_FOUND, "No state found for the requested revision"),
+        Ok(None) => detail(
+            StatusCode::NOT_FOUND,
+            "No state found for the requested revision",
+        ),
         Err(e) => storage_error(e),
     }
 }
@@ -1101,8 +1316,20 @@ async fn state_at_global(
     Path((session_id, target_revision)): Path<(String, String)>,
     Query(query): Query<Vec<(String, String)>>,
 ) -> Response {
-    let revision = tri!(int_param("path", "target_revision", Some(target_revision), None, None));
-    state_at_response(&shared.agent, revision, query_one(&query, "state_id"), &session_id).await
+    let revision = tri!(int_param(
+        "path",
+        "target_revision",
+        Some(target_revision),
+        None,
+        None
+    ));
+    state_at_response(
+        &shared.agent,
+        revision,
+        query_one(&query, "state_id"),
+        &session_id,
+    )
+    .await
 }
 
 async fn current_state_at_global(
@@ -1110,9 +1337,21 @@ async fn current_state_at_global(
     Path(target_revision): Path<String>,
     Query(query): Query<Vec<(String, String)>>,
 ) -> Response {
-    let revision = tri!(int_param("path", "target_revision", Some(target_revision), None, None));
+    let revision = tri!(int_param(
+        "path",
+        "target_revision",
+        Some(target_revision),
+        None,
+        None
+    ));
     let session = tri!(resolve_session(&shared.agent, None));
-    state_at_response(&shared.agent, revision, query_one(&query, "state_id"), &session).await
+    state_at_response(
+        &shared.agent,
+        revision,
+        query_one(&query, "state_id"),
+        &session,
+    )
+    .await
 }
 
 async fn forward_events(
@@ -1120,10 +1359,27 @@ async fn forward_events(
     Path((session_id, after)): Path<(String, String)>,
     Query(query): Query<Vec<(String, String)>>,
 ) -> Response {
-    let after = tri!(int_param("path", "after_global_revision", Some(after), None, None));
-    let count = tri!(int_param("query", "count", query_one(&query, "count"), Some(100), Some(1)));
+    let after = tri!(int_param(
+        "path",
+        "after_global_revision",
+        Some(after),
+        None,
+        None
+    ));
+    let count = tri!(int_param(
+        "query",
+        "count",
+        query_one(&query, "count"),
+        Some(100),
+        Some(1)
+    ));
     let state_id = query_one(&query, "state_id");
-    match shared.agent.store.forward_events(after, state_id.as_deref(), Some(&session_id), count).await {
+    match shared
+        .agent
+        .store
+        .forward_events(after, state_id.as_deref(), Some(&session_id), count)
+        .await
+    {
         Ok(events) => Json(events).into_response(),
         Err(e) => storage_error(e),
     }
@@ -1134,14 +1390,38 @@ async fn snapshots_around(
     Path((session_id, target_revision)): Path<(String, String)>,
     Query(query): Query<Vec<(String, String)>>,
 ) -> Response {
-    let revision = tri!(int_param("path", "target_revision", Some(target_revision), None, None));
-    let before = tri!(int_param("query", "before", query_one(&query, "before"), Some(1), Some(0)));
-    let after = tri!(int_param("query", "after", query_one(&query, "after"), Some(1), Some(0)));
+    let revision = tri!(int_param(
+        "path",
+        "target_revision",
+        Some(target_revision),
+        None,
+        None
+    ));
+    let before = tri!(int_param(
+        "query",
+        "before",
+        query_one(&query, "before"),
+        Some(1),
+        Some(0)
+    ));
+    let after = tri!(int_param(
+        "query",
+        "after",
+        query_one(&query, "after"),
+        Some(1),
+        Some(0)
+    ));
     let state_id = query_one(&query, "state_id");
     match shared
         .agent
         .store
-        .snapshots_around(revision, state_id.as_deref(), Some(&session_id), before, after)
+        .snapshots_around(
+            revision,
+            state_id.as_deref(),
+            Some(&session_id),
+            before,
+            after,
+        )
         .await
     {
         Ok(snapshots) => Json(snapshots).into_response(),
@@ -1171,16 +1451,36 @@ async fn journal_info(State(shared): S) -> Response {
     }
 }
 
-async fn journal_entries(State(shared): S, Path(session_id): Path<String>, Query(query): Query<Vec<(String, String)>>) -> Response {
+async fn journal_entries(
+    State(shared): S,
+    Path(session_id): Path<String>,
+    Query(query): Query<Vec<(String, String)>>,
+) -> Response {
     let agent = &shared.agent;
     let session = tri!(journal_session(agent, session_id));
-    let after = tri!(int_param("query", "after", query_one(&query, "after"), Some(0), Some(0)));
-    let limit = tri!(int_param("query", "limit", query_one(&query, "limit"), Some(1000), Some(1)));
+    let after = tri!(int_param(
+        "query",
+        "after",
+        query_one(&query, "after"),
+        Some(0),
+        Some(0)
+    ));
+    let limit = tri!(int_param(
+        "query",
+        "limit",
+        query_one(&query, "limit"),
+        Some(1000),
+        Some(1)
+    ));
     let until = match query_one(&query, "until") {
         Some(raw) => Some(tri!(int_param("query", "until", Some(raw), None, Some(0))) as u64),
         None => None,
     };
-    if agent.journal.watermark().is_some_and(|wm| wm.session_id == session) {
+    if agent
+        .journal
+        .watermark()
+        .is_some_and(|wm| wm.session_id == session)
+    {
         agent.journal.flush(FLUSH_TIMEOUT).await;
     }
     let entries = agent
@@ -1209,7 +1509,11 @@ async fn journal_entries(State(shared): S, Path(session_id): Path<String>, Query
 }
 
 async fn world_response(agent: &LocalAgent, session: &str, pos: u64) -> Response {
-    if agent.journal.watermark().is_some_and(|wm| wm.session_id == session) {
+    if agent
+        .journal
+        .watermark()
+        .is_some_and(|wm| wm.session_id == session)
+    {
         agent.journal.flush_to(pos, FLUSH_TIMEOUT).await;
     }
     match agent.store.journal_world(session, pos).await {
@@ -1242,21 +1546,46 @@ fn parse_timestamp(raw: &str) -> Option<i64> {
     })
 }
 
-async fn journal_at_time(State(shared): S, Path(session_id): Path<String>, Query(query): Query<Vec<(String, String)>>) -> Response {
+async fn journal_at_time(
+    State(shared): S,
+    Path(session_id): Path<String>,
+    Query(query): Query<Vec<(String, String)>>,
+) -> Response {
     let agent = &shared.agent;
     let session = tri!(journal_session(agent, session_id));
     let Some(raw) = query_one(&query, "timestamp") else {
-        return invalid("query", "timestamp", "missing", "Field required", Value::Null, None);
+        return invalid(
+            "query",
+            "timestamp",
+            "missing",
+            "Field required",
+            Value::Null,
+            None,
+        );
     };
     let Some(ms) = parse_timestamp(&raw) else {
-        return invalid("query", "timestamp", "datetime_parsing", "Input should be a valid datetime", json!(raw), None);
+        return invalid(
+            "query",
+            "timestamp",
+            "datetime_parsing",
+            "Input should be a valid datetime",
+            json!(raw),
+            None,
+        );
     };
-    if agent.journal.watermark().is_some_and(|wm| wm.session_id == session) {
+    if agent
+        .journal
+        .watermark()
+        .is_some_and(|wm| wm.session_id == session)
+    {
         agent.journal.flush(FLUSH_TIMEOUT).await;
     }
     match agent.store.journal_pos_at_time(&session, ms).await {
         Ok(Some(pos)) => world_response(agent, &session, pos).await,
-        Ok(None) => detail(StatusCode::NOT_FOUND, "No journal entry at or before that time"),
+        Ok(None) => detail(
+            StatusCode::NOT_FOUND,
+            "No journal entry at or before that time",
+        ),
         Err(e) => storage_error(e),
     }
 }
@@ -1271,7 +1600,10 @@ async fn task_events(State(shared): S, Path(task_id): Path<String>) -> Response 
             .into_response(),
         Ok(entries) => {
             let fold = Fold::from_entries(&entries);
-            Json(json!({ "task_id": task_id, "task": fold.tasks.get(&task_id), "entries": entries })).into_response()
+            Json(
+                json!({ "task_id": task_id, "task": fold.tasks.get(&task_id), "entries": entries }),
+            )
+            .into_response()
         }
         Err(e) => storage_error(e),
     }
@@ -1286,9 +1618,16 @@ fn build_openapi(agent: &LocalAgent, options: &ServeOptions) -> Value {
         serde_json::from_str(include_str!("openapi_models.json")).expect("bundled schemas parse");
     let registry = agent.executor.registry();
 
-    let command = |summary: &str, tag: &str| json!({ "post": { "tags": [tag], "summary": summary } });
-    paths.insert(options.assign_path.clone(), command("Assign Base Action", "Agent"));
-    paths.insert(format!("{}/{{interface}}", options.assign_path), command("Assign Action", "Agent"));
+    let command =
+        |summary: &str, tag: &str| json!({ "post": { "tags": [tag], "summary": summary } });
+    paths.insert(
+        options.assign_path.clone(),
+        command("Assign Base Action", "Agent"),
+    );
+    paths.insert(
+        format!("{}/{{interface}}", options.assign_path),
+        command("Assign Action", "Agent"),
+    );
     for (path, summary) in [
         ("/cancel", "Cancel Action"),
         ("/pause", "Pause Action"),
@@ -1297,17 +1636,45 @@ fn build_openapi(agent: &LocalAgent, options: &ServeOptions) -> Value {
     ] {
         paths.insert(path.into(), command(summary, "Agent"));
     }
-    let listing = |summary: &str, tags: &[&str]| json!({ "get": { "tags": tags, "summary": summary } });
-    paths.insert(options.tasks_path.clone(), listing("List tasks", &["Tasks"]));
-    paths.insert(format!("{}/{{task_id}}", options.tasks_path), listing("Get task details", &["Tasks", "Task Details"]));
-    paths.insert(options.states_path.clone(), listing("List states", &["States"]));
-    paths.insert(options.locks_path.clone(), listing("List locks", &["Locks"]));
+    let listing =
+        |summary: &str, tags: &[&str]| json!({ "get": { "tags": tags, "summary": summary } });
+    paths.insert(
+        options.tasks_path.clone(),
+        listing("List tasks", &["Tasks"]),
+    );
+    paths.insert(
+        format!("{}/{{task_id}}", options.tasks_path),
+        listing("Get task details", &["Tasks", "Task Details"]),
+    );
+    paths.insert(
+        options.states_path.clone(),
+        listing("List states", &["States"]),
+    );
+    paths.insert(
+        options.locks_path.clone(),
+        listing("List locks", &["Locks"]),
+    );
     if options.add_journal {
-        paths.insert("/journal".into(), listing("The journal's current position", &["Journal"]));
-        paths.insert("/journal/{session_id}".into(), listing("Journal entries in order", &["Journal"]));
-        paths.insert("/journal/{session_id}/at/{pos}".into(), listing("States, tasks and locks at a position", &["Journal"]));
-        paths.insert("/journal/{session_id}/at".into(), listing("States, tasks and locks at a time", &["Journal"]));
-        paths.insert(format!("{}/{{task_id}}/events", options.tasks_path), listing("Every journal entry of a task", &["Journal", "Tasks"]));
+        paths.insert(
+            "/journal".into(),
+            listing("The journal's current position", &["Journal"]),
+        );
+        paths.insert(
+            "/journal/{session_id}".into(),
+            listing("Journal entries in order", &["Journal"]),
+        );
+        paths.insert(
+            "/journal/{session_id}/at/{pos}".into(),
+            listing("States, tasks and locks at a position", &["Journal"]),
+        );
+        paths.insert(
+            "/journal/{session_id}/at".into(),
+            listing("States, tasks and locks at a time", &["Journal"]),
+        );
+        paths.insert(
+            format!("{}/{{task_id}}/events", options.tasks_path),
+            listing("Every journal entry of a task", &["Journal", "Tasks"]),
+        );
     }
 
     if options.add_implementations {
@@ -1343,7 +1710,10 @@ fn build_openapi(agent: &LocalAgent, options: &ServeOptions) -> Value {
     }
     for declaration in registry.states() {
         let title = format!("{}State", declaration.name);
-        components.insert(title.clone(), schema::schema_from_ports(&declaration.ports, &title));
+        components.insert(
+            title.clone(),
+            schema::schema_from_ports(&declaration.ports, &title),
+        );
     }
 
     json!({

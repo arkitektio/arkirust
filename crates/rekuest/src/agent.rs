@@ -158,17 +158,27 @@ pub struct Agent {
 }
 
 impl Agent {
-    pub fn new(options: AgentOptions, registry: Registry, ctx: Context, tokens: Arc<dyn TokenLoader>) -> Self {
+    pub fn new(
+        options: AgentOptions,
+        registry: Registry,
+        ctx: Context,
+        tokens: Arc<dyn TokenLoader>,
+    ) -> Self {
         let outbox = Arc::new(Outbox::new());
         // One session per agent: REGISTER announces it, SESSION_INIT and every
         // STATE_PATCH carry it.
         let session_id = uuid::Uuid::new_v4().to_string();
         #[cfg(feature = "wal")]
-        let store = options.journal_path.as_ref().and_then(|path| match crate::store::HistoryStore::open(path) {
-            Ok(store) => Some(store),
-            Err(e) => {
-                tracing::error!("could not open the journal at {}: {e:#}; keeping it in memory", path.display());
-                None
+        let store = options.journal_path.as_ref().and_then(|path| {
+            match crate::store::HistoryStore::open(path) {
+                Ok(store) => Some(store),
+                Err(e) => {
+                    tracing::error!(
+                        "could not open the journal at {}: {e:#}; keeping it in memory",
+                        path.display()
+                    );
+                    None
+                }
             }
         });
         #[cfg(feature = "wal")]
@@ -180,7 +190,13 @@ impl Agent {
         let journal = Arc::new(Journal::new(outbox.clone(), sink, Some(session_id.clone())));
         Self {
             options,
-            executor: Executor::with_session(registry, ctx, journal.clone(), None, Some(session_id.clone())),
+            executor: Executor::with_session(
+                registry,
+                ctx,
+                journal.clone(),
+                None,
+                Some(session_id.clone()),
+            ),
             tokens,
             outbox,
             journal,
@@ -234,7 +250,10 @@ impl Agent {
                 return Err(AgentError::Exhausted(attempt - 1));
             }
             let delay = policy.delay_for(attempt);
-            tracing::info!("reconnecting in {delay:?} (attempt {attempt}/{})", policy.max_retries);
+            tracing::info!(
+                "reconnecting in {delay:?} (attempt {attempt}/{})",
+                policy.max_retries
+            );
             tokio::time::sleep(delay).await;
         }
     }
@@ -248,14 +267,20 @@ impl Agent {
     /// Once: queue what earlier sessions of this agent never got acknowledged
     /// (from the local journal) ahead of this session, and start pruning.
     async fn load_backlog(&self) {
-        if self.backlog_loaded.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        if self
+            .backlog_loaded
+            .swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
             return;
         }
         #[cfg(feature = "wal")]
         if let Some(store) = &self.store {
             match store.unacked_entries(Some(&self.session_id)).await {
                 Ok(entries) if !entries.is_empty() => {
-                    tracing::info!("re-sending {} journal entries of earlier sessions", entries.len());
+                    tracing::info!(
+                        "re-sending {} journal entries of earlier sessions",
+                        entries.len()
+                    );
                     self.outbox.preload(entries);
                 }
                 Ok(_) => {}
@@ -265,7 +290,8 @@ impl Agent {
                 let store = store.clone();
                 tokio::spawn(async move {
                     loop {
-                        let before = chrono::Utc::now().timestamp_millis() - retention.as_millis() as i64;
+                        let before =
+                            chrono::Utc::now().timestamp_millis() - retention.as_millis() as i64;
                         match store.prune_acked(before).await {
                             Ok(0) => {}
                             Ok(n) => tracing::debug!("pruned {n} acknowledged journal entries"),
@@ -296,7 +322,8 @@ impl Agent {
                 Ok(()) => Activation::Done,
                 Err(e) => Activation::Failed(format!("{e:#}")),
             };
-            let previous = std::mem::replace(&mut *activation.lock().expect("activation lock"), next);
+            let previous =
+                std::mem::replace(&mut *activation.lock().expect("activation lock"), next);
             if let (Ok(()), Activation::Running(buffered)) = (&result, previous) {
                 for assign in buffered {
                     executor.assign(assign);
@@ -326,7 +353,9 @@ impl Agent {
                 self.executor.assign(assign);
             }
             Activation::Running(buffered) => buffered.push(assign),
-            Activation::Failed(_) => tracing::warn!("dropping an assignment: the agent failed to start"),
+            Activation::Failed(_) => {
+                tracing::warn!("dropping an assignment: the agent failed to start")
+            }
             // Cannot happen (assignments come after INIT), but never lose one.
             Activation::NotStarted => *activation = Activation::Running(vec![assign]),
         }
@@ -335,9 +364,19 @@ impl Agent {
     async fn session(&self) -> Result<SessionEnd, AgentError> {
         let token = self.tokens.get_token().await?;
 
-        let (ws, _) = match crate::transport::connect_ws(&self.options.endpoint_url, self.options.proxy.as_deref()).await {
+        let (ws, _) = match crate::transport::connect_ws(
+            &self.options.endpoint_url,
+            self.options.proxy.as_deref(),
+        )
+        .await
+        {
             Ok(ws) => ws,
-            Err(e) => return Ok(SessionEnd::Dropped(format!("connect to {}: {e}", self.options.endpoint_url))),
+            Err(e) => {
+                return Ok(SessionEnd::Dropped(format!(
+                    "connect to {}: {e}",
+                    self.options.endpoint_url
+                )))
+            }
         };
         let (mut sink, mut stream) = ws.split();
 
@@ -375,7 +414,11 @@ impl Agent {
             };
 
             let text = match frame {
-                Err(_) => break SessionEnd::Dropped("no frame from the server within the idle timeout".into()),
+                Err(_) => {
+                    break SessionEnd::Dropped(
+                        "no frame from the server within the idle timeout".into(),
+                    )
+                }
                 Ok(None) => break SessionEnd::Dropped("stream ended".into()),
                 Ok(Some(Err(e))) => break SessionEnd::Dropped(format!("read: {e}")),
                 Ok(Some(Ok(Message::Text(text)))) => text,
@@ -465,7 +508,10 @@ impl Agent {
             ToAgent::Pause { task } => self.executor.pause(&task),
             ToAgent::Resume { task, step } => self.executor.resume(&task, step),
             ToAgent::EventAck { event, seq, .. } => self.outbox.ack(event.as_deref(), seq),
-            ToAgent::JournalAck { journal_session, pos } => {
+            ToAgent::JournalAck {
+                journal_session,
+                pos,
+            } => {
                 self.outbox.journal_ack(&journal_session, pos);
                 #[cfg(feature = "wal")]
                 if let Some(store) = self.store.clone() {

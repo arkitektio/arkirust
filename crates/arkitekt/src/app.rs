@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use fakts::{Manifest, PublicSource};
 
-use rekuest::{Action, Background, Registry, StateType, Startup};
+use rekuest::{Action, Background, Registry, Startup, StateType};
 
 use crate::runtime::{ConnectOptions, Runtime};
 use crate::service::{rekuest_requirement, Service};

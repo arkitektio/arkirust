@@ -14,7 +14,8 @@ use serde_json::{json, Value};
 use tokio_tungstenite::tungstenite::Message;
 use twin::CameraState;
 
-type Ws = tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+type Ws =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
 /// Changes the camera until cancelled.
 #[action]
@@ -33,7 +34,8 @@ async fn start() -> (String, LocalAgent) {
     let mut registry = twin::registry();
     registry.register(spin);
     let options = ServeOptions::default().history(History::Memory);
-    let (router, agent) = configure(axum::Router::new(), registry, Context::default(), options).unwrap();
+    let (router, agent) =
+        configure(axum::Router::new(), registry, Context::default(), options).unwrap();
     agent.start().await.unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
@@ -42,7 +44,9 @@ async fn start() -> (String, LocalAgent) {
 }
 
 async fn connect(base: &str, init: Value) -> (Ws, Value) {
-    let (mut ws, _) = tokio_tungstenite::connect_async(base.replace("http", "ws") + "/ws").await.unwrap();
+    let (mut ws, _) = tokio_tungstenite::connect_async(base.replace("http", "ws") + "/ws")
+        .await
+        .unwrap();
     ws.send(Message::Text(init.to_string())).await.unwrap();
     let first = next_frame(&mut ws).await;
     assert_eq!(first["type"], "INIT");
@@ -51,7 +55,12 @@ async fn connect(base: &str, init: Value) -> (Ws, Value) {
 
 async fn next_frame(ws: &mut Ws) -> Value {
     loop {
-        match tokio::time::timeout(Duration::from_secs(10), ws.next()).await.unwrap().unwrap().unwrap() {
+        match tokio::time::timeout(Duration::from_secs(10), ws.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap()
+        {
             Message::Text(text) => return serde_json::from_str(&text).unwrap(),
             _ => continue,
         }
@@ -64,7 +73,10 @@ async fn until_terminal(ws: &mut Ws, task: &str) -> Vec<Value> {
     loop {
         let frame = next_frame(ws).await;
         let done = frame["task"] == task
-            && matches!(frame["type"].as_str(), Some("COMPLETED" | "FAILED" | "CRITICAL" | "CANCELLED"));
+            && matches!(
+                frame["type"].as_str(),
+                Some("COMPLETED" | "FAILED" | "CRITICAL" | "CANCELLED")
+            );
         frames.push(frame);
         if done {
             break;
@@ -100,7 +112,10 @@ async fn get(http: &reqwest::Client, url: String) -> Value {
 }
 
 fn positions(frames: &[Value]) -> Vec<u64> {
-    frames.iter().map(|f| f["pos"].as_u64().expect("every journal frame has a pos")).collect()
+    frames
+        .iter()
+        .map(|f| f["pos"].as_u64().expect("every journal frame has a pos"))
+        .collect()
 }
 
 fn kinds(frames: &[Value]) -> Vec<&str> {
@@ -109,7 +124,11 @@ fn kinds(frames: &[Value]) -> Vec<&str> {
 
 fn assert_contiguous(pos: &[u64]) {
     for pair in pos.windows(2) {
-        assert_eq!(pair[1], pair[0] + 1, "positions have no gaps and no repeats: {pos:?}");
+        assert_eq!(
+            pair[1],
+            pair[0] + 1,
+            "positions have no gaps and no repeats: {pos:?}"
+        );
     }
 }
 
@@ -122,14 +141,25 @@ async fn one_order_for_tasks_and_state_and_replay_at_any_position() {
     let (mut legacy, legacy_init) = connect(&base, json!({"type": "INIT"})).await;
     let session = init["journal"]["session_id"].as_str().unwrap().to_owned();
     assert_eq!(init["journal"]["pos"], 1, "SESSION_INIT is the first entry");
-    assert_eq!(init["journal"]["states"]["CameraState"]["exposure_ms"], 10.0);
+    assert_eq!(
+        init["journal"]["states"]["CameraState"]["exposure_ms"],
+        10.0
+    );
     assert!(legacy_init.get("journal").is_none());
 
     let task = assign(&http, &base, "set_exposure", json!({"exposure_ms": 20.0})).await;
     let frames = until_terminal(&mut ws, &task).await;
     assert_eq!(
         kinds(&frames),
-        ["ASSIGN", "PROGRESS", "LOCK", "STATE_PATCH", "YIELD", "COMPLETED", "UNLOCK"]
+        [
+            "ASSIGN",
+            "PROGRESS",
+            "LOCK",
+            "STATE_PATCH",
+            "YIELD",
+            "COMPLETED",
+            "UNLOCK"
+        ]
     );
     let pos = positions(&frames);
     assert_eq!(pos[0], 2);
@@ -139,8 +169,20 @@ async fn one_order_for_tasks_and_state_and_replay_at_any_position() {
 
     // The legacy subscriber gets Python's frames: no ASSIGN, no positions.
     let legacy_frames = until_terminal(&mut legacy, &task).await;
-    assert_eq!(kinds(&legacy_frames), ["PROGRESS", "LOCK", "STATE_PATCH", "YIELD", "COMPLETED", "UNLOCK"]);
-    assert!(legacy_frames.iter().all(|f| f.get("pos").is_none() && f.get("journal_session").is_none()));
+    assert_eq!(
+        kinds(&legacy_frames),
+        [
+            "PROGRESS",
+            "LOCK",
+            "STATE_PATCH",
+            "YIELD",
+            "COMPLETED",
+            "UNLOCK"
+        ]
+    );
+    assert!(legacy_frames
+        .iter()
+        .all(|f| f.get("pos").is_none() && f.get("journal_session").is_none()));
     assert_eq!(
         legacy_frames.iter().map(|f| &f["id"]).collect::<Vec<_>>(),
         frames[1..].iter().map(|f| &f["id"]).collect::<Vec<_>>(),
@@ -151,10 +193,18 @@ async fn one_order_for_tasks_and_state_and_replay_at_any_position() {
     let listing = get(&http, format!("{base}/journal/current")).await;
     let entries = listing["entries"].as_array().unwrap();
     assert_eq!(entries.len(), 8);
-    assert_contiguous(&entries.iter().map(|e| e["pos"].as_u64().unwrap()).collect::<Vec<_>>());
+    assert_contiguous(
+        &entries
+            .iter()
+            .map(|e| e["pos"].as_u64().unwrap())
+            .collect::<Vec<_>>(),
+    );
     assert_eq!(entries[0]["kind"], "SESSION_INIT");
     let unlock = &entries[7];
-    assert_eq!((unlock["kind"].as_str(), unlock["task_id"].as_str()), (Some("UNLOCK"), Some(task.as_str())));
+    assert_eq!(
+        (unlock["kind"].as_str(), unlock["task_id"].as_str()),
+        (Some("UNLOCK"), Some(task.as_str()))
+    );
 
     // Time travel: before the patch, between the end and the unlock, after.
     let lock_pos = frames[2]["pos"].as_u64().unwrap();
@@ -169,19 +219,44 @@ async fn one_order_for_tasks_and_state_and_replay_at_any_position() {
     assert_eq!(at["global_rev"], 1);
     assert_eq!(at["tasks"][&task]["status"], "COMPLETED");
     assert_eq!(at["tasks"][&task]["last_returns"]["return0"], 20.0);
-    assert_eq!(at["locks"]["camera"], task.as_str(), "UNLOCK comes after the end");
-    let at = get(&http, format!("{base}/journal/{session}/at/{}", done_pos + 1)).await;
+    assert_eq!(
+        at["locks"]["camera"],
+        task.as_str(),
+        "UNLOCK comes after the end"
+    );
+    let at = get(
+        &http,
+        format!("{base}/journal/{session}/at/{}", done_pos + 1),
+    )
+    .await;
     assert!(at["locks"].as_object().unwrap().is_empty());
 
     let now = chrono::Utc::now().timestamp_millis() + 1000;
-    let at = get(&http, format!("{base}/journal/{session}/at?timestamp={now}")).await;
+    let at = get(
+        &http,
+        format!("{base}/journal/{session}/at?timestamp={now}"),
+    )
+    .await;
     assert_eq!(at["pos"], done_pos + 1);
 
     let events = get(&http, format!("{base}/tasks/{task}/events")).await;
     assert_eq!(events["task"]["status"], "COMPLETED");
     assert_eq!(
-        events["entries"].as_array().unwrap().iter().map(|e| e["kind"].as_str().unwrap()).collect::<Vec<_>>(),
-        ["ASSIGN", "PROGRESS", "LOCK", "STATE_PATCH", "YIELD", "COMPLETED", "UNLOCK"]
+        events["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["kind"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        [
+            "ASSIGN",
+            "PROGRESS",
+            "LOCK",
+            "STATE_PATCH",
+            "YIELD",
+            "COMPLETED",
+            "UNLOCK"
+        ]
     );
 
     let info = get(&http, format!("{base}/session_info")).await;
@@ -217,7 +292,10 @@ async fn delivery_order_is_journal_order_under_concurrency() {
     let mut ended = 0;
     while ended < ids.len() {
         let frame = next_frame(&mut ws).await;
-        if matches!(frame["type"].as_str(), Some("COMPLETED" | "FAILED" | "CRITICAL")) {
+        if matches!(
+            frame["type"].as_str(),
+            Some("COMPLETED" | "FAILED" | "CRITICAL")
+        ) {
             ended += 1;
         }
         frames.push(frame);
@@ -261,7 +339,10 @@ async fn resume_after_a_disconnect() {
 
     // Missed while away.
     let missed = assign(&http, &base, "count_up", json!({"until": 3})).await;
-    while !agent.journal().locked(|v| v.fold().tasks.get(&missed).is_some_and(|t| t.done)) {
+    while !agent
+        .journal()
+        .locked(|v| v.fold().tasks.get(&missed).is_some_and(|t| t.done))
+    {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     tokio::time::sleep(Duration::from_millis(50)).await;
@@ -298,9 +379,16 @@ async fn resume_after_a_disconnect() {
     assert_eq!(init["journal"]["resync"], true);
 
     // Nor a position without its session (it may be from before a restart).
-    let (mut ws, init) = connect(&base, json!({"type": "INIT", "journal": true, "resume_after": 1})).await;
+    let (mut ws, init) = connect(
+        &base,
+        json!({"type": "INIT", "journal": true, "resume_after": 1}),
+    )
+    .await;
     assert_eq!(init["journal"]["resync"], true);
-    assert!(drain(&mut ws, Duration::from_millis(200)).await.is_empty(), "no backlog on resync");
+    assert!(
+        drain(&mut ws, Duration::from_millis(200)).await.is_empty(),
+        "no backlog on resync"
+    );
 
     agent.shutdown().await;
 }
@@ -311,12 +399,19 @@ async fn resume_from_storage_beyond_memory() {
     let http = reqwest::Client::new();
     let n = rekuest::journal::RING_CAPACITY as i64 + 100;
     let task = assign(&http, &base, "count_up", json!({"until": n})).await;
-    while !agent.journal().locked(|v| v.fold().tasks.get(&task).is_some_and(|t| t.done)) {
+    while !agent
+        .journal()
+        .locked(|v| v.fold().tasks.get(&task).is_some_and(|t| t.done))
+    {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     let watermark = agent.journal().watermark().unwrap().pos;
 
-    let (mut ws, init) = connect(&base, json!({"type": "INIT", "journal": true, "resume_after": 0})).await;
+    let (mut ws, init) = connect(
+        &base,
+        json!({"type": "INIT", "journal": true, "resume_after": 0}),
+    )
+    .await;
     assert_eq!(init["journal"]["resync"], false);
     let mut frames = vec![];
     for _ in 0..watermark {
@@ -344,26 +439,48 @@ async fn nothing_of_a_cancelled_task_after_its_end() {
             patches += 1;
         }
     }
-    http.post(format!("{base}/cancel")).json(&json!({"task": task})).send().await.unwrap();
+    http.post(format!("{base}/cancel"))
+        .json(&json!({"task": task}))
+        .send()
+        .await
+        .unwrap();
     let frames = until_terminal(&mut ws, &task).await;
-    let cancelled = frames.iter().position(|f| f["type"] == "CANCELLED").unwrap();
-    assert_eq!(kinds(&frames[cancelled + 1..]), ["UNLOCK"], "only the lock release follows the end");
+    let cancelled = frames
+        .iter()
+        .position(|f| f["type"] == "CANCELLED")
+        .unwrap();
+    assert_eq!(
+        kinds(&frames[cancelled + 1..]),
+        ["UNLOCK"],
+        "only the lock release follows the end"
+    );
 
     agent.journal().flush(Duration::from_secs(5)).await;
-    let listing = get(&http, format!("{base}/journal/{session}?kinds=STATE_PATCH&limit=100000")).await;
+    let listing = get(
+        &http,
+        format!("{base}/journal/{session}?kinds=STATE_PATCH&limit=100000"),
+    )
+    .await;
     let revs: Vec<u64> = listing["entries"]
         .as_array()
         .unwrap()
         .iter()
         .map(|e| e["global_rev"].as_u64().unwrap())
         .collect();
-    assert_eq!(revs, (1..=revs.len() as u64).collect::<Vec<_>>(), "no revision was skipped");
+    assert_eq!(
+        revs,
+        (1..=revs.len() as u64).collect::<Vec<_>>(),
+        "no revision was skipped"
+    );
 
     // The live state is exactly the recorded one.
     let last = agent.journal().watermark().unwrap();
     assert_eq!(agent.executor().states().revision().1, last.global_rev);
     let at = get(&http, format!("{base}/journal/{session}/at/{}", last.pos)).await;
-    assert_eq!(at["states"]["CameraState"], agent.executor().states().value("CameraState").unwrap());
+    assert_eq!(
+        at["states"]["CameraState"],
+        agent.executor().states().value("CameraState").unwrap()
+    );
     assert_eq!(at["tasks"][&task]["status"], "CANCELLED");
 
     agent.shutdown().await;

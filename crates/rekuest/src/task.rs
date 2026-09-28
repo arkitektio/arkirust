@@ -73,7 +73,9 @@ pub struct Task {
 
 impl std::fmt::Debug for Task {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Task").field("id", &self.id).finish_non_exhaustive()
+        f.debug_struct("Task")
+            .field("id", &self.id)
+            .finish_non_exhaustive()
     }
 }
 
@@ -180,9 +182,13 @@ impl Task {
         let Some(armed) = self.brk.current() else {
             return false;
         };
-        self.emit(FromAgent::Paused { task: self.id.clone() });
+        self.emit(FromAgent::Paused {
+            task: self.id.clone(),
+        });
         armed.notified().await;
-        self.emit(FromAgent::Resumed { task: self.id.clone() });
+        self.emit(FromAgent::Resumed {
+            task: self.id.clone(),
+        });
         true
     }
 
@@ -225,11 +231,14 @@ impl Task {
     /// A handle to change a state, holding this task's locks. Used by `#[action]`.
     #[doc(hidden)]
     pub fn state_mut<T: StateType>(&self) -> Result<StateMut<T>, StateError> {
-        self.hub.as_ref().ok_or(StateError::NoAgent)?.state_mut(Mutation {
-            task_id: Some(self.id.clone()),
-            locks: Some(self.locks.clone()),
-            gate: Some(self.gate.clone()),
-        })
+        self.hub
+            .as_ref()
+            .ok_or(StateError::NoAgent)?
+            .state_mut(Mutation {
+                task_id: Some(self.id.clone()),
+                locks: Some(self.locks.clone()),
+                gate: Some(self.gate.clone()),
+            })
     }
 
     /// A read-only handle to a state. Used by `#[action]`.

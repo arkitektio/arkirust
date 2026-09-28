@@ -24,15 +24,22 @@ pub async fn connect_ws(url: &str, proxy: Option<&str>) -> Result<(Ws, Response)
     ))?;
     let port = uri
         .port_u16()
-        .unwrap_or(if uri.scheme_str() == Some("wss") { 443 } else { 80 });
+        .unwrap_or(if uri.scheme_str() == Some("wss") {
+            443
+        } else {
+            80
+        });
     let stream = tunnel(proxy, host, port).await?;
     tokio_tungstenite::client_async_tls_with_config(request, stream, None, None).await
 }
 
 /// Open a TCP tunnel to `host:port` through the HTTP proxy at `proxy`.
 async fn tunnel(proxy: &str, host: &str, port: u16) -> Result<TcpStream, Error> {
-    let invalid = |what: String| Error::Io(std::io::Error::new(std::io::ErrorKind::InvalidInput, what));
-    let proxy_uri: Uri = proxy.parse().map_err(|e| invalid(format!("invalid proxy url {proxy}: {e}")))?;
+    let invalid =
+        |what: String| Error::Io(std::io::Error::new(std::io::ErrorKind::InvalidInput, what));
+    let proxy_uri: Uri = proxy
+        .parse()
+        .map_err(|e| invalid(format!("invalid proxy url {proxy}: {e}")))?;
     let proxy_host = proxy_uri
         .host()
         .ok_or_else(|| invalid(format!("proxy url {proxy} has no host")))?;

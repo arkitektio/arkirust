@@ -101,7 +101,11 @@ impl Runtime {
         Self::connect_as(app, options, false).await
     }
 
-    async fn connect_as(app: App, options: ConnectOptions, remote_agent: bool) -> anyhow::Result<Self> {
+    async fn connect_as(
+        app: App,
+        options: ConnectOptions,
+        remote_agent: bool,
+    ) -> anyhow::Result<Self> {
         let device_id = options.device_id.clone().or_else(|| device_id().ok());
         let manifest = app.manifest_for(device_id, remote_agent);
         if manifest.requirements.is_empty() && !remote_agent {
@@ -128,11 +132,11 @@ impl Runtime {
         if let Some(grant) = &options.grant {
             builder = builder.grant(grant.clone());
         }
-        if let Some(proxy) = options
-            .mesh_proxy
-            .clone()
-            .or_else(|| std::env::var("ARKITEKT_MESH_PROXY").ok().filter(|p| !p.is_empty()))
-        {
+        if let Some(proxy) = options.mesh_proxy.clone().or_else(|| {
+            std::env::var("ARKITEKT_MESH_PROXY")
+                .ok()
+                .filter(|p| !p.is_empty())
+        }) {
             builder = builder.mesh_proxy(proxy);
         }
         #[cfg(feature = "mesh")]
@@ -215,7 +219,13 @@ impl Runtime {
             .app
             .identifier
             .chars()
-            .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
             .collect();
         options.journal_path = Some(format!("{file}.journal.db").into());
         if let Some(policy) = &self.options.policy {

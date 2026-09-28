@@ -58,7 +58,10 @@ pub struct Broadcaster {
 impl std::fmt::Debug for Broadcaster {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Broadcaster")
-            .field("subscribers", &self.subscribers.lock().expect("subscribers").len())
+            .field(
+                "subscribers",
+                &self.subscribers.lock().expect("subscribers").len(),
+            )
             .finish()
     }
 }
@@ -81,19 +84,30 @@ fn legacy_route<'a>(message: &'a FromAgent, action_key: Option<&'a str>) -> Opti
 }
 
 impl Broadcaster {
-    pub(crate) fn subscribe(&self, filters: Filters, tx: UnboundedSender<String>, journal: bool) -> u64 {
+    pub(crate) fn subscribe(
+        &self,
+        filters: Filters,
+        tx: UnboundedSender<String>,
+        journal: bool,
+    ) -> u64 {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
-        self.subscribers.lock().expect("subscribers").push(Subscriber {
-            id,
-            filters,
-            tx,
-            journal,
-        });
+        self.subscribers
+            .lock()
+            .expect("subscribers")
+            .push(Subscriber {
+                id,
+                filters,
+                tx,
+                journal,
+            });
         id
     }
 
     pub(crate) fn unsubscribe(&self, id: u64) {
-        self.subscribers.lock().expect("subscribers").retain(|s| s.id != id);
+        self.subscribers
+            .lock()
+            .expect("subscribers")
+            .retain(|s| s.id != id);
     }
 
     fn deliver(&self, message: FromAgent, action_key: Option<&str>, entry: Option<&JournalEntry>) {
@@ -129,7 +143,9 @@ impl Broadcaster {
                 if !legacy.is_some_and(|r| s.filters.admits(r)) {
                     return true;
                 }
-                plain.get_or_insert_with(|| serde_json::to_string(&envelope).expect("messages serialize"))
+                plain.get_or_insert_with(|| {
+                    serde_json::to_string(&envelope).expect("messages serialize")
+                })
             };
             s.tx.send(text.clone()).is_ok()
         });

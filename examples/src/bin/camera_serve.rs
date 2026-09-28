@@ -62,13 +62,20 @@ async fn set_exposure(exposure_ms: f64, camera: StateMut<CameraState>) -> anyhow
 /// # Arguments
 /// * `count` - How many frames to acquire
 #[action]
-async fn acquire(#[port(default = 3)] count: i64, camera: StateMut<CameraState>, task: Task) -> anyhow::Result<i64> {
+async fn acquire(
+    #[port(default = 3)] count: i64,
+    camera: StateMut<CameraState>,
+    task: Task,
+) -> anyhow::Result<i64> {
     for i in 0..count {
         task.pausepoint().await;
         let exposure = camera.read(|c| c.exposure_ms);
         tokio::time::sleep(Duration::from_millis(exposure as u64)).await;
         camera.update(|c| c.frames += 1)?;
-        task.progress((100 * (i + 1) / count.max(1)) as i32, format!("frame {}", i + 1));
+        task.progress(
+            (100 * (i + 1) / count.max(1)) as i32,
+            format!("frame {}", i + 1),
+        );
     }
     Ok(camera.read(|c| c.frames))
 }
@@ -76,7 +83,9 @@ async fn acquire(#[port(default = 3)] count: i64, camera: StateMut<CameraState>,
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
+        )
         .init();
 
     let app = App::new("camera", "0.1.0")
@@ -110,5 +119,8 @@ async fn main() -> anyhow::Result<()> {
     // Nothing above connects: an App is a declaration. `serve` runs the startup
     // hooks and mounts the agent next to your own routes.
     let router = axum::Router::new().route("/health", get(|| async { "ok" }));
-    serve(app, router, ServeOptions::default()).await?.listen("0.0.0.0:8099").await
+    serve(app, router, ServeOptions::default())
+        .await?
+        .listen("0.0.0.0:8099")
+        .await
 }
