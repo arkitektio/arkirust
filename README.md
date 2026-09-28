@@ -49,12 +49,13 @@ async fn main() -> anyhow::Result<()> {
 | [`rekuest-macros`](crates/rekuest-macros) | `@register`     | `#[action]`: turns a function into an action definition                                          |
 | [`arkitekt`](crates/arkitekt)         | `arkitekt`          | `App`, `Service`, `Runtime`; re-exports everything above                                          |
 | [`mikro`](crates/mikro)               | `mikro`             | Mikro client: array datasets stored as zarr v3 on the S3 datalayer                                |
+| [`lovekit`](crates/lovekit)           | `lovekit`           | Lovekit client: LiveKit broadcasts and stream tokens; with `livekit`, joins rooms and publishes video, also through the mesh |
 
 Apps normally depend on `arkitekt` (and service crates such as `mikro`) only.
 
-On crates.io, `rath` and `mikro` are published as `arkitekt-rath` and
-`arkitekt-mikro` (the plain names were taken); they are still imported as
-`rath` / `mikro`:
+On crates.io, `rath`, `mikro` and `lovekit` are published as `arkitekt-rath`,
+`arkitekt-mikro` and `arkitekt-lovekit` (the plain names were taken); they are
+still imported as `rath` / `mikro` / `lovekit`:
 
 ```toml
 [dependencies]
@@ -171,15 +172,117 @@ tailnet). Build with the `mesh` feature and run with `ARKITEKT_MESH=1` (or
 `ConnectOptions::mesh(..)`):
 
 * When authorizing, the app asks for a mesh key. The approver can allow it.
-* The app then runs a userspace `tailscaled` as a sidecar. It needs no root and
-  runs next to a system tailscale. The sidecar joins the mesh once and keeps its
-  node under `~/.local/state/arkitekt/mesh/`.
+* The app then runs [`arkitekt-meshd`](crates/meshd/) as a sidecar: a userspace
+  tailnet node (our own client, below) that needs no root and runs next to a
+  system tailscale. It joins
+  the mesh once and keeps its node under `~/.local/state/arkitekt/mesh/`. It
+  stops when the app exits.
 * Aliases the server marks as mesh-only are challenged and used through the
   sidecar's local HTTP proxy. This covers GraphQL, the agent websocket and S3.
-* tailscale must be installed.
+* `arkitekt-meshd` must be installed. Download it from the `meshd-v*` GitHub
+  releases or run `pip install arkitekt-meshd`. The app finds it through
+  `ARKITEKT_MESHD`, next to its own executable, in `~/.local/share/arkitekt/bin`,
+  or on `PATH`. The Python client runs the same binary, or the same node
+  in-process (`pip install arkitekt-mesh`).
+
+### Without the sidecar: `mesh-native`
+
+With the `mesh-native` feature, `ARKITEKT_MESH=native` (or
+`MeshOptions { backend: MeshBackend::Native, .. }`) runs the node inside the
+app with [`arkitekt-mesh`](crates/mesh/). This is our own Tailscale-compatible
+client, written from the protocol up. It speaks:
+
+* ts2021 control (Noise, then HTTP/2), the protocol ionscale, headscale and
+  Tailscale serve. It is tested against tailscale's own test control server,
+  and against our ionskale fork in the local mesh lab (`testing/mesh-lab`),
+* WireGuard,
+* DERP relays,
+* disco path discovery with STUN, so peers get direct UDP paths when the
+  network allows and relay through DERP when it doesn't.
+
+You don't need a separate binary or a Go toolchain, and the app gets the same
+local proxy.
+
+The same limits apply to any new implementation:
+
+* It has not been audited. The protocols are tested against tailscale's own Go
+  implementation (see below), and the cryptographic primitives come from the
+  RustCrypto crates.
+* It has no MagicDNS. Mesh hostnames are looked up in the node's netmap by
+  hostname or FQDN.
+* It dials out only. The node accepts no inbound TCP connections; a UDP
+  socket it binds (`Node::bind_udp`) receives only what peers send to it.
+
+Each backend keeps its own node state. The native node lives in
+`…/mesh/<app>-native/` (`identity.json`). Switching backends therefore joins
+the mesh as a new node, which needs a fresh mesh key: authorize again with
+`no_cache`.
+
+To check a real deployment, join its mesh with a key and reach a peer:
+
+```sh
+ARKITEKT_TEST_MESH_URL=https://… ARKITEKT_TEST_MESH_KEY=tskey-… \
+ARKITEKT_TEST_MESH_PEER=http://<peer>/ \
+  cargo test -p fakts --features mesh-native -- --ignored native
+```
+
+The crate's end-to-end tests (`cargo test -p arkitekt-mesh`) run it against
+tailscale's test control server, a DERP/STUN server and a `tsnet` peer. They
+build these from `crates/mesh/tests/harness` and need Go; without Go they are
+skipped.
+
+For running the same stack on ESP32, see [docs/esp32-mesh.md](docs/esp32-mesh.md).
+
+Go appears only in the tests, as the reference tailscale the client is
+checked against. The client used to run as a Go tsnet sidecar; that build is
+gone (see [RFC-1](docs/rfc1-rust-only-mesh.md)). What the Rust node lacked compared with tsnet
+is tracked as RFCs, each listing what is done and what is not:
+
+| RFC | What | Status |
+|---|---|---|
+| [RFC-2](docs/rfc2-ipv6-underlay.md) | Direct paths over IPv6 | Implemented |
+| [RFC-3](docs/rfc3-nat-port-mapping.md) | NAT port mapping | PCP and NAT-PMP; no UPnP |
+| [RFC-4](docs/rfc4-derp-home-by-latency.md) | Home DERP region by measured latency | Implemented |
+| [RFC-5](docs/rfc5-tailnet-lock.md) | Tailnet lock | Verifying node; no signing or fork resolution |
+| [RFC-6](docs/rfc6-cross-platform.md) | macOS and Windows | CI matrix written, never run |
+| [RFC-7](docs/rfc7-production-and-throughput.md) | Production and throughput | Proposed |
+| [RFC-8](docs/rfc8-packet-filter.md) | Enforcing the tailnet's ACLs | Implemented |
+
+The same node runs:
+
+* **as the sidecar:** [`crates/meshd`](crates/meshd/) is `arkitekt-meshd`
+  (`--turn` and `--forward` also expose the relay and forwards).
+* **in Python:** [`crates/mesh-py`](crates/mesh-py/) is the `arkitekt-mesh`
+  package on PyPI. With it installed, Python fakts runs the node in-process
+  (`MeshOptions.backend`, `ARKITEKT_MESH=native`).
+
+### WebRTC media over the mesh (LiveKit)
+
+WebRTC media is UDP and cannot go through the HTTP proxy. With fakts'
+`mesh-relay` feature, the native node offers two more ways in, without root
+or a TUN device:
+
+* `Fakts::mesh_forward(&alias)`: a local 127.0.0.1 port that forwards TCP to
+  a mesh alias, e.g. for LiveKit's signaling websocket.
+* `Fakts::mesh_turn()`: a TURN server on 127.0.0.1 whose allocations are UDP
+  sockets on the mesh. Hand it to the WebRTC client as its only ICE server,
+  with a relay-only transport policy. All media then goes through the relay
+  and over the mesh to the SFU. The relay only reaches mesh peers.
+
+In Python, `lovekit`'s `aconnect_room(token)` does both for a mesh-only
+LiveKit alias, via `Fakts.amesh_forward`/`amesh_turn`. The SFU must advertise
+its mesh address on its UDP port (LiveKit `rtc.node_ip` with
+`rtc.udp_port`), and the mesh ACLs must let apps reach it on the signaling
+(TCP) and media (UDP) ports.
 
 If a proxy into the mesh is already running (e.g. `arkitekt mesh proxy`), set
 `ARKITEKT_MESH_PROXY=http://localhost:1055` instead.
+
+The mesh proxy is passed explicitly to each mesh alias. It is never read from
+`HTTP_PROXY` or `ALL_PROXY`, and it is HTTP only, never SOCKS. Direct aliases
+still follow `HTTP(S)_PROXY`/`ALL_PROXY`, but the datalayer cannot use a SOCKS
+proxy. With `ALL_PROXY=socks5h://…` set for another tool, exclude the
+deployment with `NO_PROXY`.
 
 ## Serving without a rekuest server
 
@@ -202,6 +305,7 @@ so clients written against a Python app work unchanged:
 | `WS /ws` | send `{"type": "INIT"}` and receive a snapshot, then every YIELD / COMPLETED / LOG / STATE_PATCH / LOCK frame |
 | `GET /tasks`, `/states`, `/states/{name}`, `/locks` | what the app is doing right now |
 | `GET /states/checkout`, `/states/segments`, `/forward_events/…`, … | state history, kept in SQLite (`agent_data.db`) |
+| `GET /journal/{session}`, `/journal/{session}/at/{pos}`, `/tasks/{id}/events` | the journal: every task event and state change in one order, and the app as of any position |
 | `GET /schemas/…`, `/openapi.json`, `/docs` | the declaration and an API page |
 
 * **Service connections:** an app without services never authenticates. One
@@ -209,6 +313,10 @@ so clients written against a Python app work unchanged:
 * **Auth:** `ServeOptions::auth(|request| ...)` protects `/assign` and the
   websocket.
 * **Testing:** the `testing` feature adds `AgentTestClient`.
+* **Journal:** send `{"type": "INIT", "journal": true}` on the websocket to get
+  a `pos` on every frame and a snapshot consistent with it; add
+  `"resume_after": N` after a reconnect to receive exactly what you missed.
+  See [docs/journal.md](docs/journal.md).
 
 Because the served app tracks every state itself, do not add "getter" actions
 that only return state: read `GET /states` or subscribe to the websocket.
@@ -241,6 +349,10 @@ Implemented:
 - [x] Mikro: create, fetch and read array datasets through zarr v3 on S3
 - [x] States (JSON-patch published, with history), locks, pause/resume/step, startup/background/shutdown hooks
 - [x] Serving over HTTP + websocket without a rekuest server, contract-tested against the Python implementation
+- [x] A journal of task events and state changes in one order: resumable subscriptions, replay at any position
+- [x] A local write-ahead journal: what the server has not acknowledged is re-sent after a restart
+- [x] Memory structures (`Memory<T>`): kept in the agent's memory under ids it mints itself, no round trip
+- [x] Durable-action groundwork: `task.now()`, `task.random_bytes(n)`, `task.sleep(d)` are recorded as effects
 
 Not implemented yet:
 
