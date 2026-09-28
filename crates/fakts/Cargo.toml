@@ -26,13 +26,23 @@ sha2.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+mesh = { workspace = true, optional = true, features = ["session"] }
 
 [features]
 default = []
-# Join the deployment's mesh with a userspace tailscaled sidecar
+# Join the deployment's mesh with the `arkitekt-meshd` sidecar
 # (`FaktsBuilder::mesh`); mesh aliases are reached through its proxy.
 mesh = ["tokio/process"]
+# Also run the node in-process with our own Tailscale-compatible client
+# (`MeshBackend::Native`, the `arkitekt-mesh` crate): no sidecar binary.
+mesh-native = ["mesh", "dep:mesh"]
+# The native node's TURN relay and TCP forwards (`Fakts::mesh_turn`,
+# `Fakts::mesh_forward`), for WebRTC media such as LiveKit.
+mesh-relay = ["mesh-native", "mesh/relay"]
 
 [dev-dependencies]
 wiremock = "0.6"
+axum.workspace = true
+futures.workspace = true
 tempfile = "3"
+tracing-subscriber.workspace = true

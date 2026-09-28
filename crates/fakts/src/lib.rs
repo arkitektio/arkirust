@@ -34,7 +34,7 @@ pub use crate::fakts::{Fakts, FaktsBuilder, Grant, TokenLoader};
 pub use crate::grants::{ClientKind, ClientRole, DeviceCodeHook, DeviceCodeOptions};
 pub use crate::models::*;
 #[cfg(feature = "mesh")]
-pub use crate::mesh::MeshOptions;
+pub use crate::mesh::{MeshBackend, MeshOptions};
 
 /// Select the process-wide TLS provider (ring), once.
 ///
