@@ -244,7 +244,7 @@ is tracked as RFCs, each listing what is done and what is not:
 | [RFC-3](docs/rfc3-nat-port-mapping.md) | NAT port mapping | PCP and NAT-PMP; no UPnP |
 | [RFC-4](docs/rfc4-derp-home-by-latency.md) | Home DERP region by measured latency | Implemented |
 | [RFC-5](docs/rfc5-tailnet-lock.md) | Tailnet lock | Verifying node; no signing or fork resolution |
-| [RFC-6](docs/rfc6-cross-platform.md) | macOS and Windows | CI matrix written, never run |
+| [RFC-6](docs/rfc6-cross-platform.md) | macOS and Windows | Tests green on all three; release signing open |
 | [RFC-7](docs/rfc7-production-and-throughput.md) | Production and throughput | Proposed |
 | [RFC-8](docs/rfc8-packet-filter.md) | Enforcing the tailnet's ACLs | Implemented |
 
