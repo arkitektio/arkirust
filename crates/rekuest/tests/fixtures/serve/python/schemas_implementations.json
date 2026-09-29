@@ -75,7 +75,9 @@
         ],
         "needsToken": true,
         "provenanceAudience": null,
-        "effect": null
+        "effects": null,
+        "execution": null,
+        "codeHash": null
       },
       "add_tag": {
         "definition": {
@@ -146,7 +148,9 @@
         ],
         "needsToken": true,
         "provenanceAudience": null,
-        "effect": null
+        "effects": null,
+        "execution": null,
+        "codeHash": null
       },
       "count_up": {
         "definition": {
@@ -213,7 +217,9 @@
         "manipulates": [],
         "needsToken": true,
         "provenanceAudience": null,
-        "effect": null
+        "effects": null,
+        "execution": null,
+        "codeHash": null
       },
       "explode": {
         "definition": {
@@ -261,7 +267,9 @@
         "manipulates": [],
         "needsToken": true,
         "provenanceAudience": null,
-        "effect": null
+        "effects": null,
+        "execution": null,
+        "codeHash": null
       },
       "pausable": {
         "definition": {
@@ -309,7 +317,9 @@
         "manipulates": [],
         "needsToken": true,
         "provenanceAudience": null,
-        "effect": null
+        "effects": null,
+        "execution": null,
+        "codeHash": null
       }
     }
   }

@@ -80,7 +80,9 @@ pub(crate) fn api_implementation(i: &Implementation) -> Value {
         "manipulates": i.manipulates,
         "needsToken": i.needs_token,
         "provenanceAudience": null,
-        "effect": null,
+        "effects": null,
+        "execution": null,
+        "codeHash": null,
     })
 }
 
