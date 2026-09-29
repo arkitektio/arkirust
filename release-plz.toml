@@ -14,13 +14,14 @@ name = "arkitekt-mesh"
 version_group = "arkitekt"
 
 # The sidecar binary (`cargo install arkitekt-meshd`); its prebuilt binaries
-# and the Python wheels are released by .github/workflows/meshd.yml on a
+# are attached to a GitHub release by .github/workflows/meshd.yml on a
 # `meshd-vX.Y.Z` tag.
 [[package]]
 name = "arkitekt-meshd"
 version_group = "arkitekt"
 
-# Published to PyPI (as `arkitekt-mesh`) by the meshd workflow, not crates.io.
+# Published to PyPI (as `arkitekt-mesh`) by .github/workflows/release.yaml on a
+# `mesh-vX.Y.Z` tag, not to crates.io.
 [[package]]
 name = "arkitekt-mesh-py"
 version_group = "arkitekt"
