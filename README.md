@@ -354,11 +354,12 @@ Implemented:
 - [x] A local write-ahead journal: what the server has not acknowledged is re-sent after a restart
 - [x] Memory structures (`Memory<T>`): kept in the agent's memory under ids it mints itself, no round trip
 - [x] Durable-action groundwork: `task.now()`, `task.random_bytes(n)`, `task.sleep(d)` are recorded as effects
+- [x] The recovery wire: `ASSIGN_REQUEST.call_key` and keyed `EFFECT` frames parse; actions register as `PLAIN` with no `effects` claim, so a Rust task whose agent dies ends `LOST`
 
 Not implemented yet:
 
 - [ ] GraphQL subscriptions over websocket
-- [ ] Memory structures and calling other actions from an action
+- [ ] Workflows (`WORKFLOW` actions that call other actions and are resumed from their journal), and an `effects` claim per action
 - [ ] Structure-typed fields inside states
 - [ ] The redeem grant for headless deployment
 - [ ] Other mikro data types (tables, files, meshes, …) and multiscale pyramids
