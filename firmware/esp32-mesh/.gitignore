@@ -1,5 +1,0 @@
-target/
-.embuild/
-Cargo.lock
-mesh.env
-sdkconfig

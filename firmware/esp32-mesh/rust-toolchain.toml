@@ -1,5 +1,0 @@
-[toolchain]
-# Espressif's Xtensa toolchain, pinned: 1.94+ (LLVM 21) fails release builds
-# with "Cannot select: XtensaISD::PCREL_WRAPPER".
-#   espup install --targets esp32,esp32s3 --toolchain-version 1.93.0.0 --name esp-1.93
-channel = "esp-1.93"

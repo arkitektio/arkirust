@@ -54,16 +54,16 @@ jobs:
       - run: cargo check -p arkitekt --features mesh-native
       - run: cargo test -p arkitekt-mesh --lib
 
-  # The mesh core and driver still build for ESP32-C6 (ESP-IDF, RISC-V).
-  mesh-esp32:
+  # What the ESP32 firmware (arkitektio/arkitekt-mesh-esp32) builds: the mesh
+  # without its default features (no ring, no udp, no tka-disable, no portmap).
+  mesh-embedded:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: rust-src
-      - run: cargo check
-        working-directory: spikes/esp32-mesh
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check -p arkitekt-mesh --no-default-features
+      - run: cargo check -p arkitekt-mesh --no-default-features --features tokio
 
   # Squash-merged PR titles become the commits release-plz reads, so enforce Conventional Commits.
   pr-title:

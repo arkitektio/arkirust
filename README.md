@@ -231,7 +231,8 @@ tailscale's test control server, a DERP/STUN server and a `tsnet` peer. They
 build these from `crates/mesh/tests/harness` and need Go; without Go they are
 skipped.
 
-For running the same stack on ESP32, see [docs/esp32-mesh.md](docs/esp32-mesh.md).
+For running the same stack on an ESP32, see
+[arkitektio/arkitekt-mesh-esp32](https://github.com/arkitektio/arkitekt-mesh-esp32).
 
 Go appears only in the tests, as the reference tailscale the client is
 checked against. The client used to run as a Go tsnet sidecar; that build is
