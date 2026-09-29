@@ -336,6 +336,7 @@ mod tests {
                 task: "t".into(),
                 effect: crate::messages::EffectKind::Now,
                 value: 1.5.into(),
+                key: None,
             },
             None,
         );
@@ -364,6 +365,7 @@ mod tests {
             FromAgent::AssignRequest {
                 reference: None,
                 parent_step: Some(3),
+                call_key: None,
                 args: Default::default(),
                 action: Some("a".into()),
                 action_hash: None,

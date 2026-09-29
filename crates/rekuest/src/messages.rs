@@ -258,6 +258,9 @@ pub enum FromAgent {
         task: String,
         effect: EffectKind,
         value: Value,
+        /// What the task calls this value; a replay matches values by key.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        key: Option<String>,
     },
     /// Ask the server to assign a child task (dependent work). Not numbered
     /// (no `pos`): the server answers it. `parent_step` is the parent's step for
@@ -269,6 +272,10 @@ pub enum FromAgent {
         reference: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         parent_step: Option<u64>,
+        /// What the parent calls this child; the server is idempotent on
+        /// (`parent`, `call_key`) too, checked before the step.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        call_key: Option<String>,
         #[serde(default)]
         args: Map<String, Value>,
         #[serde(default, skip_serializing_if = "Option::is_none")]

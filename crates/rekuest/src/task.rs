@@ -202,6 +202,8 @@ impl Task {
             task: self.id.clone(),
             effect,
             value: value.clone(),
+            // Keys are for workflow replay, which this agent does not do.
+            key: None,
         });
         value
     }
