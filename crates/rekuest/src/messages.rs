@@ -70,9 +70,6 @@ pub enum ToAgent {
         hash: Option<String>,
         #[serde(default)]
         diagnostics: Vec<Diagnostic>,
-        /// The server persists journal positions and answers with `JOURNAL_ACK`.
-        #[serde(default)]
-        journal: bool,
     },
     Assign(Box<Assign>),
     Cancel {
@@ -228,8 +225,10 @@ pub enum FromAgent {
         key: String,
         task: String,
     },
+    /// `task` is the task that held the lock.
     Unlock {
         key: String,
+        task: String,
     },
     /// The agent holds a value in memory under `resource_id`, an id it minted
     /// itself. The value is referenced by that id right away; the server only
@@ -253,31 +252,70 @@ pub enum FromAgent {
         reference: String,
         drawer: String,
     },
-    /// The assignment a task started from, as the journal records it (no token).
-    /// Only sent to a server that keeps a journal.
-    Assign(Box<Assign>),
-    /// The task read the clock (a durable-action effect).
-    Now {
+    /// A value the task took from outside itself (the clock, randomness, a
+    /// deadline), recorded so a replay can return the same value.
+    Effect {
         task: String,
-        /// `{task}:{step}`, filled in by the journal.
-        #[serde(default)]
-        effect_id: String,
-        value: f64,
+        effect: EffectKind,
+        value: Value,
     },
-    /// The task drew random bytes (hex).
-    Random {
-        task: String,
+    /// Ask the server to assign a child task (dependent work). Not numbered
+    /// (no `pos`): the server answers it. `parent_step` is the parent's step for
+    /// this call; the server stores it as the child's parent step and is
+    /// idempotent on (`parent`, `parent_step`). `reference` is the caller's own
+    /// idempotency key; the server mints one when it is omitted.
+    AssignRequest {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reference: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parent_step: Option<u64>,
         #[serde(default)]
-        effect_id: String,
-        value: String,
+        args: Map<String, Value>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        action: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        action_hash: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        implementation: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        interface: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parent: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dependency: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        method: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        resolution: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        hooks: Option<Vec<Value>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        capture: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        step: Option<bool>,
     },
-    /// The task slept until a deadline (epoch seconds).
-    Sleep {
-        task: String,
-        #[serde(default)]
-        effect_id: String,
-        until: f64,
-    },
+}
+
+/// What an [`FromAgent::Effect`] recorded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum EffectKind {
+    /// The clock, in epoch seconds.
+    Now,
+    /// Random bytes, as hex.
+    Random,
+    /// A sleep's deadline, in epoch seconds.
+    Sleep,
+}
+
+/// Tasks of a probe (`ASSIGN` with `probe: true`) have ids starting with
+/// this. Their frames are never numbered, retained or journaled.
+pub const PROBE_PREFIX: &str = "p-";
+
+pub fn is_probe_task(task: &str) -> bool {
+    task.starts_with(PROBE_PREFIX)
 }
 
 impl FromAgent {
@@ -294,13 +332,14 @@ impl FromAgent {
     }
 
     /// Events that carry a `seq`.
-    /// Task events carry a `seq`; registration, heartbeats, state, lock,
-    /// shelve and journal-only messages do not.
+    /// Task events carry a `seq`; registration, heartbeats, requests, state,
+    /// lock and shelve messages do not.
     pub fn is_event(&self) -> bool {
         !matches!(
             self,
             FromAgent::Register { .. }
                 | FromAgent::HeartbeatAnswer {}
+                | FromAgent::AssignRequest { .. }
                 | FromAgent::StatePatch { .. }
                 | FromAgent::StateSnapshot { .. }
                 | FromAgent::SessionInit { .. }
@@ -308,31 +347,21 @@ impl FromAgent {
                 | FromAgent::Unlock { .. }
                 | FromAgent::Shelve { .. }
                 | FromAgent::Unshelve { .. }
-        ) && !self.is_journal_only()
-    }
-
-    /// Kinds only a journal-capable server understands, and legacy
-    /// subscribers never see: the assignment echo and the effects.
-    pub fn is_journal_only(&self) -> bool {
-        matches!(
-            self,
-            FromAgent::Assign(_)
-                | FromAgent::Now { .. }
-                | FromAgent::Random { .. }
-                | FromAgent::Sleep { .. }
         )
     }
 
-    /// Effects: their `effect_id` is `{task}:{step}`.
-    pub fn effect_id_mut(&mut self) -> Option<&mut String> {
-        match self {
-            FromAgent::Now { effect_id, .. }
-            | FromAgent::Random { effect_id, .. }
-            | FromAgent::Sleep { effect_id, .. } => Some(effect_id),
-            _ => None,
-        }
+    /// Frames that never get a journal position: they have their own reply.
+    pub fn is_unnumbered(&self) -> bool {
+        matches!(
+            self,
+            FromAgent::Register { .. }
+                | FromAgent::HeartbeatAnswer {}
+                | FromAgent::AssignRequest { .. }
+        )
     }
 
+    /// The task a frame belongs to: for `STATE_PATCH` the changing task, for
+    /// `LOCK`/`UNLOCK` the holder, for `SHELVE` the task that shelved.
     pub fn task(&self) -> Option<&str> {
         match self {
             FromAgent::Started { task }
@@ -346,13 +375,18 @@ impl FromAgent {
             | FromAgent::Interrupted { task }
             | FromAgent::Paused { task }
             | FromAgent::Resumed { task }
-            | FromAgent::Now { task, .. }
-            | FromAgent::Random { task, .. }
-            | FromAgent::Sleep { task, .. } => Some(task),
-            FromAgent::Assign(assign) => Some(assign.task.as_str()),
+            | FromAgent::Effect { task, .. }
+            | FromAgent::Lock { task, .. }
+            | FromAgent::Unlock { task, .. } => Some(task),
+            FromAgent::StatePatch { task_id, .. } => task_id.as_deref(),
             FromAgent::Shelve { task, .. } => task.as_deref(),
             _ => None,
         }
+    }
+
+    /// A frame of a probe task (see [`is_probe_task`]).
+    pub fn is_probe(&self) -> bool {
+        self.task().is_some_and(is_probe_task)
     }
 }
 
@@ -404,6 +438,15 @@ impl Envelope {
             message,
         }
     }
+}
+
+/// A [`ToAgent`] message with its `id`, as it is on the wire.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ToAgentFrame {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(flatten)]
+    pub message: ToAgent,
 }
 
 /// Parse a server frame. Returns the raw value alongside so that a frame

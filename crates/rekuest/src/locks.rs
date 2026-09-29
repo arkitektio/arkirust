@@ -11,6 +11,7 @@ use serde::Serialize;
 use tokio::sync::OwnedMutexGuard;
 
 use crate::emit::Emitter;
+use crate::journal::TaskGate;
 use crate::messages::FromAgent;
 
 struct Slot {
@@ -55,27 +56,40 @@ impl LockTable {
         }
     }
 
-    /// Take `keys` (sorted, unknown keys skipped) for `task`, waiting as needed.
+    /// Take `keys` (sorted, unknown keys skipped) for `task` into `held`,
+    /// waiting as needed. Each lock is taken and reported (`LOCK`) inside the
+    /// task's gate; once the gate is closed nothing more is taken, and this
+    /// returns false.
+    ///
+    /// The locks live in `held`, not in the caller's future: aborting the
+    /// task does not release them. Whoever reports the task's end releases
+    /// them afterwards ([`HeldLocks::release`]), so `UNLOCK` follows the end.
     pub(crate) async fn acquire(
         &self,
         keys: &[String],
         task: &str,
-        emitter: Arc<dyn Emitter>,
-    ) -> HeldLocks {
+        gate: &TaskGate,
+        held: &HeldLocks,
+        emitter: &dyn Emitter,
+    ) -> bool {
         let mut keys: Vec<&String> = keys
             .iter()
             .filter(|k| self.slots.contains_key(*k))
             .collect();
         keys.sort();
         keys.dedup();
-        let mut held = HeldLocks {
-            held: vec![],
-            emitter: emitter.clone(),
-        };
         for key in keys {
             let slot = self.slots[key].clone();
             let guard = slot.mutex.clone().lock_owned().await;
+            let Some(_pass) = gate.enter() else {
+                return false;
+            };
             *slot.holder.lock().expect("lock holder") = Some(task.to_owned());
+            held.inner
+                .lock()
+                .expect("held locks")
+                .0
+                .push((key.clone(), slot, guard));
             emitter.emit(
                 FromAgent::Lock {
                     key: key.clone(),
@@ -83,9 +97,8 @@ impl LockTable {
                 },
                 None,
             );
-            held.held.push((key.clone(), slot, guard));
         }
-        held
+        true
     }
 
     pub fn views(&self, filter: Option<&HashSet<String>>) -> IndexMap<String, LockView> {
@@ -114,18 +127,48 @@ impl LockTable {
     }
 }
 
-/// Locks held by one assignment; released (in reverse order) when dropped,
-/// which also covers a cancelled task.
-pub(crate) struct HeldLocks {
-    held: Vec<(String, Arc<Slot>, OwnedMutexGuard<()>)>,
-    emitter: Arc<dyn Emitter>,
+type Held = Vec<(String, Arc<Slot>, OwnedMutexGuard<()>)>;
+
+struct HeldInner(Held);
+
+impl Drop for HeldInner {
+    /// Frees what was never released (the executor went away) without reporting.
+    fn drop(&mut self) {
+        while let Some((_, slot, guard)) = self.0.pop() {
+            *slot.holder.lock().expect("lock holder") = None;
+            drop(guard);
+        }
+    }
 }
 
-impl Drop for HeldLocks {
-    fn drop(&mut self) {
-        while let Some((key, slot, guard)) = self.held.pop() {
+/// Locks held by one assignment. Shared between the task's future and the
+/// executor, so they outlive an aborted future until the end is reported.
+#[derive(Clone)]
+pub(crate) struct HeldLocks {
+    inner: Arc<Mutex<HeldInner>>,
+}
+
+impl Default for HeldLocks {
+    fn default() -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(HeldInner(vec![]))),
+        }
+    }
+}
+
+impl HeldLocks {
+    /// Release every lock (in reverse order), reporting `UNLOCK` for `task`.
+    pub(crate) fn release(&self, task: &str, emitter: &dyn Emitter) {
+        let held = std::mem::take(&mut self.inner.lock().expect("held locks").0);
+        for (key, slot, guard) in held.into_iter().rev() {
             *slot.holder.lock().expect("lock holder") = None;
-            self.emitter.emit(FromAgent::Unlock { key }, None);
+            emitter.emit(
+                FromAgent::Unlock {
+                    key,
+                    task: task.to_owned(),
+                },
+                None,
+            );
             drop(guard);
         }
     }
@@ -147,11 +190,14 @@ mod tests {
             ] {
                 let table = table.clone();
                 handles.push(tokio::spawn(async move {
-                    let held = table
-                        .acquire(&keys, &format!("t{round}"), Arc::new(NullEmitter))
-                        .await;
+                    let (task, held) = (format!("t{round}"), HeldLocks::default());
+                    assert!(
+                        table
+                            .acquire(&keys, &task, &TaskGate::default(), &held, &NullEmitter)
+                            .await
+                    );
                     tokio::task::yield_now().await;
-                    drop(held);
+                    held.release(&task, &NullEmitter);
                 }));
             }
         }
@@ -167,15 +213,35 @@ mod tests {
     #[tokio::test]
     async fn unknown_keys_are_skipped() {
         let table = LockTable::new(["a".to_owned()]);
-        let held = table
+        let held = HeldLocks::default();
+        table
             .acquire(
                 &["zzz".to_owned(), "a".to_owned()],
                 "t",
-                Arc::new(NullEmitter),
+                &TaskGate::default(),
+                &held,
+                &NullEmitter,
             )
             .await;
         assert_eq!(table.views(None)["a"].task_id.as_deref(), Some("t"));
         drop(held);
+        assert_eq!(
+            table.views(None)["a"].task_id,
+            None,
+            "dropping frees silently"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_closed_gate_takes_nothing() {
+        let table = LockTable::new(["a".to_owned()]);
+        let (gate, held) = (TaskGate::default(), HeldLocks::default());
+        gate.close();
+        assert!(
+            !table
+                .acquire(&["a".to_owned()], "t", &gate, &held, &NullEmitter)
+                .await
+        );
         assert_eq!(table.views(None)["a"].task_id, None);
     }
 }

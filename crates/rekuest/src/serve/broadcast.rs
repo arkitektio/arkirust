@@ -35,7 +35,7 @@ struct Subscriber {
     filters: Filters,
     tx: UnboundedSender<String>,
     /// Opted into the journal: frames carry `pos`, and session-wide entries
-    /// (`SESSION_INIT`, `STATE_SNAPSHOT`, `ASSIGN`) are included.
+    /// (`SESSION_INIT`, `STATE_SNAPSHOT`) are included.
     journal: bool,
 }
 
@@ -72,13 +72,14 @@ fn allows(filter: &Option<HashSet<String>>, key: &str) -> bool {
 
 /// How the Python transport routes a message; `None` reaches nobody.
 fn legacy_route<'a>(message: &'a FromAgent, action_key: Option<&'a str>) -> Option<Route<'a>> {
-    if message.is_journal_only() {
-        return None;
-    }
     match message {
-        FromAgent::Shelve { .. } | FromAgent::Unshelve { .. } => None,
+        // Python's subscribers never see these.
+        FromAgent::Shelve { .. }
+        | FromAgent::Unshelve { .. }
+        | FromAgent::Effect { .. }
+        | FromAgent::AssignRequest { .. } => None,
         FromAgent::StatePatch { state_name, .. } => Some(Route::State(state_name)),
-        FromAgent::Lock { key, .. } | FromAgent::Unlock { key } => Some(Route::Lock(key)),
+        FromAgent::Lock { key, .. } | FromAgent::Unlock { key, .. } => Some(Route::Lock(key)),
         _ => action_key.map(Route::Action),
     }
 }
@@ -144,7 +145,14 @@ impl Broadcaster {
                     return true;
                 }
                 plain.get_or_insert_with(|| {
-                    serde_json::to_string(&envelope).expect("messages serialize")
+                    let mut frame = serde_json::to_value(&envelope).expect("messages serialize");
+                    // Python's UNLOCK does not name the holder.
+                    if let (FromAgent::Unlock { .. }, Some(map)) =
+                        (&envelope.message, frame.as_object_mut())
+                    {
+                        map.remove("task");
+                    }
+                    frame.to_string()
                 })
             };
             s.tx.send(text.clone()).is_ok()

@@ -21,7 +21,7 @@ use crate::context::Context;
 use crate::emit::Emitter;
 use crate::hooks::{Background, Startup};
 use crate::journal::TaskGate;
-use crate::locks::{LockTable, LockView};
+use crate::locks::{HeldLocks, LockTable, LockView};
 use crate::messages::{Assign, FromAgent};
 use crate::shelf::Shelf;
 use crate::state::{Sink, StateHub};
@@ -64,6 +64,8 @@ struct Managed {
     brk: Arc<Break>,
     abort: Option<AbortHandle>,
     gate: TaskGate,
+    /// Released by whoever reports the end, after reporting it.
+    held: HeldLocks,
 }
 
 #[derive(Default)]
@@ -384,6 +386,7 @@ impl Executor {
         let assign = Arc::new(assign);
         let locks = action.locks();
         let gate = TaskGate::default();
+        let held = HeldLocks::default();
         let task = Task::new(
             assign.clone(),
             inner.emitter.clone(),
@@ -402,6 +405,7 @@ impl Executor {
                 brk,
                 abort: None,
                 gate: gate.clone(),
+                held: held.clone(),
             },
         );
 
@@ -424,14 +428,22 @@ impl Executor {
                 Some(serial) => Some(serial.lock_owned().await),
                 None => None,
             };
-            let held = inner
+            if !inner
                 .locks
-                .acquire(&locks, &id, inner.emitter.clone())
-                .await;
+                .acquire(&locks, &id, &gate, &held, &*inner.emitter)
+                .await
+            {
+                // Stopped while waiting: `stop` reported the end and releases.
+                return;
+            }
 
             let body = rath::with_task_token(
                 assign.token.clone(),
-                action.run(assign.args.clone(), this.context(), task),
+                crate::shelf::shelving_for(
+                    id.clone(),
+                    gate.clone(),
+                    action.run(assign.args.clone(), this.context(), task),
+                ),
             );
             let event = match AssertUnwindSafe(body).catch_unwind().await {
                 Ok(Ok(())) => FromAgent::Completed { task: id.clone() },
@@ -449,16 +461,15 @@ impl Executor {
                 },
             };
             // Reported while still holding the locks: UNLOCK follows the end, as in Python.
-            // A cancelled task was already reported (and forgotten) by `stop`.
-            {
-                let mut tasks = inner.tasks.lock().expect("tasks lock");
-                if tasks.managed.contains_key(&id) {
-                    gate.close();
-                    this.emit(event, Some(&key));
-                    tasks.finish(&id);
-                }
+            // A cancelled task was already reported (and forgotten, and its
+            // locks released) by `stop`.
+            let mut tasks = inner.tasks.lock().expect("tasks lock");
+            if tasks.managed.contains_key(&id) {
+                gate.close();
+                this.emit(event, Some(&key));
+                tasks.finish(&id);
+                held.release(&id, &*inner.emitter);
             }
-            drop(held);
         };
 
         // The lock is held across the spawn so the task cannot finish before
@@ -486,14 +497,18 @@ impl Executor {
             return;
         };
         let key = managed.action_key.clone();
+        let held = managed.held.clone();
         if let Some(abort) = &managed.abort {
             abort.abort();
         }
         // Waits for a report or state change the task is making right now;
-        // after this, the task can report nothing more.
+        // after this, the task can report (or lock) nothing more.
         managed.gate.close();
         self.emit(report(task.to_owned()), Some(&key));
         tasks.finish(task);
+        // The aborted future does not release its locks (it may be dropped
+        // later, on another worker): they are released here, after the end.
+        held.release(task, &*self.inner.emitter);
     }
 
     /// Pause the task at its next pausepoint.
@@ -530,8 +545,16 @@ impl Executor {
             .map(|m| m.brk.clone())
     }
 
+    /// A lifecycle request for a task this agent does not run. For a task
+    /// that already ended nothing is recorded (its end was reported).
     fn not_managed(&self, task: &str) {
-        self.emit(
+        let tasks = self.inner.tasks.lock().expect("tasks lock");
+        if tasks.finished_set.contains(task) {
+            tracing::debug!("ignoring a lifecycle request for task {task}: it already ended");
+            return;
+        }
+        drop(tasks);
+        self.inner.emitter.emit_unowned(
             FromAgent::Critical {
                 task: task.to_owned(),
                 error: "Actors is no longer running and not managed. Probablry there was a restart"
@@ -605,4 +628,146 @@ fn panic_message(panic: &Box<dyn std::any::Any + Send>) -> String {
         .map(|s| s.to_string())
         .or_else(|| panic.downcast_ref::<String>().cloned())
         .unwrap_or_else(|| "unknown panic".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::journal::{kind_of, Journal, JournalEntry};
+
+    /// Hold
+    ///
+    /// Holds the stage and waits forever.
+    #[crate::action(locks = ["stage"])]
+    async fn hold(task: Task) {
+        task.log("holding");
+        std::future::pending::<()>().await;
+    }
+
+    /// Quick
+    ///
+    /// Holds the stage briefly.
+    #[crate::action(locks = ["stage"])]
+    async fn quick() {}
+
+    /// (kind, task, pos) of a recorded frame.
+    type Seen = (String, Option<String>, Option<u64>);
+
+    #[derive(Default)]
+    struct Recorder(Mutex<Vec<Seen>>);
+
+    impl Emitter for Recorder {
+        fn emit(&self, message: FromAgent, _: Option<&str>) {
+            let task = message.task().map(str::to_owned);
+            self.0.lock().unwrap().push((kind_of(&message), task, None));
+        }
+        fn emit_entry(&self, message: FromAgent, _: Option<&str>, entry: &JournalEntry) {
+            let task = message.task().map(str::to_owned);
+            self.0
+                .lock()
+                .unwrap()
+                .push((entry.kind.clone(), task, Some(entry.pos)));
+        }
+    }
+
+    fn assign(task: &str, interface: &str) -> Assign {
+        serde_json::from_value(serde_json::json!({
+            "interface": interface, "task": task, "args": {},
+            "user": "u", "org": "o", "action": "a", "implementation": "i"
+        }))
+        .unwrap()
+    }
+
+    fn executor() -> (Executor, Arc<Recorder>) {
+        let recorder = Arc::new(Recorder::default());
+        let journal = Arc::new(Journal::new(recorder.clone(), None, Some("s".into())));
+        let mut registry = Registry::new();
+        registry.register(hold).register(quick);
+        let executor = Executor::with_session(registry, Context::default(), journal, None, None);
+        (executor, recorder)
+    }
+
+    fn pos_of(frames: &[Seen], kind: &str, task: &str) -> u64 {
+        frames
+            .iter()
+            .find(|(k, t, _)| k == kind && t.as_deref() == Some(task))
+            .and_then(|(_, _, pos)| *pos)
+            .unwrap_or_else(|| panic!("no numbered {kind} of {task}"))
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn unlock_always_follows_the_cancelled_report() {
+        let (executor, recorder) = executor();
+        for round in 0..50 {
+            let task = format!("t{round}");
+            executor.assign(assign(&task, "hold"));
+            // Let it take the lock on some worker (sometimes not yet).
+            if round % 2 == 0 {
+                for _ in 0..1000 {
+                    if executor.locks().views(None)["stage"].task_id.as_deref() == Some(&task) {
+                        break;
+                    }
+                    tokio::task::yield_now().await;
+                }
+            }
+            executor.cancel(&task);
+        }
+        // A later task gets the lock: none leaked.
+        executor.assign(assign("last", "quick"));
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !executor.has_finished("last") {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("the lock was released");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let frames = recorder.0.lock().unwrap().clone();
+        for round in 0..50 {
+            let task = format!("t{round}");
+            let cancelled = pos_of(&frames, "CANCELLED", &task);
+            for (kind, t, pos) in &frames {
+                if t.as_deref() == Some(task.as_str()) && kind != "UNLOCK" {
+                    assert!(pos.unwrap() <= cancelled, "{kind} of {task} after its end");
+                }
+            }
+            let locked = frames
+                .iter()
+                .any(|(k, t, _)| k == "LOCK" && t.as_deref() == Some(task.as_str()));
+            if round % 2 == 0 {
+                assert!(locked, "{task} held the lock when it was cancelled");
+            }
+            if locked {
+                assert!(pos_of(&frames, "UNLOCK", &task) > cancelled, "{task}");
+            } else {
+                assert!(!frames
+                    .iter()
+                    .any(|(k, t, _)| k == "UNLOCK" && t.as_deref() == Some(task.as_str())));
+            }
+        }
+        assert!(pos_of(&frames, "UNLOCK", "last") > pos_of(&frames, "COMPLETED", "last"));
+    }
+
+    #[tokio::test]
+    async fn lifecycle_requests_for_an_ended_task_record_nothing() {
+        let (executor, recorder) = executor();
+        executor.assign(assign("t", "quick"));
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !executor.has_finished("t") {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let before = recorder.0.lock().unwrap().len();
+        executor.pause("t");
+        executor.resume("t", false);
+        assert_eq!(recorder.0.lock().unwrap().len(), before);
+
+        // An unknown task is still answered.
+        executor.pause("never");
+        let frames = recorder.0.lock().unwrap().clone();
+        assert_eq!(frames.last().unwrap().0, "CRITICAL");
+    }
 }

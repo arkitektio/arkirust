@@ -152,7 +152,6 @@ async fn one_order_for_tasks_and_state_and_replay_at_any_position() {
     assert_eq!(
         kinds(&frames),
         [
-            "ASSIGN",
             "PROGRESS",
             "LOCK",
             "STATE_PATCH",
@@ -165,9 +164,8 @@ async fn one_order_for_tasks_and_state_and_replay_at_any_position() {
     assert_eq!(pos[0], 2);
     assert_contiguous(&pos);
     assert!(frames.iter().all(|f| f["journal_session"] == session));
-    assert!(frames[0].get("token").is_none());
 
-    // The legacy subscriber gets Python's frames: no ASSIGN, no positions.
+    // The legacy subscriber gets Python's frames: no positions.
     let legacy_frames = until_terminal(&mut legacy, &task).await;
     assert_eq!(
         kinds(&legacy_frames),
@@ -185,14 +183,14 @@ async fn one_order_for_tasks_and_state_and_replay_at_any_position() {
         .all(|f| f.get("pos").is_none() && f.get("journal_session").is_none()));
     assert_eq!(
         legacy_frames.iter().map(|f| &f["id"]).collect::<Vec<_>>(),
-        frames[1..].iter().map(|f| &f["id"]).collect::<Vec<_>>(),
+        frames.iter().map(|f| &f["id"]).collect::<Vec<_>>(),
         "the same messages, with the same ids"
     );
 
     // The stored journal is the same sequence.
     let listing = get(&http, format!("{base}/journal/current")).await;
     let entries = listing["entries"].as_array().unwrap();
-    assert_eq!(entries.len(), 8);
+    assert_eq!(entries.len(), 7);
     assert_contiguous(
         &entries
             .iter()
@@ -200,15 +198,15 @@ async fn one_order_for_tasks_and_state_and_replay_at_any_position() {
             .collect::<Vec<_>>(),
     );
     assert_eq!(entries[0]["kind"], "SESSION_INIT");
-    let unlock = &entries[7];
+    let unlock = &entries[6];
     assert_eq!(
         (unlock["kind"].as_str(), unlock["task_id"].as_str()),
         (Some("UNLOCK"), Some(task.as_str()))
     );
 
     // Time travel: before the patch, between the end and the unlock, after.
-    let lock_pos = frames[2]["pos"].as_u64().unwrap();
-    let done_pos = frames[5]["pos"].as_u64().unwrap();
+    let lock_pos = frames[1]["pos"].as_u64().unwrap();
+    let done_pos = frames[4]["pos"].as_u64().unwrap();
     let at = get(&http, format!("{base}/journal/{session}/at/{lock_pos}")).await;
     assert_eq!(at["states"]["CameraState"]["exposure_ms"], 10.0);
     assert_eq!(at["global_rev"], 0);
@@ -249,7 +247,6 @@ async fn one_order_for_tasks_and_state_and_replay_at_any_position() {
             .map(|e| e["kind"].as_str().unwrap())
             .collect::<Vec<_>>(),
         [
-            "ASSIGN",
             "PROGRESS",
             "LOCK",
             "STATE_PATCH",
@@ -260,7 +257,7 @@ async fn one_order_for_tasks_and_state_and_replay_at_any_position() {
     );
 
     let info = get(&http, format!("{base}/session_info")).await;
-    assert_eq!(info["current_pos"], 8);
+    assert_eq!(info["current_pos"], 7);
 
     agent.shutdown().await;
 }
@@ -305,15 +302,27 @@ async fn delivery_order_is_journal_order_under_concurrency() {
     assert_eq!(pos[0], start_pos + 1);
     assert_contiguous(&pos);
 
-    // Per task: ASSIGN first, the end last (before its UNLOCK); patches carry increasing revisions.
+    // Per task: the queued PROGRESS first, the end last (before its UNLOCK); patches carry increasing revisions.
     for id in &ids {
         let own: Vec<&Value> = frames
             .iter()
             .filter(|f| f["task"] == id.as_str() || f["task_id"] == id.as_str())
             .collect();
-        assert_eq!(own[0]["type"], "ASSIGN");
+        assert_eq!(own[0]["type"], "PROGRESS");
         let end = own.iter().position(|f| f["type"] == "COMPLETED").unwrap();
-        assert_eq!(end, own.len() - 1, "nothing of a task after its end");
+        assert!(
+            own[end + 1..].iter().all(|f| f["type"] == "UNLOCK"),
+            "nothing of a task after its end but its UNLOCKs"
+        );
+        let steps: Vec<u64> = own
+            .iter()
+            .map(|f| f["task_step"].as_u64().unwrap())
+            .collect();
+        assert_eq!(
+            steps,
+            (1..=own.len() as u64).collect::<Vec<_>>(),
+            "gapless task steps"
+        );
     }
     let revs: Vec<u64> = frames
         .iter()
@@ -360,7 +369,7 @@ async fn resume_after_a_disconnect() {
     for _ in last..watermark {
         frames.push(next_frame(&mut ws).await);
     }
-    assert_eq!(kinds(&frames)[0], "ASSIGN");
+    assert_eq!(kinds(&frames)[0], "PROGRESS");
     assert_eq!(frames[0]["task"], missed.as_str());
 
     // Then live, continuing the same order.
@@ -377,6 +386,19 @@ async fn resume_after_a_disconnect() {
     )
     .await;
     assert_eq!(init["journal"]["resync"], true);
+    // Not even from the start: 0 of another session is not 0 of this one.
+    let (mut other, init) = connect(
+        &base,
+        json!({"type": "INIT", "journal": true, "resume_after": 0, "session_id": "elsewhere"}),
+    )
+    .await;
+    assert_eq!(init["journal"]["resync"], true);
+    assert!(
+        drain(&mut other, Duration::from_millis(200))
+            .await
+            .is_empty(),
+        "no replay on resync"
+    );
 
     // Nor a position without its session (it may be from before a restart).
     let (mut ws, init) = connect(

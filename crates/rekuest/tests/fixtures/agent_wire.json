@@ -1,0 +1,35 @@
+{
+  "about": "Canonical agent-socket frames for docs/design/journal.md. Every agent (Rust rekuest crate, Python rekuest/arkitekt-runtime) and the server parse each frame, and re-serialize it without losing a field. Copies live in the agents' test fixtures; keep them identical.",
+  "session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90",
+  "numbered_from_agent": [
+    {"name": "session_init", "frame": {"type": "SESSION_INIT", "id": "f-01", "session_id": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "states": {"counter": {"value": 0}}, "pos": 1, "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "agent_ts": 1790000000.0}},
+    {"name": "started", "frame": {"type": "STARTED", "id": "f-02", "task": "42", "pos": 2, "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "agent_ts": 1790000000.1, "task_step": 1}},
+    {"name": "lock", "frame": {"type": "LOCK", "id": "f-03", "key": "stage", "task": "42", "pos": 3, "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "agent_ts": 1790000000.2, "task_step": 2}},
+    {"name": "progress", "frame": {"type": "PROGRESS", "id": "f-04", "task": "42", "progress": 10, "message": "moving", "pos": 4, "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "agent_ts": 1790000000.3, "task_step": 3}},
+    {"name": "log", "frame": {"type": "LOG", "id": "f-05", "task": "42", "message": "at 10%", "level": "INFO", "pos": 5, "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "agent_ts": 1790000000.4, "task_step": 4}},
+    {"name": "effect_now", "frame": {"type": "EFFECT", "id": "f-06", "task": "42", "effect": "NOW", "value": 1790000000.5, "pos": 6, "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "agent_ts": 1790000000.5, "task_step": 5}},
+    {"name": "effect_random", "frame": {"type": "EFFECT", "id": "f-07", "task": "42", "effect": "RANDOM", "value": "9f86d081884c7d65", "pos": 7, "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "agent_ts": 1790000000.6, "task_step": 6}},
+    {"name": "effect_sleep", "frame": {"type": "EFFECT", "id": "f-08", "task": "42", "effect": "SLEEP", "value": 1790000002.6, "pos": 8, "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "agent_ts": 1790000000.6, "task_step": 7}},
+    {"name": "state_patch", "frame": {"type": "STATE_PATCH", "id": "f-09", "session_id": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "global_rev": 1, "state_name": "counter", "ts": 1790000002.7, "op": "replace", "path": "/value", "value": 1, "old_value": 0, "task_id": "42", "pos": 9, "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "agent_ts": 1790000002.7, "task_step": 9}},
+    {"name": "state_snapshot", "frame": {"type": "STATE_SNAPSHOT", "id": "f-10", "session_id": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "global_rev": 1, "snapshots": {"counter": {"value": 1}}, "pos": 10, "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "agent_ts": 1790000002.8}},
+    {"name": "shelve", "frame": {"type": "SHELVE", "id": "f-11", "ref": "0d4e8a1f7c2b4e6a8b1c3d5e7f9a0b2c", "identifier": "@mikro/image", "resource_id": "0d4e8a1f7c2b4e6a8b1c3d5e7f9a0b2c", "label": "an image", "task": "42", "pos": 11, "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "agent_ts": 1790000002.9, "task_step": 10}},
+    {"name": "yield", "frame": {"type": "YIELD", "id": "f-12", "task": "42", "returns": {"image": {"__identifier": "@mikro/image", "object": "0d4e8a1f7c2b4e6a8b1c3d5e7f9a0b2c"}}, "pos": 12, "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "agent_ts": 1790000003.0, "task_step": 11}},
+    {"name": "completed", "frame": {"type": "COMPLETED", "id": "f-13", "task": "42", "pos": 13, "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "agent_ts": 1790000003.1, "task_step": 12}},
+    {"name": "unlock", "frame": {"type": "UNLOCK", "id": "f-14", "key": "stage", "task": "42", "pos": 14, "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "agent_ts": 1790000003.1, "task_step": 13}},
+    {"name": "unshelve", "frame": {"type": "UNSHELVE", "id": "f-15", "ref": "0d4e8a1f7c2b4e6a8b1c3d5e7f9a0b2c", "drawer": "0d4e8a1f7c2b4e6a8b1c3d5e7f9a0b2c", "pos": 15, "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "agent_ts": 1790000004.0}},
+    {"name": "failed", "frame": {"type": "FAILED", "id": "f-16", "task": "43", "error": "boom", "pos": 16, "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "agent_ts": 1790000004.1, "task_step": 2}},
+    {"name": "critical", "frame": {"type": "CRITICAL", "id": "f-17", "task": "44", "error": "hardware fault", "pos": 17, "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "agent_ts": 1790000004.2, "task_step": 2}},
+    {"name": "cancelled", "frame": {"type": "CANCELLED", "id": "f-18", "task": "45", "pos": 18, "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "agent_ts": 1790000004.3, "task_step": 2}},
+    {"name": "interrupted", "frame": {"type": "INTERRUPTED", "id": "f-19", "task": "46", "pos": 19, "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "agent_ts": 1790000004.4, "task_step": 2}},
+    {"name": "paused", "frame": {"type": "PAUSED", "id": "f-20", "task": "47", "pos": 20, "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "agent_ts": 1790000004.5, "task_step": 2}},
+    {"name": "resumed", "frame": {"type": "RESUMED", "id": "f-21", "task": "47", "pos": 21, "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "agent_ts": 1790000004.6, "task_step": 3}}
+  ],
+  "unnumbered_from_agent": [
+    {"name": "child_call", "note": "task 42 took step 8 for this call; reference is the caller's own", "frame": {"type": "ASSIGN_REQUEST", "id": "f-30", "reference": "c0ffee00c0ffee00c0ffee00c0ffee00", "parent": "42", "parent_step": 8, "action": "7", "args": {"x": 1}}},
+    {"name": "probe_log", "note": "a probe task (ASSIGN probe: true, id p-…) is never numbered", "frame": {"type": "LOG", "id": "f-31", "task": "p-3b9f0c2d4e6a8b1c3d5e7f9a0b2c4d6e", "message": "probing", "level": "INFO"}}
+  ],
+  "to_agent": [
+    {"name": "journal_ack", "frame": {"type": "JOURNAL_ACK", "id": "t-01", "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "pos": 13}},
+    {"name": "collect", "note": "drawers are named by the resource_id the agent minted", "frame": {"type": "COLLECT", "id": "t-02", "drawers": ["0d4e8a1f7c2b4e6a8b1c3d5e7f9a0b2c"]}}
+  ]
+}

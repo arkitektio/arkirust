@@ -30,9 +30,11 @@
 //!
 //! A websocket client that sends `"journal": true` in its INIT opts into the
 //! journal: its INIT gets a `journal` object (the watermark and the states,
-//! tasks and locks exactly as of it), every frame after carries `pos` and
-//! `journal_session`, and with `"resume_after": N` it first gets the entries
-//! it missed after `N`. Without the flag, frames are exactly Python's.
+//! tasks and locks exactly as of it), every frame after carries `pos`,
+//! `journal_session`, `agent_ts` and (for a task's frames) `task_step`, and
+//! with `"resume_after": N` and the `session_id` it first gets the entries it
+//! missed after `N` (another session's position answers `resync: true`).
+//! Without the flag, frames are exactly Python's.
 
 // Handler helpers return a ready `Response` as their error, as axum handlers do.
 #![allow(clippy::result_large_err)]
@@ -637,11 +639,6 @@ async fn submit(
 ) -> Result<String, Response> {
     let assign = build_assign(payload, interface, user).ok_or_else(internal_error)?;
     let task = assign.task.clone();
-    // The task's first entry: what it was asked to do.
-    shared
-        .agent
-        .journal
-        .record_assign(&assign, &crate::executor::action_key(&assign));
     shared.agent.executor.assign(assign);
     Ok(task)
 }
@@ -892,12 +889,13 @@ async fn journal_opening(
 
     // A position means nothing without its session (the agent may have
     // restarted since): resuming needs the session, except from the start.
+    // A session that is not this one always resyncs, even from 0.
     let resync = init.resume_after.is_some_and(|after| {
-        let same_session = init
-            .session_id
-            .as_ref()
-            .is_some_and(|s| *s == wm.session_id);
-        after > wm.pos || (after > 0 && !same_session)
+        let session_ok = match &init.session_id {
+            Some(session) => *session == wm.session_id,
+            None => after == 0,
+        };
+        after > wm.pos || !session_ok
     });
     let backlog: Vec<Arc<JournalEntry>> = match (init.resume_after, resync) {
         (Some(after), false) => match recent {

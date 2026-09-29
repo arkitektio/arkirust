@@ -7,7 +7,7 @@ use tokio::sync::Notify;
 
 use crate::emit::Emitter;
 use crate::journal::TaskGate;
-use crate::messages::{Assign, FromAgent, LogLevel};
+use crate::messages::{Assign, EffectKind, FromAgent, LogLevel};
 use crate::state::{Mutation, StateError, StateHub, StateMut, StateRef, StateType};
 
 /// A pause armed on a task: the next pausepoint waits until it is released.
@@ -192,40 +192,54 @@ impl Task {
         true
     }
 
-    /// The current time, recorded in the journal (a durable-action effect:
-    /// a replay would return the recorded time instead of reading the clock).
+    /// Record an `EFFECT`: a value the task takes from outside itself.
+    ///
+    /// This is the replay seam: once a replay engine exists, it returns the
+    /// value recorded at this task step here instead of calling `take`.
+    fn effect(&self, effect: EffectKind, take: impl FnOnce() -> Value) -> Value {
+        let value = take();
+        self.emit(FromAgent::Effect {
+            task: self.id.clone(),
+            effect,
+            value: value.clone(),
+        });
+        value
+    }
+
+    /// The current time, recorded as an `EFFECT` (`NOW`, epoch seconds).
     pub fn now(&self) -> chrono::DateTime<chrono::Utc> {
-        let now = chrono::Utc::now();
-        self.emit(FromAgent::Now {
-            task: self.id.clone(),
-            effect_id: String::new(),
-            value: now.timestamp_micros() as f64 / 1e6,
+        let value = self.effect(EffectKind::Now, || {
+            Value::from(chrono::Utc::now().timestamp_micros() as f64 / 1e6)
         });
-        now
+        from_epoch_seconds(&value).unwrap_or_else(chrono::Utc::now)
     }
 
-    /// `n` random bytes, recorded in the journal (a durable-action effect).
-    pub fn random_bytes(&self, n: usize) -> Vec<u8> {
-        use rand::RngCore;
-        let mut bytes = vec![0u8; n];
-        rand::thread_rng().fill_bytes(&mut bytes);
-        self.emit(FromAgent::Random {
-            task: self.id.clone(),
-            effect_id: String::new(),
-            value: hex::encode(&bytes),
+    /// `n` random bytes, recorded as an `EFFECT` (`RANDOM`, hex).
+    pub fn random(&self, n: usize) -> Vec<u8> {
+        let value = self.effect(EffectKind::Random, || {
+            use rand::RngCore;
+            let mut bytes = vec![0u8; n];
+            rand::thread_rng().fill_bytes(&mut bytes);
+            Value::from(hex::encode(bytes))
         });
-        bytes
+        value
+            .as_str()
+            .and_then(|hex| hex::decode(hex).ok())
+            .unwrap_or_default()
     }
 
-    /// Sleep, recording the deadline in the journal (a durable-action effect).
+    /// Sleep for `duration`: records the deadline as an `EFFECT` (`SLEEP`,
+    /// epoch seconds), then sleeps until it.
     pub async fn sleep(&self, duration: std::time::Duration) {
-        let until = chrono::Utc::now() + chrono::Duration::from_std(duration).unwrap_or_default();
-        self.emit(FromAgent::Sleep {
-            task: self.id.clone(),
-            effect_id: String::new(),
-            until: until.timestamp_micros() as f64 / 1e6,
+        let value = self.effect(EffectKind::Sleep, || {
+            let until =
+                chrono::Utc::now() + chrono::Duration::from_std(duration).unwrap_or_default();
+            Value::from(until.timestamp_micros() as f64 / 1e6)
         });
-        tokio::time::sleep(duration).await;
+        let left = from_epoch_seconds(&value)
+            .and_then(|until| (until - chrono::Utc::now()).to_std().ok())
+            .unwrap_or_default();
+        tokio::time::sleep(left).await;
     }
 
     /// A handle to change a state, holding this task's locks. Used by `#[action]`.
@@ -255,4 +269,9 @@ impl Task {
             returns,
         })
     }
+}
+
+fn from_epoch_seconds(value: &Value) -> Option<chrono::DateTime<chrono::Utc>> {
+    let micros = (value.as_f64()? * 1e6).round() as i64;
+    chrono::DateTime::from_timestamp_micros(micros)
 }

@@ -129,10 +129,12 @@ async fn serves_assignments() {
     send(&mut ws, json!({"type": "CANCEL", "id": "c", "task": "t4"})).await;
     assert_eq!(recv_type(&mut ws, "CANCELLED").await["task"], "t4");
 
-    // Unacknowledged terminal reports are re-sent after a reconnect.
+    // Everything not covered by a JOURNAL_ACK is re-sent after a reconnect
+    // (terminal reports included; EVENT_ACK is not needed).
+    let acked = completed["pos"].as_u64().unwrap();
     send(
         &mut ws,
-        json!({"type": "EVENT_ACK", "id": "a", "event": completed["id"]}),
+        json!({"type": "JOURNAL_ACK", "id": "a", "journal_session": completed["journal_session"], "pos": acked}),
     )
     .await;
     ws.close(None).await.unwrap();
@@ -146,14 +148,29 @@ async fn serves_assignments() {
         json!({"type": "INIT", "id": "i2", "agent": "agent-1"}),
     )
     .await;
-    let mut resent = vec![];
-    for _ in 0..4 {
+    let (mut positions, mut terminals) = (vec![], vec![]);
+    loop {
         let frame = recv(&mut ws).await;
-        resent.push(frame["task"].as_str().unwrap().to_owned());
+        positions.push(frame["pos"].as_u64().unwrap());
+        let task = frame["task"].as_str().unwrap_or_default().to_owned();
+        if matches!(
+            frame["type"].as_str(),
+            Some("COMPLETED" | "FAILED" | "CRITICAL" | "CANCELLED")
+        ) {
+            terminals.push(task.clone());
+        }
+        if frame["type"] == "CANCELLED" && task == "t4" {
+            break;
+        }
     }
-    resent.sort();
-    // t1's COMPLETED was acked; the other terminal reports come again.
-    assert_eq!(resent, vec!["lost", "t2", "t3", "t4"]);
+    let last = *positions.last().unwrap();
+    assert_eq!(
+        positions,
+        (acked + 1..=last).collect::<Vec<_>>(),
+        "gapless, in order"
+    );
+    // "lost" and t1 were acked; the other terminal reports come again.
+    assert_eq!(terminals, vec!["t2", "t3", "t4"]);
 
     // Being kicked is fatal.
     send(&mut ws, json!({"type": "KICK", "id": "k", "reason": "bye"})).await;

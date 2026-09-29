@@ -16,11 +16,27 @@ use serde_json::{json, Value};
 
 use crate::context::Context;
 use crate::emit::Emitter;
+use crate::journal::TaskGate;
 use crate::messages::FromAgent;
 use crate::port_type::{unwrap_reference, PortError, PortType};
 use crate::ports::{Port, PortKind};
 
 type Stored = Arc<dyn Any + Send + Sync>;
+
+tokio::task_local! {
+    /// The task whose action is running (set by the executor around it).
+    static SHELVING: (String, TaskGate);
+}
+
+/// Run `fut` (an action of `task`) so that what it shelves is attributed to
+/// `task`, and nothing is shelved once the task's gate is closed.
+pub(crate) async fn shelving_for<F: std::future::Future>(
+    task: String,
+    gate: TaskGate,
+    fut: F,
+) -> F::Output {
+    SHELVING.scope((task, gate), fut).await
+}
 
 struct Inner {
     values: Mutex<HashMap<String, Stored>>,
@@ -52,7 +68,9 @@ impl Shelf {
         }
     }
 
-    /// Keep `value` and return the id it is referenced by. Records `SHELVE`.
+    /// Keep `value` and return the id it is referenced by. Records `SHELVE`
+    /// (with the task, when called from a running action). A task that has
+    /// already ended shelves nothing.
     pub fn put<T: Send + Sync + 'static>(
         &self,
         identifier: &str,
@@ -60,6 +78,17 @@ impl Shelf {
         label: Option<String>,
     ) -> String {
         let id = uuid::Uuid::new_v4().simple().to_string();
+        let owner = SHELVING.try_with(|owner| owner.clone()).ok();
+        let _pass = match &owner {
+            Some((task, gate)) => match gate.enter() {
+                Some(pass) => Some(pass),
+                None => {
+                    tracing::debug!(task = %task, "not shelving after the task ended");
+                    return id;
+                }
+            },
+            None => None,
+        };
         self.inner
             .values
             .lock()
@@ -72,7 +101,7 @@ impl Shelf {
                 resource_id: id.clone(),
                 label,
                 description: None,
-                task: None,
+                task: owner.as_ref().map(|(task, _)| task.clone()),
             },
             None,
         );

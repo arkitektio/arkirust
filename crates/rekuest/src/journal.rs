@@ -1,8 +1,8 @@
 //! One ordered record of everything an agent reports.
 //!
-//! Task events (`PROGRESS`, `YIELD`, `COMPLETED`, …), lock changes, state
-//! patches, snapshots, the session baseline and (when served) the `ASSIGN`
-//! that started a task each get a position `pos` in their session. `pos`
+//! Task events (`PROGRESS`, `YIELD`, `EFFECT`, `COMPLETED`, …), lock and
+//! shelf changes, state patches, snapshots and the session baseline each get
+//! a position `pos` in their session. `pos`
 //! starts at 1 with `SESSION_INIT` and has no gaps; `(session_id, pos)` is
 //! the durable key. Every entry also carries the state revision `global_rev`
 //! as of that entry, so "the world at `pos`" is the state at `global_rev`
@@ -18,6 +18,10 @@
 //! when the end is reported, and the task's handles ([`Task`](crate::Task)
 //! reports, [`StateMut`](crate::StateMut) changes) refuse to act on a
 //! closed gate *before* they change anything.
+//!
+//! Not numbered: `REGISTER`, `HEARTBEAT_ANSWER`, requests (`ASSIGN_REQUEST`)
+//! and every frame of a probe task (see [`crate::messages::is_probe_task`]).
+//! They are handed on as they are and never recorded.
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex};
@@ -30,7 +34,7 @@ use serde_json::Value;
 use tokio::sync::{mpsc, watch};
 
 use crate::emit::Emitter;
-use crate::messages::{Assign, FromAgent};
+use crate::messages::FromAgent;
 use crate::state::apply_op;
 
 /// Entries kept in memory for resuming subscribers.
@@ -69,9 +73,9 @@ pub struct JournalEntry {
     pub timepoint: String,
     #[serde(skip)]
     pub event_time: i64,
-    /// The frame `type`: `ASSIGN`, `PROGRESS`, `STATE_PATCH`, …
+    /// The frame `type`: `PROGRESS`, `EFFECT`, `STATE_PATCH`, …
     pub kind: String,
-    /// The task this entry belongs to (for `UNLOCK`: the task that held the lock).
+    /// The task this entry belongs to (for `LOCK`/`UNLOCK`: the holder).
     pub task_id: Option<String>,
     /// 1, 2, 3, … over the entries of `task_id`.
     pub step: Option<u64>,
@@ -121,8 +125,9 @@ impl JournalEntry {
     }
 }
 
-/// Add `pos` and `journal_session` to a frame. (Not `session_id`: state
-/// frames already have one, and it would clash.)
+/// Add the numbering (`pos`, `journal_session`, `agent_ts`, `task_step`)
+/// to a frame, as the agent sends it. (Not `session_id`: state frames
+/// already have one, and it would clash.)
 pub fn stamp(frame: &mut Value, entry: &JournalEntry) {
     if let Value::Object(map) = frame {
         map.insert("pos".into(), Value::from(entry.pos));
@@ -130,6 +135,13 @@ pub fn stamp(frame: &mut Value, entry: &JournalEntry) {
             "journal_session".into(),
             Value::String(entry.session_id.clone()),
         );
+        map.insert(
+            "agent_ts".into(),
+            Value::from(entry.event_time as f64 / 1000.0),
+        );
+        if let Some(step) = entry.step {
+            map.insert("task_step".into(), Value::from(step));
+        }
     }
 }
 
@@ -143,7 +155,7 @@ pub fn is_terminal_kind(kind: &str) -> bool {
 fn subject_of(message: &FromAgent) -> Option<String> {
     match message {
         FromAgent::StatePatch { state_name, .. } => Some(state_name.clone()),
-        FromAgent::Lock { key, .. } | FromAgent::Unlock { key } => Some(key.clone()),
+        FromAgent::Lock { key, .. } | FromAgent::Unlock { key, .. } => Some(key.clone()),
         _ => None,
     }
 }
@@ -155,9 +167,7 @@ fn subject_of(message: &FromAgent) -> Option<String> {
 pub struct TaskFold {
     pub task: String,
     pub action_key: Option<String>,
-    pub interface: Option<String>,
-    pub reference: Option<String>,
-    /// `ASSIGNED`, `RUNNING`, `PAUSED`, or the terminal kind.
+    /// `RUNNING`, `PAUSED`, or the terminal kind.
     pub status: String,
     pub done: bool,
     pub progress: Option<i64>,
@@ -228,7 +238,10 @@ impl Fold {
         let Some(task_id) = &entry.task_id else {
             return;
         };
-        if matches!(entry.kind.as_str(), "STATE_PATCH" | "LOCK" | "UNLOCK") {
+        if matches!(
+            entry.kind.as_str(),
+            "STATE_PATCH" | "LOCK" | "UNLOCK" | "SHELVE"
+        ) {
             if let Some(task) = self.tasks.get_mut(task_id) {
                 task.last_pos = task.last_pos.max(entry.pos);
             }
@@ -240,9 +253,7 @@ impl Fold {
             .or_insert_with(|| TaskFold {
                 task: task_id.clone(),
                 action_key: entry.action_key.clone(),
-                interface: None,
-                reference: None,
-                status: "ASSIGNED".into(),
+                status: "RUNNING".into(),
                 done: false,
                 progress: None,
                 message: None,
@@ -261,10 +272,6 @@ impl Fold {
         }
         let text = |key: &str| payload.get(key).and_then(Value::as_str).map(str::to_owned);
         match entry.kind.as_str() {
-            "ASSIGN" => {
-                task.interface = text("interface");
-                task.reference = text("reference");
-            }
             "PROGRESS" => {
                 if let Some(progress) = payload.get("progress").and_then(Value::as_i64) {
                     task.progress = Some(progress);
@@ -497,15 +504,6 @@ impl Journal {
         f(&JournalView { state: &state })
     }
 
-    /// Record the assignment that starts a task (secrets removed).
-    pub fn record_assign(&self, assign: &Assign, action_key: &str) {
-        let mut assign = assign.clone();
-        assign.token = None;
-        // The frame's `id` is the entry's.
-        assign.id = None;
-        self.emit(FromAgent::Assign(Box::new(assign)), Some(action_key));
-    }
-
     /// Wait (bounded) until everything up to `pos` of the current session is persisted.
     pub async fn flush_to(&self, pos: u64, timeout: Duration) -> bool {
         let Some(session) = self.state.lock().expect("journal lock").session.clone() else {
@@ -539,15 +537,15 @@ impl Journal {
     fn append(
         &self,
         state: &mut JournalState,
-        kind: &str,
         task_id: Option<String>,
         action_key: Option<String>,
         subject: Option<String>,
         mut payload: Value,
+        stepped: bool,
     ) -> Option<Arc<JournalEntry>> {
         let session = state.session.clone()?;
         state.pos += 1;
-        let step = task_id.as_ref().map(|task| {
+        let step = task_id.as_ref().filter(|_| stepped).map(|task| {
             let step = state.steps.entry(task.clone()).or_default();
             *step += 1;
             *step
@@ -569,7 +567,11 @@ impl Journal {
             global_rev: state.global_rev,
             timepoint: iso_from_ms(event_time),
             event_time,
-            kind: kind.to_owned(),
+            kind: payload
+                .get("type")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
             task_id,
             step,
             action_key,
@@ -640,22 +642,34 @@ async fn write_loop(
                 Err(_) => break,
             }
         }
-        if let Err(e) = sink.write_entries(&batch).await {
-            tracing::warn!("could not persist the journal: {e:#}");
+        // The watermark only moves past entries that are written: retry the
+        // batch (writes are idempotent) until it is.
+        let mut attempt = 0u32;
+        while let Err(e) = sink.write_entries(&batch).await {
+            if attempt.is_power_of_two() || attempt == 0 {
+                tracing::warn!(
+                    "could not persist the journal (attempt {}), retrying: {e:#}",
+                    attempt + 1
+                );
+            }
+            attempt = attempt.saturating_add(1);
+            let backoff = Duration::from_millis(50u64 << attempt.min(6));
+            tokio::time::sleep(backoff).await;
         }
         let last = batch.last().expect("a batch is never empty");
         durable.send_replace((last.session_id.clone(), last.pos));
     }
 }
 
-impl Emitter for Journal {
-    fn emit(&self, mut message: FromAgent, action_key: Option<&str>) {
+impl Journal {
+    /// Number and hand on `message`. Without `owned`, it is a report about a
+    /// task this process never ran: numbered, but without a `task_step`.
+    fn record(&self, message: FromAgent, action_key: Option<&str>, owned: bool) {
+        if message.is_unnumbered() {
+            return self.inner.emit(message, action_key);
+        }
         let mut state = self.state.lock().expect("journal lock");
         match &message {
-            FromAgent::Register { .. } | FromAgent::HeartbeatAnswer {} => {
-                drop(state);
-                return self.inner.emit(message, action_key);
-            }
             FromAgent::SessionInit { session_id, .. } => {
                 if state.session.as_deref() != Some(session_id.as_str()) {
                     state.session = Some(session_id.clone());
@@ -673,39 +687,37 @@ impl Emitter for Journal {
             }
             _ => {}
         }
-
-        let task_id = match &message {
-            FromAgent::StatePatch { task_id, .. } => task_id.clone(),
-            FromAgent::Lock { task, .. } => Some(task.clone()),
-            FromAgent::Unlock { key } => state.fold.locks.get(key).cloned(),
-            other => other.task().map(str::to_owned),
-        };
-        // An effect is addressed by its task and step, which is the next one.
-        if let Some(task) = task_id.as_ref().filter(|_| state.session.is_some()) {
-            let next = state.steps.get(task).copied().unwrap_or(0) + 1;
-            if let Some(effect_id) = message.effect_id_mut() {
-                if effect_id.is_empty() {
-                    *effect_id = format!("{task}:{next}");
-                }
-            }
+        // A probe is ephemeral: its frames are handed on (in order, under the
+        // lock), never numbered. Except the state patches it causes: the
+        // revision chain has no holes. They carry no task step.
+        let probe_patch = matches!(message, FromAgent::StatePatch { .. }) && message.is_probe();
+        if message.is_probe() && !probe_patch {
+            return self.inner.emit(message, action_key);
         }
+
+        let task_id = message.task().map(str::to_owned);
         let payload = serde_json::to_value(&message).unwrap_or(Value::Null);
-        let kind = payload
-            .get("type")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_owned();
         match self.append(
             &mut state,
-            &kind,
             task_id,
             action_key.map(str::to_owned),
             subject_of(&message),
             payload,
+            owned && !probe_patch,
         ) {
             Some(entry) => self.inner.emit_entry(message, action_key, &entry),
             None => self.inner.emit(message, action_key),
         }
+    }
+}
+
+impl Emitter for Journal {
+    fn emit(&self, message: FromAgent, action_key: Option<&str>) {
+        self.record(message, action_key, true)
+    }
+
+    fn emit_unowned(&self, message: FromAgent, action_key: Option<&str>) {
+        self.record(message, action_key, false)
     }
 }
 
@@ -779,27 +791,13 @@ mod tests {
             None,
         );
         journal.emit(session_init("s"), None);
-        journal.record_assign(
-            &Assign {
-                id: None,
-                interface: "set".into(),
+        journal.emit(
+            FromAgent::Progress {
                 task: "t".into(),
-                root: None,
-                parent: None,
-                resolution: None,
-                step: None,
-                probe: false,
-                capture: None,
-                reference: Some("r".into()),
-                args: Map::new(),
+                progress: Some(0),
                 message: None,
-                user: "u".into(),
-                org: "o".into(),
-                action: "a".into(),
-                implementation: "i".into(),
-                token: Some("secret".into()),
             },
-            "set",
+            Some("set"),
         );
         journal.emit(
             FromAgent::Lock {
@@ -817,7 +815,22 @@ mod tests {
             Some("set"),
         );
         journal.emit(FromAgent::Completed { task: "t".into() }, Some("set"));
-        journal.emit(FromAgent::Unlock { key: "cam".into() }, None);
+        journal.emit(
+            FromAgent::Unlock {
+                key: "cam".into(),
+                task: "t".into(),
+            },
+            None,
+        );
+        // Probes and requests are handed on unnumbered.
+        journal.emit(
+            FromAgent::Log {
+                task: "p-1".into(),
+                message: "probing".into(),
+                level: Default::default(),
+            },
+            None,
+        );
 
         let seen = recorder.0.lock().unwrap().clone();
         assert_eq!(
@@ -830,7 +843,7 @@ mod tests {
             kinds,
             [
                 "SESSION_INIT",
-                "ASSIGN",
+                "PROGRESS",
                 "LOCK",
                 "STATE_PATCH",
                 "YIELD",
@@ -840,6 +853,7 @@ mod tests {
             .iter()
             .enumerate()
             .map(|(i, k)| (k.to_string(), Some(i as u64 + 1)))
+            .chain([("LOG".to_string(), None)])
             .collect::<Vec<_>>()
         );
 
@@ -853,13 +867,13 @@ mod tests {
                 (task.status.as_str(), task.done, task.yields),
                 ("COMPLETED", true, 1)
             );
-            assert_eq!(task.reference.as_deref(), Some("r"));
             assert!(fold.locks.is_empty());
             let recent = view.recent(0, 7).unwrap();
             assert_eq!(recent.len(), 7);
-            assert!(
-                recent[1].payload.get("token").is_none(),
-                "secrets are not recorded"
+            assert_eq!(
+                recent.iter().map(|e| e.step).collect::<Vec<_>>(),
+                [None, Some(1), Some(2), Some(3), Some(4), Some(5), Some(6)],
+                "task steps are gapless over events, patches and locks"
             );
             assert_eq!(
                 recent[6].task_id.as_deref(),
@@ -1008,5 +1022,83 @@ mod tests {
         }
         assert!(journal.flush(Duration::from_secs(2)).await);
         assert_eq!(*sink.0.lock().unwrap(), (1..=400).collect::<Vec<u64>>());
+    }
+
+    #[tokio::test]
+    async fn the_durable_watermark_never_passes_a_failed_write() {
+        struct Failing(std::sync::atomic::AtomicUsize, usize, StdMutex<Vec<u64>>);
+        #[async_trait]
+        impl JournalSink for Failing {
+            async fn write_entries(&self, entries: &[Arc<JournalEntry>]) -> anyhow::Result<()> {
+                let n = self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                if n < self.1 {
+                    anyhow::bail!("disk full");
+                }
+                self.2.lock().unwrap().extend(entries.iter().map(|e| e.pos));
+                Ok(())
+            }
+        }
+        let log = |journal: &Journal| {
+            journal.emit(
+                FromAgent::Log {
+                    task: "t".into(),
+                    message: "m".into(),
+                    level: Default::default(),
+                },
+                None,
+            )
+        };
+
+        // Always failing: never durable.
+        let sink = Arc::new(Failing(Default::default(), usize::MAX, Default::default()));
+        let journal = Journal::new(
+            Arc::new(crate::emit::NullEmitter),
+            Some(sink),
+            Some("s".into()),
+        );
+        log(&journal);
+        assert!(!journal.flush(Duration::from_millis(300)).await);
+
+        // Failing twice: retried until written, each entry once.
+        let sink = Arc::new(Failing(Default::default(), 2, Default::default()));
+        let journal = Journal::new(
+            Arc::new(crate::emit::NullEmitter),
+            Some(sink.clone()),
+            Some("s".into()),
+        );
+        log(&journal);
+        log(&journal);
+        assert!(journal.flush(Duration::from_secs(2)).await);
+        assert_eq!(*sink.2.lock().unwrap(), [1, 2]);
+    }
+
+    #[test]
+    fn probe_patches_and_unowned_reports_are_numbered_without_a_step() {
+        let journal = Journal::new(Arc::new(crate::emit::NullEmitter), None, Some("s".into()));
+        journal.emit(patch(1, "p-1"), None);
+        journal.emit(FromAgent::Completed { task: "p-1".into() }, None);
+        journal.emit_unowned(
+            FromAgent::Critical {
+                task: "old".into(),
+                error: "lost".into(),
+            },
+            None,
+        );
+        journal.emit(FromAgent::Completed { task: "t".into() }, None);
+        journal.locked(|view| {
+            let entries = view.recent(0, 3).unwrap();
+            let seen: Vec<(u64, &str, Option<&str>, Option<u64>)> = entries
+                .iter()
+                .map(|e| (e.pos, e.kind.as_str(), e.task_id.as_deref(), e.step))
+                .collect();
+            assert_eq!(
+                seen,
+                [
+                    (1, "STATE_PATCH", Some("p-1"), None),
+                    (2, "CRITICAL", Some("old"), None),
+                    (3, "COMPLETED", Some("t"), Some(1)),
+                ]
+            );
+        });
     }
 }

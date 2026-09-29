@@ -3,7 +3,8 @@
 //!
 //! Connection lifecycle:
 //! 1. connect, send `REGISTER` (token + declaration), wait for `INIT`
-//! 2. re-send unacknowledged terminal reports, answer inquiries
+//! 2. re-send every numbered frame not covered by a `JOURNAL_ACK` (earlier
+//!    sessions' first), answer inquiries
 //! 3. after the *first* `INIT` only: activate (startup hooks, `SESSION_INIT`,
 //!    background hooks). Activation runs beside the read loop so heartbeats
 //!    keep being answered; assignments wait until it is done.
@@ -164,7 +165,6 @@ impl Agent {
         ctx: Context,
         tokens: Arc<dyn TokenLoader>,
     ) -> Self {
-        let outbox = Arc::new(Outbox::new());
         // One session per agent: REGISTER announces it, SESSION_INIT and every
         // STATE_PATCH carry it.
         let session_id = uuid::Uuid::new_v4().to_string();
@@ -181,6 +181,13 @@ impl Agent {
                 }
             }
         });
+        #[cfg(feature = "wal")]
+        let outbox = Arc::new(Outbox::with_limit(
+            crate::outbox::RETAIN_LIMIT,
+            store.is_some(),
+        ));
+        #[cfg(not(feature = "wal"))]
+        let outbox = Arc::new(Outbox::new());
         #[cfg(feature = "wal")]
         let sink = store
             .clone()
@@ -281,7 +288,7 @@ impl Agent {
                         "re-sending {} journal entries of earlier sessions",
                         entries.len()
                     );
-                    self.outbox.preload(entries);
+                    self.outbox.reload(entries);
                 }
                 Ok(_) => {}
                 Err(e) => tracing::warn!("could not read the journal backlog: {e:#}"),
@@ -340,12 +347,23 @@ impl Agent {
         }
     }
 
+    /// Frames dropped from memory (see [`Outbox::needs_reload`]) are read
+    /// back from the local journal before resending.
+    async fn reload_spilled(&self) {
+        #[cfg(feature = "wal")]
+        if let Some(store) = &self.store {
+            if self.outbox.needs_reload() {
+                self.journal.flush(crate::executor::FLUSH_TIMEOUT).await;
+                match store.unacked_entries(None).await {
+                    Ok(entries) => self.outbox.reload(entries),
+                    Err(e) => tracing::warn!("could not read the journal to resend it: {e:#}"),
+                }
+            }
+        }
+    }
+
     /// Run now if activated, else hold until activation is done.
     fn assign(&self, assign: Assign) {
-        if !self.executor.is_running(&assign.task) && !self.executor.has_finished(&assign.task) {
-            self.journal
-                .record_assign(&assign, &crate::executor::action_key(&assign));
-        }
         let mut activation = self.activation.lock().expect("activation lock");
         match &mut *activation {
             Activation::Done => {
@@ -454,7 +472,6 @@ impl Agent {
                     agent,
                     inquiries,
                     diagnostics,
-                    journal,
                     ..
                 } => {
                     tracing::info!(
@@ -470,7 +487,7 @@ impl Agent {
                             d.path.map(|p| format!(" at {p}")).unwrap_or_default()
                         );
                     }
-                    self.outbox.set_journal(journal);
+                    self.reload_spilled().await;
                     self.outbox.attach(tx.clone());
                     self.outbox.resend_unacked();
                     self.answer_inquiries(inquiries.into_iter().map(|i| i.task));
@@ -507,7 +524,9 @@ impl Agent {
             ToAgent::Interrupt { task } => self.executor.interrupt(&task),
             ToAgent::Pause { task } => self.executor.pause(&task),
             ToAgent::Resume { task, step } => self.executor.resume(&task, step),
-            ToAgent::EventAck { event, seq, .. } => self.outbox.ack(event.as_deref(), seq),
+            // Frames are retired by JOURNAL_ACK; the server stops sending
+            // EVENT_ACK once it gets positions.
+            ToAgent::EventAck { .. } => {}
             ToAgent::JournalAck {
                 journal_session,
                 pos,
@@ -567,7 +586,8 @@ impl Agent {
                     None,
                 );
             } else if !self.executor.has_finished(&task) {
-                self.journal.emit(
+                // A predecessor's task: numbered, but with no task step.
+                self.journal.emit_unowned(
                     FromAgent::Critical {
                         task,
                         error: "the agent restarted and lost this task".into(),

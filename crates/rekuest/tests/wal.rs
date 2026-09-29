@@ -1,6 +1,7 @@
 //! The local journal against a fake server that keeps a journal: what the
 //! server never acknowledged is re-sent after a restart, first and in order;
-//! journal-only kinds and locally minted shelve ids travel in that order too.
+//! effects and locally minted shelve ids travel in that order too; probes
+//! are never numbered.
 
 #![cfg(feature = "wal")]
 
@@ -34,11 +35,12 @@ impl MemoryStructure for Frame {
 
 /// Stamp
 ///
-/// Reads the clock and draws a random number, as effects.
+/// Reads the clock, draws a random number and sleeps, as effects.
 #[action]
 async fn stamp(task: Task) -> i64 {
     let now = task.now();
-    let bytes = task.random_bytes(4);
+    let bytes = task.random(4);
+    task.sleep(Duration::from_millis(20)).await;
     now.timestamp() + bytes.len() as i64
 }
 
@@ -99,11 +101,7 @@ async fn connect(db: &std::path::Path) -> (Arc<Agent>, Ws) {
     let (stream, _) = listener.accept().await.unwrap();
     let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
     assert_eq!(recv(&mut ws).await["type"], "REGISTER");
-    send(
-        &mut ws,
-        json!({"type": "INIT", "agent": "a1", "journal": true}),
-    )
-    .await;
+    send(&mut ws, json!({"type": "INIT", "agent": "a1"})).await;
     (agent, ws)
 }
 
@@ -139,27 +137,51 @@ async fn unacknowledged_entries_survive_a_restart() {
     let kinds: Vec<&str> = frames.iter().map(|f| f["type"].as_str().unwrap()).collect();
     assert_eq!(
         kinds,
-        ["ASSIGN", "PROGRESS", "NOW", "RANDOM", "YIELD", "COMPLETED"]
+        [
+            "PROGRESS",
+            "EFFECT",
+            "EFFECT",
+            "EFFECT",
+            "YIELD",
+            "COMPLETED"
+        ]
     );
-    assert!(
-        frames[0].get("token").is_none(),
-        "the echo carries no token"
-    );
+    let effects: Vec<&str> = frames[1..4]
+        .iter()
+        .map(|f| f["effect"].as_str().unwrap())
+        .collect();
+    assert_eq!(effects, ["NOW", "RANDOM", "SLEEP"]);
+    assert!(frames[1]["value"].is_f64());
     assert_eq!(
-        frames[2]["effect_id"], "t1:3",
-        "effects are addressed by task and step"
+        frames[2]["value"].as_str().unwrap().len(),
+        8,
+        "4 bytes as hex"
     );
+    assert!(frames[3]["value"].as_f64().unwrap() >= frames[1]["value"].as_f64().unwrap());
     let steps: Vec<u64> = frames
         .iter()
         .map(|f| f["task_step"].as_u64().unwrap())
         .collect();
     assert_eq!(steps, [1, 2, 3, 4, 5, 6]);
+
+    // A probe is reported, but never numbered, journaled or resent.
+    let mut probe = assign("p-1", "stamp");
+    probe["probe"] = json!(true);
+    send(&mut ws, probe).await;
+    let probe_frames = until_end(&mut ws, "p-1").await;
+    assert_eq!(probe_frames.len(), 6);
+    assert!(probe_frames
+        .iter()
+        .all(|f| f.get("pos").is_none() && f.get("task_step").is_none()));
     let sent_positions: Vec<u64> = std::iter::once(&session_init)
         .chain(&frames)
         .map(|f| f["pos"].as_u64().unwrap())
         .collect();
     first.shutdown().await;
     drop(ws);
+    let store = rekuest::store::HistoryStore::open(&db).unwrap();
+    assert!(store.journal_task_entries("p-1").await.unwrap().is_empty());
+    assert_eq!(store.journal_task_entries("t1").await.unwrap().len(), 6);
 
     // Restart on the same journal: the old session comes first, in order, then the new one.
     let (second, mut ws) = connect(&db).await;
@@ -204,6 +226,14 @@ async fn a_shelved_value_is_announced_before_it_is_referenced() {
     assert!(shelve < yielded);
     let id = frames[shelve]["resource_id"].as_str().unwrap().to_owned();
     assert_eq!(frames[shelve]["ref"], id.as_str());
+    assert_eq!(
+        frames[shelve]["task"], "t1",
+        "SHELVE names the task that shelved"
+    );
+    assert_eq!(
+        frames[shelve]["task_step"].as_u64().unwrap() + 1,
+        frames[yielded]["task_step"].as_u64().unwrap()
+    );
     assert_eq!(
         frames[yielded]["returns"]["return0"],
         json!({"__identifier": "@test/frame", "object": id})
