@@ -165,7 +165,7 @@ impl HeldLocks {
             emitter.emit(
                 FromAgent::Unlock {
                     key,
-                    task: task.to_owned(),
+                    task: Some(task.to_owned()),
                 },
                 None,
             );

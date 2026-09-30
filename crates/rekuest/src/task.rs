@@ -184,6 +184,8 @@ impl Task {
         };
         self.emit(FromAgent::Paused {
             task: self.id.clone(),
+            message: None,
+            details: None,
         });
         armed.notified().await;
         self.emit(FromAgent::Resumed {

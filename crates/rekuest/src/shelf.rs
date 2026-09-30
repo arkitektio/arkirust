@@ -96,7 +96,7 @@ impl Shelf {
             .insert(id.clone(), value as Stored);
         self.inner.emitter.emit(
             FromAgent::Shelve {
-                reference: id.clone(),
+                reference: Some(id.clone()),
                 identifier: identifier.to_owned(),
                 resource_id: id.clone(),
                 label,
@@ -132,7 +132,7 @@ impl Shelf {
         if removed {
             self.inner.emitter.emit(
                 FromAgent::Unshelve {
-                    reference: id.to_owned(),
+                    reference: Some(id.to_owned()),
                     drawer: id.to_owned(),
                 },
                 None,
@@ -259,7 +259,7 @@ mod tests {
         assert!(Memory::<Frame>::expand(reference, &ctx).await.is_err());
         let messages = recorder.0.lock().unwrap();
         assert!(
-            matches!(&messages[0], FromAgent::Shelve { resource_id, reference, .. } if *resource_id == id && *reference == id)
+            matches!(&messages[0], FromAgent::Shelve { resource_id, reference, .. } if *resource_id == id && reference.as_deref() == Some(id.as_str()))
         );
         assert!(matches!(&messages[1], FromAgent::Unshelve { drawer, .. } if *drawer == id));
         assert_eq!(journal.watermark().unwrap().pos, 2);

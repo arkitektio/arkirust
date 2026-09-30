@@ -40,6 +40,10 @@ name = "rekuest-macros"
 version_group = "arkitekt"
 
 [[package]]
+name = "rekuest-protocol"
+version_group = "arkitekt"
+
+[[package]]
 name = "rekuest"
 version_group = "arkitekt"
 
@@ -57,7 +61,7 @@ name = "arkitekt"
 version_group = "arkitekt"
 changelog_update = true
 changelog_path = "CHANGELOG.md"
-changelog_include = ["arkitekt-mesh", "arkitekt-meshd", "fakts", "arkitekt-rath", "rekuest-macros", "rekuest", "arkitekt-mikro", "arkitekt-lovekit"]
+changelog_include = ["arkitekt-mesh", "arkitekt-meshd", "fakts", "arkitekt-rath", "rekuest-macros", "rekuest-protocol", "rekuest", "arkitekt-mikro", "arkitekt-lovekit"]
 git_tag_enable = true
 git_tag_name = "v{{ version }}"
 git_release_enable = true

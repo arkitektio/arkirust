@@ -22,16 +22,13 @@ extern crate self as rekuest;
 mod action;
 pub mod agent;
 mod context;
-mod definition;
 mod emit;
 pub mod executor;
 mod hooks;
 pub mod journal;
 mod locks;
-pub mod messages;
 mod outbox;
 mod port_type;
-mod ports;
 #[cfg(feature = "serve")]
 pub mod serve;
 pub mod shelf;
@@ -40,6 +37,9 @@ pub mod state;
 pub mod store;
 mod task;
 pub mod transport;
+
+// The wire types live in `rekuest-protocol` (shared with servers); these paths stay.
+pub use rekuest_protocol::{definition, messages, ports};
 
 pub use crate::action::{Action, ActionError, Concurrency, Registry};
 pub use crate::agent::{Agent, AgentError, AgentOptions, ConnectionPolicy};

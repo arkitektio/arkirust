@@ -56,6 +56,37 @@ pub struct Assign {
     pub implementation: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token: Option<String>,
+    /// Set when the server sends a workflow again after its agent died: what the
+    /// previous run recorded, for the resumed run to replay.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resume: Option<Journal>,
+}
+
+/// One value a workflow recorded, keyed as the workflow named it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RecordedEffect {
+    pub key: String,
+    pub effect: String,
+    #[serde(default)]
+    pub value: Value,
+}
+
+/// What a resumed workflow replays: its recorded effects, and the step to continue after.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Journal {
+    #[serde(default)]
+    pub last_step: u64,
+    #[serde(default)]
+    pub effects: Vec<RecordedEffect>,
+}
+
+/// The fields every `…_EVENT` mirror carries: the server tells a caller what
+/// happened to a task it assigned. `event` is the event's id, `seq` its order.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ExecutionEvent {
+    pub task: String,
+    pub event: String,
+    pub seq: u64,
 }
 
 /// Server → agent.
@@ -115,17 +146,123 @@ pub enum ToAgent {
     },
     /// The server's answer to a `SHELVE`; the agent minted the id already.
     Shelved {
-        #[serde(default)]
+        #[serde(rename = "ref")]
+        reference: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        drawer: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },
     Unshelved {
-        #[serde(default)]
+        #[serde(rename = "ref")]
+        reference: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },
     /// Everything of `journal_session` up to `pos` is persisted.
     JournalAck {
         journal_session: String,
         pos: u64,
+    },
+    /// The answer to an `ASSIGN_REQUEST`: the child task, or why there is none.
+    /// `created` is false when the request named a child that already exists.
+    AssignResponse {
+        request: String,
+        reference: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        task: Option<String>,
+        #[serde(default)]
+        created: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+    ProbeResponse {
+        request: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        probe: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+    /// The answer to a `STATE_REVISION_REQUEST` (a workflow's guard).
+    StateRevisionResponse {
+        request: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        revision: Option<Value>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        changed: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+    /// The answer to a `CANCEL_REQUEST`, `INTERRUPT_REQUEST`, `PAUSE_REQUEST` or `RESUME_REQUEST`.
+    ControlResponse {
+        request: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        task: Option<String>,
+        accepted: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+    BoundEvent(ExecutionEvent),
+    QueuedEvent(ExecutionEvent),
+    StartedEvent(ExecutionEvent),
+    ProgressEvent {
+        #[serde(flatten)]
+        event: ExecutionEvent,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        progress: Option<i64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
+    },
+    DelegateEvent(ExecutionEvent),
+    YieldEvent {
+        #[serde(flatten)]
+        event: ExecutionEvent,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        returns: Option<Map<String, Value>>,
+    },
+    CompletedEvent(ExecutionEvent),
+    LogEvent {
+        #[serde(flatten)]
+        event: ExecutionEvent,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        level: Option<LogLevel>,
+    },
+    CancellingEvent(ExecutionEvent),
+    CancelledEvent(ExecutionEvent),
+    InterruptingEvent(ExecutionEvent),
+    InterruptedEvent(ExecutionEvent),
+    PausingEvent(ExecutionEvent),
+    PausedEvent(ExecutionEvent),
+    ResumingEvent(ExecutionEvent),
+    ResumedEvent(ExecutionEvent),
+    FailedEvent {
+        #[serde(flatten)]
+        event: ExecutionEvent,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+    CriticalEvent {
+        #[serde(flatten)]
+        event: ExecutionEvent,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+    /// The task's agent died while it ran; how it ended is unknown.
+    LostEvent {
+        #[serde(flatten)]
+        event: ExecutionEvent,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        started: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        last_progress: Option<i64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        effects: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
     },
     /// Anything this agent does not handle (yet).
     #[serde(other)]
@@ -144,16 +281,20 @@ pub enum LogLevel {
 }
 
 /// Agent → server.
+///
+/// `D` is what a `REGISTER` declares. An agent sends its own [`AgentDeclaration`]; a
+/// server parses the full declaration its registration validates.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum FromAgent {
+pub enum FromAgent<D = AgentDeclaration> {
     Register {
         token: String,
+        #[serde(default)]
         force: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         session_id: Option<String>,
         #[serde(flatten)]
-        declaration: AgentDeclaration,
+        declaration: D,
     },
     HeartbeatAnswer {},
     Started {
@@ -162,6 +303,7 @@ pub enum FromAgent {
     Log {
         task: String,
         message: String,
+        #[serde(default)]
         level: LogLevel,
     },
     Progress {
@@ -192,8 +334,14 @@ pub enum FromAgent {
     Interrupted {
         task: String,
     },
+    /// The task paused: asked to, or on its own (a workflow's hold), with `message`
+    /// and `details` for whoever decides.
     Paused {
         task: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        details: Option<Value>,
     },
     Resumed {
         task: String,
@@ -228,14 +376,15 @@ pub enum FromAgent {
     /// `task` is the task that held the lock.
     Unlock {
         key: String,
-        task: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        task: Option<String>,
     },
     /// The agent holds a value in memory under `resource_id`, an id it minted
     /// itself. The value is referenced by that id right away; the server only
     /// records the drawer.
     Shelve {
-        #[serde(rename = "ref")]
-        reference: String,
+        #[serde(rename = "ref", default, skip_serializing_if = "Option::is_none")]
+        reference: Option<String>,
         identifier: String,
         resource_id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -248,8 +397,8 @@ pub enum FromAgent {
     },
     /// The agent dropped a shelved value.
     Unshelve {
-        #[serde(rename = "ref")]
-        reference: String,
+        #[serde(rename = "ref", default, skip_serializing_if = "Option::is_none")]
+        reference: Option<String>,
         drawer: String,
     },
     /// A value the task took from outside itself (the clock, randomness, a
@@ -303,6 +452,48 @@ pub enum FromAgent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         step: Option<bool>,
     },
+    /// Ask the server to run an action as a probe (not a task; nothing is recorded).
+    ProbeRequest {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reference: Option<String>,
+        #[serde(default)]
+        args: Map<String, Value>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        action: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        action_hash: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        implementation: Option<String>,
+    },
+    /// A workflow's guard: has `state` of `dependency` changed since `since`?
+    /// Without `since`, the answer is the revision to record.
+    StateRevisionRequest {
+        parent: String,
+        dependency: String,
+        state: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        since: Option<Value>,
+        #[serde(default)]
+        paths: Vec<String>,
+    },
+    /// Cancel a task this agent assigned; unconfirmed after `auto_interrupt`
+    /// seconds, it is interrupted.
+    CancelRequest {
+        task: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        auto_interrupt: Option<f64>,
+    },
+    InterruptRequest {
+        task: String,
+    },
+    PauseRequest {
+        task: String,
+    },
+    ResumeRequest {
+        task: String,
+        #[serde(default)]
+        step: bool,
+    },
 }
 
 /// What an [`FromAgent::Effect`] recorded.
@@ -315,6 +506,10 @@ pub enum EffectKind {
     Random,
     /// A sleep's deadline, in epoch seconds.
     Sleep,
+    /// A value a workflow recorded with `task.record(fn)`.
+    Record,
+    /// A hold a person resumed.
+    Hold,
 }
 
 /// Tasks of a probe (`ASSIGN` with `probe: true`) have ids starting with
@@ -325,7 +520,7 @@ pub fn is_probe_task(task: &str) -> bool {
     task.starts_with(PROBE_PREFIX)
 }
 
-impl FromAgent {
+impl<D> FromAgent<D> {
     /// Events that end a task; kept until the server acknowledges them.
     pub fn is_terminal(&self) -> bool {
         matches!(
@@ -347,6 +542,12 @@ impl FromAgent {
             FromAgent::Register { .. }
                 | FromAgent::HeartbeatAnswer {}
                 | FromAgent::AssignRequest { .. }
+                | FromAgent::ProbeRequest { .. }
+                | FromAgent::StateRevisionRequest { .. }
+                | FromAgent::CancelRequest { .. }
+                | FromAgent::InterruptRequest { .. }
+                | FromAgent::PauseRequest { .. }
+                | FromAgent::ResumeRequest { .. }
                 | FromAgent::StatePatch { .. }
                 | FromAgent::StateSnapshot { .. }
                 | FromAgent::SessionInit { .. }
@@ -364,6 +565,12 @@ impl FromAgent {
             FromAgent::Register { .. }
                 | FromAgent::HeartbeatAnswer {}
                 | FromAgent::AssignRequest { .. }
+                | FromAgent::ProbeRequest { .. }
+                | FromAgent::StateRevisionRequest { .. }
+                | FromAgent::CancelRequest { .. }
+                | FromAgent::InterruptRequest { .. }
+                | FromAgent::PauseRequest { .. }
+                | FromAgent::ResumeRequest { .. }
         )
     }
 
@@ -380,11 +587,11 @@ impl FromAgent {
             | FromAgent::Critical { task, .. }
             | FromAgent::Cancelled { task }
             | FromAgent::Interrupted { task }
-            | FromAgent::Paused { task }
+            | FromAgent::Paused { task, .. }
             | FromAgent::Resumed { task }
             | FromAgent::Effect { task, .. }
-            | FromAgent::Lock { task, .. }
-            | FromAgent::Unlock { task, .. } => Some(task),
+            | FromAgent::Lock { task, .. } => Some(task),
+            FromAgent::Unlock { task, .. } => task.as_deref(),
             FromAgent::StatePatch { task_id, .. } => task_id.as_deref(),
             FromAgent::Shelve { task, .. } => task.as_deref(),
             _ => None,
@@ -401,11 +608,11 @@ impl FromAgent {
 /// journaled) its position. Journal fields are named so they cannot clash
 /// with message fields (`STATE_PATCH` has its own `session_id` and `ts`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Envelope {
+pub struct Envelope<D = AgentDeclaration> {
     pub id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seq: Option<u64>,
-    /// Position in the agent's journal; see [`crate::journal`].
+    /// Position in the agent's journal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pos: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -417,11 +624,11 @@ pub struct Envelope {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_step: Option<u64>,
     #[serde(flatten)]
-    pub message: FromAgent,
+    pub message: FromAgent<D>,
 }
 
-impl Envelope {
-    pub fn new(message: FromAgent) -> Self {
+impl<D> Envelope<D> {
+    pub fn new(message: FromAgent<D>) -> Self {
         Self {
             id: uuid::Uuid::new_v4().to_string(),
             seq: None,
@@ -429,19 +636,6 @@ impl Envelope {
             journal_session: None,
             agent_ts: None,
             task_step: None,
-            message,
-        }
-    }
-
-    /// The envelope of a journaled message: its id and position come from the entry.
-    pub fn journaled(message: FromAgent, entry: &crate::journal::JournalEntry) -> Self {
-        Self {
-            id: entry.message_id.clone(),
-            seq: None,
-            pos: Some(entry.pos),
-            journal_session: Some(entry.session_id.clone()),
-            agent_ts: Some(entry.event_time as f64 / 1000.0),
-            task_step: entry.step,
             message,
         }
     }
@@ -514,7 +708,7 @@ mod tests {
 
     #[test]
     fn serializes_agent_frames() {
-        let mut env = Envelope::new(FromAgent::Yield {
+        let mut env: Envelope = Envelope::new(FromAgent::Yield {
             task: "t".into(),
             returns: json!({"return0": 1}).as_object().unwrap().clone(),
         });
@@ -525,11 +719,14 @@ mod tests {
         assert_eq!(v["returns"]["return0"], 1);
         assert!(v["id"].as_str().unwrap().len() > 10);
 
-        let v = serde_json::to_value(Envelope::new(FromAgent::HeartbeatAnswer {})).unwrap();
+        let v = serde_json::to_value(Envelope::<AgentDeclaration>::new(
+            FromAgent::HeartbeatAnswer {},
+        ))
+        .unwrap();
         assert_eq!(v["type"], "HEARTBEAT_ANSWER");
         assert!(v.get("seq").is_none());
 
-        let v = serde_json::to_value(Envelope::new(FromAgent::Failed {
+        let v = serde_json::to_value(Envelope::<AgentDeclaration>::new(FromAgent::Failed {
             task: "t".into(),
             error: "e".into(),
         }))

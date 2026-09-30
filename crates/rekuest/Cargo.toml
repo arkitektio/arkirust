@@ -14,6 +14,7 @@ readme = "../../README.md"
 fakts.workspace = true
 rath.workspace = true
 rekuest-macros.workspace = true
+rekuest-protocol.workspace = true
 anyhow.workspace = true
 async-trait.workspace = true
 chrono.workspace = true

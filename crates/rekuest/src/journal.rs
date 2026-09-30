@@ -34,7 +34,7 @@ use serde_json::Value;
 use tokio::sync::{mpsc, watch};
 
 use crate::emit::Emitter;
-use crate::messages::FromAgent;
+use crate::messages::{Envelope, FromAgent};
 use crate::state::apply_op;
 
 /// Entries kept in memory for resuming subscribers.
@@ -99,6 +99,19 @@ pub enum Route<'a> {
 }
 
 impl JournalEntry {
+    /// The envelope of `message` as this entry journaled it: its id and position come from the entry.
+    pub fn envelope(&self, message: FromAgent) -> Envelope {
+        Envelope {
+            id: self.message_id.clone(),
+            seq: None,
+            pos: Some(self.pos),
+            journal_session: Some(self.session_id.clone()),
+            agent_ts: Some(self.event_time as f64 / 1000.0),
+            task_step: self.step,
+            message,
+        }
+    }
+
     /// The payload with `pos` and `journal_session`, as journal subscribers get it.
     pub fn frame(&self) -> Value {
         let mut frame = self.payload.clone();
@@ -818,7 +831,7 @@ mod tests {
         journal.emit(
             FromAgent::Unlock {
                 key: "cam".into(),
-                task: "t".into(),
+                task: Some("t".into()),
             },
             None,
         );

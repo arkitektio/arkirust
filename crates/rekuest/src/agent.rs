@@ -546,7 +546,7 @@ impl Agent {
                     self.executor.shelf().remove(&drawer);
                 }
             }
-            ToAgent::Shelved { error: Some(e) } | ToAgent::Unshelved { error: Some(e) } => {
+            ToAgent::Shelved { error: Some(e), .. } | ToAgent::Unshelved { error: Some(e), .. } => {
                 tracing::warn!("the server could not record a drawer: {e}")
             }
             ToAgent::Unknown => tracing::debug!("ignoring an unsupported message"),

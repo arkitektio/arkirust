@@ -156,7 +156,7 @@ impl Outbox {
         self.state
             .lock()
             .expect("outbox lock")
-            .deliver(Envelope::journaled(message, entry));
+            .deliver(entry.envelope(message));
     }
 
     #[cfg_attr(not(feature = "wal"), allow(dead_code))]
@@ -206,7 +206,7 @@ impl Outbox {
                     continue;
                 }
             };
-            let envelope = Envelope::journaled(message, &entry);
+            let envelope = entry.envelope(message);
             state.retained.insert((order, entry.pos), envelope);
         }
         state.spilled = false;
