@@ -16,7 +16,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/arkitektio/arkirust"
@@ -25,15 +25,15 @@ keywords = ["arkitekt", "microscopy", "bioimage", "graphql"]
 categories = ["science", "api-bindings"]
 
 [workspace.dependencies]
-fakts = { path = "crates/fakts", version = "0.2.0" }
-rath = { path = "crates/rath", version = "0.2.0", package = "arkitekt-rath" }
-rekuest = { path = "crates/rekuest", version = "0.2.0" }
-rekuest-protocol = { path = "crates/rekuest-protocol", version = "0.2.0" }
-rekuest-macros = { path = "crates/rekuest-macros", version = "0.2.0" }
-arkitekt = { path = "crates/arkitekt", version = "0.2.0" }
-mikro = { path = "crates/mikro", version = "0.2.0", package = "arkitekt-mikro" }
-lovekit = { path = "crates/lovekit", version = "0.2.0", package = "arkitekt-lovekit" }
-mesh = { path = "crates/mesh", version = "0.2.0", package = "arkitekt-mesh" }
+fakts = { path = "crates/fakts", version = "0.3.0" }
+rath = { path = "crates/rath", version = "0.3.0", package = "arkitekt-rath" }
+rekuest = { path = "crates/rekuest", version = "0.3.0" }
+rekuest-protocol = { path = "crates/rekuest-protocol", version = "0.3.0" }
+rekuest-macros = { path = "crates/rekuest-macros", version = "0.3.0" }
+arkitekt = { path = "crates/arkitekt", version = "0.3.0" }
+mikro = { path = "crates/mikro", version = "0.3.0", package = "arkitekt-mikro" }
+lovekit = { path = "crates/lovekit", version = "0.3.0", package = "arkitekt-lovekit" }
+mesh = { path = "crates/mesh", version = "0.3.0", package = "arkitekt-mesh" }
 
 anyhow = "1"
 thiserror = "2"
