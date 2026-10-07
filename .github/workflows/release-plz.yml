@@ -13,6 +13,7 @@ jobs:
     permissions:
       contents: write
       id-token: write # crates.io trusted publishing
+      actions: write # starts release.yaml
     steps:
       - uses: actions/checkout@v4
         with:
@@ -20,12 +21,24 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
       - uses: release-plz/action@v0.5
+        id: release
         with:
           command: release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Only needed until trusted publishing is configured on crates.io.
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+      # Every release also publishes the Python bindings: `arkitekt-mesh` on
+      # PyPI, built by release.yaml on the release's tag. The tag above was
+      # pushed with GITHUB_TOKEN, which starts no workflow; a dispatch does.
+      - name: Publish arkitekt-mesh to PyPI
+        if: steps.release.outputs.releases_created == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "arkitekt-mesh-py") | .version')"
+          gh workflow run release.yaml --repo "$GITHUB_REPOSITORY" --ref "v$version"
 
   # Opens/updates the release PR with the next version bump and changelog.
   release-plz-pr:
