@@ -1,27 +1,24 @@
 # Lockstep releases: every crate shares one version and one `vX.Y.Z` tag.
-# Versions and CHANGELOG.md are derived from Conventional Commits.
+# semantic-release (releaserc.toml) decides the version, writes CHANGELOG.md,
+# tags and creates the GitHub release; release-plz only publishes the crates
+# (`release-plz release`, in ci.yml's `release` job).
 [workspace]
 changelog_update = false
 git_release_enable = false
 git_tag_enable = false
-semver_check = true
-# Pre-1.0, make `feat:` bump the minor (0.1.0 -> 0.2.0) instead of the patch.
-features_always_increment_minor = true
-pr_labels = ["release"]
 
 [[package]]
 name = "arkitekt-mesh"
 version_group = "arkitekt"
 
 # The sidecar binary (`cargo install arkitekt-meshd`); its prebuilt binaries
-# are attached to a GitHub release by .github/workflows/meshd.yml on a
-# `meshd-vX.Y.Z` tag.
+# are attached to the GitHub release by .github/workflows/meshd.yml.
 [[package]]
 name = "arkitekt-meshd"
 version_group = "arkitekt"
 
-# Published to PyPI (as `arkitekt-mesh`) by .github/workflows/release.yaml on a
-# `mesh-vX.Y.Z` tag, not to crates.io.
+# Published to PyPI (as `arkitekt-mesh`) by .github/workflows/release.yaml,
+# not to crates.io.
 [[package]]
 name = "arkitekt-mesh-py"
 version_group = "arkitekt"
@@ -55,17 +52,9 @@ version_group = "arkitekt"
 name = "arkitekt-lovekit"
 version_group = "arkitekt"
 
-# `arkitekt` owns the tag, the GitHub release and the root changelog.
 [[package]]
 name = "arkitekt"
 version_group = "arkitekt"
-changelog_update = true
-changelog_path = "CHANGELOG.md"
-changelog_include = ["arkitekt-mesh", "arkitekt-meshd", "fakts", "arkitekt-rath", "rekuest-macros", "rekuest-protocol", "rekuest", "arkitekt-mikro", "arkitekt-lovekit"]
-git_tag_enable = true
-git_tag_name = "v{{ version }}"
-git_release_enable = true
-git_release_name = "v{{ version }}"
 
 [[package]]
 name = "arkitekt-examples"

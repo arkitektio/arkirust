@@ -63,8 +63,10 @@ arkitekt = "0.1"
 mikro = { package = "arkitekt-mikro", version = "0.1" }
 ```
 
-All crates are released in lockstep from Conventional Commits via
-[release-plz](https://release-plz.dev) (see `release-plz.toml`).
+All crates are released in lockstep from Conventional Commits: every push to
+main with a `feat`, `fix` or `perf` is a release (semantic-release, see
+`releaserc.toml`), which also publishes `arkitekt-mesh` to PyPI and attaches
+the `arkitekt-meshd` binaries to the GitHub release.
 
 ## Concepts
 
@@ -179,7 +181,7 @@ tailnet). Build with the `mesh` feature and run with `ARKITEKT_MESH=1` (or
   stops when the app exits.
 * Aliases the server marks as mesh-only are challenged and used through the
   sidecar's local HTTP proxy. This covers GraphQL, the agent websocket and S3.
-* `arkitekt-meshd` must be installed. Download it from the `meshd-v*` GitHub
+* `arkitekt-meshd` must be installed. Download it from the GitHub
   releases or run `pip install arkitekt-meshd`. The app finds it through
   `ARKITEKT_MESHD`, next to its own executable, in `~/.local/share/arkitekt/bin`,
   or on `PATH`. The Python client runs the same binary, or the same node
