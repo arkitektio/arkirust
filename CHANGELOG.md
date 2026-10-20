@@ -1,6 +1,21 @@
 # CHANGELOG
 
 
+## v0.4.0 (2026-10-20)
+
+### Features
+
+- **rekuest-protocol**: Held tasks and decisions on the agent wire
+  ([`6d57063`](https://github.com/arkitektio/arkirust/commit/6d57063f977effcca6216e37c3d036d57974d224))
+
+A task can wait for a person: HELD (FromAgent) says why, with an AssignPrompt in the agent's own
+  words, and the server answers with DECIDE (approved, answer, auto). A child an agent asks for
+  carries a prompt on its ASSIGN_REQUEST; while the server holds it the caller gets HELD_EVENT, and
+  a refusal ends it with DENIED_EVENT. The hold effect now records the decision.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+
 ## v0.3.1 (2026-10-07)
 
 ### Bug Fixes
