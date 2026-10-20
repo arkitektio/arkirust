@@ -1,6 +1,22 @@
 # CHANGELOG
 
 
+## v0.5.0 (2026-10-20)
+
+### Features
+
+- State requirements on assigns
+  ([`1711660`](https://github.com/arkitektio/arkirust/commit/1711660018930ab2255696734654df6ab6adfb54))
+
+An Assign and an AssignRequest carry state_requires (a state, an RFC 6901 path, a descriptor
+  operator and a value) that the agent tests before the task runs. A FAILED report and its caller
+  event carry a code (STATE_PRECONDITION), and an agent says on REGISTER which features it
+  implements (state_requires). The Rust agent does not test them and so refuses any task that
+  carries them.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+
 ## v0.4.0 (2026-10-20)
 
 ### Features
