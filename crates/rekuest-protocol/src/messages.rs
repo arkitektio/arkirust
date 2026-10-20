@@ -25,6 +25,15 @@ pub struct Diagnostic {
     pub path: Option<String>,
 }
 
+/// What a task says about a hold or a child it asks to run, for the person who decides.
+/// It is the agent's own words: whoever shows it shows what the server knows beside it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AssignPrompt {
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
 /// A request to run an action.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Assign {
@@ -118,6 +127,16 @@ pub enum ToAgent {
         task: String,
         #[serde(default)]
         step: bool,
+    },
+    /// The answer to a task's own hold (`HELD`): a person decided, or the run is in
+    /// auto-mode (`auto`) and the server approved it. A denial does not end the task.
+    Decide {
+        task: String,
+        approved: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        answer: Option<String>,
+        #[serde(default)]
+        auto: bool,
     },
     Heartbeat {},
     Bounce {
@@ -237,6 +256,20 @@ pub enum ToAgent {
     InterruptedEvent(ExecutionEvent),
     PausingEvent(ExecutionEvent),
     PausedEvent(ExecutionEvent),
+    /// The child waits for a person to approve it; nothing runs until someone does.
+    HeldEvent {
+        #[serde(flatten)]
+        event: ExecutionEvent,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        prompt: Option<AssignPrompt>,
+    },
+    /// A person refused to let the child run: it ended without ever starting.
+    DeniedEvent {
+        #[serde(flatten)]
+        event: ExecutionEvent,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        answer: Option<String>,
+    },
     ResumingEvent(ExecutionEvent),
     ResumedEvent(ExecutionEvent),
     FailedEvent {
@@ -346,6 +379,17 @@ pub enum FromAgent<D = AgentDeclaration> {
     Resumed {
         task: String,
     },
+    /// The task waits for a person's decision (a workflow's `hold`); the server
+    /// answers with `DECIDE`. Unlike `PAUSED`, the answer comes back to the task.
+    Held {
+        task: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        prompt: Option<AssignPrompt>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        details: Option<Value>,
+    },
     /// One RFC 6902 operation on a state. `old_value` is always null, as in Python.
     StatePatch {
         session_id: String,
@@ -451,6 +495,10 @@ pub enum FromAgent<D = AgentDeclaration> {
         capture: Option<bool>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         step: Option<bool>,
+        /// Why the caller wants the child run. Unless the run is in auto-mode the
+        /// server holds the child until a person approves it, and shows this.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        prompt: Option<AssignPrompt>,
     },
     /// Ask the server to run an action as a probe (not a task; nothing is recorded).
     ProbeRequest {
@@ -508,7 +556,7 @@ pub enum EffectKind {
     Sleep,
     /// A value a workflow recorded with `task.record(fn)`.
     Record,
-    /// A hold a person resumed.
+    /// A hold's decision: whether it was approved, and the answer.
     Hold,
 }
 
@@ -588,6 +636,7 @@ impl<D> FromAgent<D> {
             | FromAgent::Cancelled { task }
             | FromAgent::Interrupted { task }
             | FromAgent::Paused { task, .. }
+            | FromAgent::Held { task, .. }
             | FromAgent::Resumed { task }
             | FromAgent::Effect { task, .. }
             | FromAgent::Lock { task, .. } => Some(task),

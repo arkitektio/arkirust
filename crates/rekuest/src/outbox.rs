@@ -379,6 +379,7 @@ mod tests {
                 hooks: None,
                 capture: None,
                 step: None,
+                prompt: None,
             },
             None,
         );
