@@ -402,6 +402,7 @@ impl Agent {
             token,
             force: self.options.force,
             session_id: Some(self.session_id.clone()),
+            features: vec![],
             declaration: self.declaration(),
         });
         if let Err(e) = sink.send(Message::Text(to_json(&register))).await {

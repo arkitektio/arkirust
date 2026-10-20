@@ -34,7 +34,15 @@
       "prompt": {
         "title": "title-1",
         "description": "description-1"
-      }
+      },
+      "state_requires": [
+        {
+          "state": "state-1",
+          "path": "/path-1",
+          "operator": "EQUALS",
+          "value": "value-1"
+        }
+      ]
     },
     "CANCELLED": {
       "id": "id-1",
@@ -95,7 +103,8 @@
       "seq": 7,
       "type": "FAILED",
       "task": "task-1",
-      "error": "error-1"
+      "error": "error-1",
+      "code": "code-1"
     },
     "HEARTBEAT_ANSWER": {
       "id": "id-1",
@@ -220,7 +229,10 @@
       "implementations": [],
       "states": [],
       "locks": [],
-      "bloks": []
+      "bloks": [],
+      "features": [
+        "features-1"
+      ]
     },
     "RESUMED": {
       "id": "id-1",
@@ -402,7 +414,15 @@
             "value": null
           }
         ]
-      }
+      },
+      "state_requires": [
+        {
+          "state": "state-1",
+          "path": "/path-1",
+          "operator": "EQUALS",
+          "value": "value-1"
+        }
+      ]
     },
     "ASSIGN_RESPONSE": {
       "id": "id-1",
@@ -510,7 +530,8 @@
       "event": "event-1",
       "seq": 7,
       "type": "FAILED_EVENT",
-      "error": "error-1"
+      "error": "error-1",
+      "code": "code-1"
     },
     "HEARTBEAT": {
       "id": "id-1",

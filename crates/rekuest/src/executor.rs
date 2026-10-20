@@ -22,7 +22,7 @@ use crate::emit::Emitter;
 use crate::hooks::{Background, Startup};
 use crate::journal::TaskGate;
 use crate::locks::{HeldLocks, LockTable, LockView};
-use crate::messages::{Assign, FromAgent};
+use crate::messages::{Assign, FromAgent, STATE_PRECONDITION};
 use crate::shelf::Shelf;
 use crate::state::{Sink, StateHub};
 use crate::task::{Break, Task};
@@ -437,28 +437,40 @@ impl Executor {
                 return;
             }
 
-            let body = rath::with_task_token(
-                assign.token.clone(),
-                crate::shelf::shelving_for(
-                    id.clone(),
-                    gate.clone(),
-                    action.run(assign.args.clone(), this.context(), task),
-                ),
-            );
-            let event = match AssertUnwindSafe(body).catch_unwind().await {
-                Ok(Ok(())) => FromAgent::Completed { task: id.clone() },
-                Ok(Err(ActionError::Failed(error))) => FromAgent::Failed {
+            // This agent does not test state requirements (it does not say
+            // `state_requires` on REGISTER), so a task that carries them is refused
+            // rather than run unchecked.
+            let event = if !assign.state_requires.is_empty() {
+                FromAgent::Failed {
                     task: id.clone(),
-                    error,
-                },
-                Ok(Err(ActionError::Critical(error))) => FromAgent::Critical {
-                    task: id.clone(),
-                    error,
-                },
-                Err(panic) => FromAgent::Critical {
-                    task: id.clone(),
-                    error: format!("the action panicked: {}", panic_message(&panic)),
-                },
+                    error: "this agent does not test state requirements".into(),
+                    code: Some(STATE_PRECONDITION.into()),
+                }
+            } else {
+                let body = rath::with_task_token(
+                    assign.token.clone(),
+                    crate::shelf::shelving_for(
+                        id.clone(),
+                        gate.clone(),
+                        action.run(assign.args.clone(), this.context(), task),
+                    ),
+                );
+                match AssertUnwindSafe(body).catch_unwind().await {
+                    Ok(Ok(())) => FromAgent::Completed { task: id.clone() },
+                    Ok(Err(ActionError::Failed(error))) => FromAgent::Failed {
+                        task: id.clone(),
+                        error,
+                        code: None,
+                    },
+                    Ok(Err(ActionError::Critical(error))) => FromAgent::Critical {
+                        task: id.clone(),
+                        error,
+                    },
+                    Err(panic) => FromAgent::Critical {
+                        task: id.clone(),
+                        error: format!("the action panicked: {}", panic_message(&panic)),
+                    },
+                }
             };
             // Reported while still holding the locks: UNLOCK follows the end, as in Python.
             // A cancelled task was already reported (and forgotten, and its
@@ -747,6 +759,33 @@ mod tests {
             }
         }
         assert!(pos_of(&frames, "UNLOCK", "last") > pos_of(&frames, "COMPLETED", "last"));
+    }
+
+    #[tokio::test]
+    async fn a_task_with_state_requirements_is_refused_not_run() {
+        let (executor, recorder) = executor();
+        let mut refused = assign("t", "quick");
+        refused.state_requires = vec![crate::messages::StateRequirement {
+            state: "stage".into(),
+            path: "/busy".into(),
+            operator: "EQUALS".into(),
+            value: serde_json::json!(false),
+        }];
+        executor.assign(refused);
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !executor.has_finished("t") {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let frames = recorder.0.lock().unwrap().clone();
+        let ends: Vec<_> = frames
+            .iter()
+            .filter(|(k, t, _)| t.as_deref() == Some("t") && (k == "FAILED" || k == "COMPLETED"))
+            .map(|(k, _, _)| k.as_str())
+            .collect();
+        assert_eq!(ends, ["FAILED"]);
     }
 
     #[tokio::test]

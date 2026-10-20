@@ -620,6 +620,7 @@ fn build_assign(
         implementation: implementation.unwrap_or_else(|| "fastapi".into()),
         token: None,
         resume: None,
+        state_requires: vec![],
     })
 }
 

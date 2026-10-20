@@ -34,6 +34,32 @@ pub struct AssignPrompt {
     pub description: Option<String>,
 }
 
+/// A condition on the running agent's state that must hold for a task to run.
+///
+/// The agent tests it after taking the action's locks and the locks the named state
+/// requires, before anything runs; a task whose state does not match ends `FAILED` with
+/// [`STATE_PRECONDITION`] as its code. `path` is an RFC 6901 pointer into the state's
+/// value (`/stage/busy`); a path the state does not hold fails. `operator` is a descriptor
+/// operator by name (`EQUALS`, `NOT_EQUALS`, `GTE`, `LTE`, `IN`, `NOT_IN`, `CONTAINS`,
+/// `EXISTS`, `MATCHES`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StateRequirement {
+    pub state: String,
+    pub path: String,
+    pub operator: String,
+    #[serde(default)]
+    pub value: Value,
+}
+
+/// The `FAILED` code of a task refused because its agent's state did not match its
+/// [`StateRequirement`]s. Nothing of the action ran.
+pub const STATE_PRECONDITION: &str = "STATE_PRECONDITION";
+
+/// What an agent that tests [`StateRequirement`]s says on `REGISTER` (in `features`). A
+/// server must not send a task with requirements to an agent that does not say it: the
+/// agent would drop them and run the task unchecked.
+pub const FEATURE_STATE_REQUIRES: &str = "state_requires";
+
 /// A request to run an action.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Assign {
@@ -69,6 +95,9 @@ pub struct Assign {
     /// previous run recorded, for the resumed run to replay.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resume: Option<Journal>,
+    /// What the agent's state must hold for the task to run (see [`StateRequirement`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub state_requires: Vec<StateRequirement>,
 }
 
 /// One value a workflow recorded, keyed as the workflow named it.
@@ -277,6 +306,9 @@ pub enum ToAgent {
         event: ExecutionEvent,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
+        /// The `FAILED` frame's code, passed on to the caller.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        code: Option<String>,
     },
     CriticalEvent {
         #[serde(flatten)]
@@ -319,6 +351,7 @@ pub enum LogLevel {
 /// server parses the full declaration its registration validates.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "SCREAMING_SNAKE_CASE")]
+#[allow(clippy::large_enum_variant)] // a frame is built once and sent; boxing would change the API
 pub enum FromAgent<D = AgentDeclaration> {
     Register {
         token: String,
@@ -326,6 +359,9 @@ pub enum FromAgent<D = AgentDeclaration> {
         force: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         session_id: Option<String>,
+        /// What this agent implements beyond the base protocol ([`FEATURE_STATE_REQUIRES`]).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        features: Vec<String>,
         #[serde(flatten)]
         declaration: D,
     },
@@ -356,6 +392,9 @@ pub enum FromAgent<D = AgentDeclaration> {
     Failed {
         task: String,
         error: String,
+        /// Why, when it is one the protocol names ([`STATE_PRECONDITION`]).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        code: Option<String>,
     },
     Critical {
         task: String,
@@ -499,6 +538,9 @@ pub enum FromAgent<D = AgentDeclaration> {
         /// server holds the child until a person approves it, and shows this.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         prompt: Option<AssignPrompt>,
+        /// What the child's agent's state must hold for it to run (see [`StateRequirement`]).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        state_requires: Vec<StateRequirement>,
     },
     /// Ask the server to run an action as a probe (not a task; nothing is recorded).
     ProbeRequest {
@@ -778,6 +820,7 @@ mod tests {
         let v = serde_json::to_value(Envelope::<AgentDeclaration>::new(FromAgent::Failed {
             task: "t".into(),
             error: "e".into(),
+            code: None,
         }))
         .unwrap();
         assert_eq!(
@@ -790,6 +833,7 @@ mod tests {
             token: "tok".into(),
             force: false,
             session_id: Some("s".into()),
+            features: vec![],
             declaration: decl,
         }))
         .unwrap();
@@ -797,5 +841,40 @@ mod tests {
         assert_eq!(v["name"], "app:1");
         assert_eq!(v["implementations"], json!([]));
         assert!(v["hash"].is_string());
+        assert!(v.get("features").is_none());
+    }
+
+    #[test]
+    fn state_requires_are_left_out_when_empty_and_kept_when_set() {
+        let frame = json!({
+            "type": "ASSIGN", "interface": "move", "task": "1", "user": "u", "org": "o",
+            "action": "a", "implementation": "i",
+        });
+        let assign: ToAgent = serde_json::from_value(frame.clone()).unwrap();
+        let ToAgent::Assign(assign) = assign else {
+            panic!("not an assign")
+        };
+        assert!(assign.state_requires.is_empty());
+        assert!(serde_json::to_value(&assign)
+            .unwrap()
+            .get("state_requires")
+            .is_none());
+
+        let mut with = frame;
+        with["state_requires"] = json!([
+            {"state": "stage", "path": "/busy", "operator": "EQUALS", "value": false}
+        ]);
+        let ToAgent::Assign(assign) = serde_json::from_value::<ToAgent>(with).unwrap() else {
+            panic!("not an assign")
+        };
+        assert_eq!(
+            assign.state_requires,
+            vec![StateRequirement {
+                state: "stage".into(),
+                path: "/busy".into(),
+                operator: "EQUALS".into(),
+                value: json!(false),
+            }]
+        );
     }
 }

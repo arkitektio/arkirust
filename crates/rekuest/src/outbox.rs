@@ -380,6 +380,7 @@ mod tests {
                 capture: None,
                 step: None,
                 prompt: None,
+                state_requires: vec![],
             },
             None,
         );
