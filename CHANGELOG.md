@@ -1,6 +1,19 @@
 # CHANGELOG
 
 
+## v0.5.1 (2026-10-20)
+
+### Bug Fixes
+
+- Publish the state-requirements release
+  ([`4973180`](https://github.com/arkitektio/arkirust/commit/4973180a28ba88bad910ed7017ffbf4ed661a9de))
+
+The release run of 0.5.0 had its tag push rejected and published nothing; this cuts the release from
+  it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+
 ## v0.5.0 (2026-10-20)
 
 ### Features
