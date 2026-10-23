@@ -1,6 +1,25 @@
 # CHANGELOG
 
 
+## v0.6.0 (2026-10-23)
+
+### Features
+
+- **rekuest-protocol**: Task bloks on the agent wire
+  ([`b4f5777`](https://github.com/arkitektio/arkirust/commit/b4f5777090ea1c1fcd0523c42c1d2a467b9f89a8))
+
+A task can show a person a blok made on demand: with its own hold (`HELD` with `blok`, an ask
+  answered through the blok's returns) or while it carries on (`INFORM`). The blok is named by a
+  declared `key`, an `id`, or BSX `source` the server parses, with its args, returns, dependencies,
+  agent mappings, demo state, catalog and services (`TaskBlok`).
+
+- `DECIDE` carries the answer's `values`, checked by the server against the blok's returns. -
+  `BLOK_REFUSED {task, reason}` answers a blok the server cannot make; nothing of the frame is kept,
+  so the sender can fix it and send again.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+
 ## v0.5.1 (2026-10-20)
 
 ### Bug Fixes
