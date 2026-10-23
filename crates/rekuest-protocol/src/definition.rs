@@ -41,6 +41,11 @@ pub struct Definition {
     pub is_test_for: Vec<Value>,
     #[serde(default)]
     pub is_dev: bool,
+    /// Where the action means to hook in (`on_scene_annotation`): hints a caller filters on,
+    /// never a contract, and not part of the action's hash. Left off the wire when empty, so
+    /// a definition without hints is what a server that predates them accepts.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub protocols: Vec<String>,
 }
 
 impl Definition {
@@ -58,6 +63,7 @@ impl Definition {
             kind,
             is_test_for: vec![],
             is_dev: false,
+            protocols: vec![],
         }
     }
 }
@@ -169,5 +175,25 @@ fn canonical_json(value: &Value) -> String {
                 .join(",")
         ),
         other => other.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod protocol_hints {
+    use super::*;
+
+    #[test]
+    fn hints_stay_off_the_wire_unless_given() {
+        let plain = Definition::new("attach", "Attach", ActionKind::Function);
+        assert!(serde_json::to_value(&plain)
+            .unwrap()
+            .get("protocols")
+            .is_none());
+
+        let mut hinted = plain.clone();
+        hinted.protocols = vec!["on_scene_init".into()];
+        let wire = serde_json::to_value(&hinted).unwrap();
+        assert_eq!(wire["protocols"], serde_json::json!(["on_scene_init"]));
+        assert_eq!(serde_json::from_value::<Definition>(wire).unwrap(), hinted);
     }
 }
