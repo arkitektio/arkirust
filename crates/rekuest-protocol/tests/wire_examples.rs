@@ -26,7 +26,7 @@ fn every_from_agent_frame_round_trips() {
     let frames = frames("from_agent");
     assert_eq!(
         frames.len(),
-        29,
+        30,
         "the fixture lost or gained a message type"
     );
     for (kind, frame) in frames {
@@ -42,7 +42,7 @@ fn every_to_agent_frame_round_trips() {
     let frames = frames("to_agent");
     assert_eq!(
         frames.len(),
-        41,
+        42,
         "the fixture lost or gained a message type"
     );
     for (kind, frame) in frames {

@@ -131,6 +131,50 @@
             "two"
           ]
         }
+      },
+      "blok": {
+        "key": "key-1",
+        "id": "id-1",
+        "source": "source-1",
+        "name": "name-1",
+        "args": {
+          "key": {
+            "any": [
+              1,
+              "two"
+            ]
+          }
+        },
+        "returns": [
+          {
+            "key": "key-1"
+          }
+        ],
+        "dependencies": [
+          {
+            "key": "key-1"
+          }
+        ],
+        "agent_mappings": {
+          "key": "agent-1"
+        },
+        "demo_state": {
+          "key": {
+            "any": [
+              1,
+              "two"
+            ]
+          }
+        },
+        "catalog": "catalog-1",
+        "services": [
+          {
+            "key": "key-1",
+            "service": "service-1",
+            "version": "version-1",
+            "schema_hash": "schema_hash-1"
+          }
+        ]
       }
     },
     "INTERRUPTED": {
@@ -381,6 +425,61 @@
           ]
         }
       }
+    },
+    "INFORM": {
+      "id": "id-1",
+      "pos": 7,
+      "journal_session": "journal_session-1",
+      "agent_ts": 1.5,
+      "task_step": 7,
+      "seq": 7,
+      "type": "INFORM",
+      "task": "task-1",
+      "message": "message-1",
+      "blok": {
+        "key": "key-1",
+        "id": "id-1",
+        "source": "source-1",
+        "name": "name-1",
+        "args": {
+          "key": {
+            "any": [
+              1,
+              "two"
+            ]
+          }
+        },
+        "returns": [
+          {
+            "key": "key-1"
+          }
+        ],
+        "dependencies": [
+          {
+            "key": "key-1"
+          }
+        ],
+        "agent_mappings": {
+          "key": "agent-1"
+        },
+        "demo_state": {
+          "key": {
+            "any": [
+              1,
+              "two"
+            ]
+          }
+        },
+        "catalog": "catalog-1",
+        "services": [
+          {
+            "key": "key-1",
+            "service": "service-1",
+            "version": "version-1",
+            "schema_hash": "schema_hash-1"
+          }
+        ]
+      }
     }
   },
   "to_agent": {
@@ -500,7 +599,15 @@
       "task": "task-1",
       "approved": true,
       "answer": "answer-1",
-      "auto": true
+      "auto": true,
+      "values": {
+        "key": {
+          "any": [
+            1,
+            "two"
+          ]
+        }
+      }
     },
     "DELEGATE_EVENT": {
       "id": "id-1",
@@ -734,6 +841,12 @@
           ]
         }
       }
+    },
+    "BLOK_REFUSED": {
+      "id": "id-1",
+      "type": "BLOK_REFUSED",
+      "task": "task-1",
+      "reason": "reason-1"
     }
   }
 }

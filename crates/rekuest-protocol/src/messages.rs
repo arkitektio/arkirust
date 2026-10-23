@@ -34,6 +34,52 @@ pub struct AssignPrompt {
     pub description: Option<String>,
 }
 
+/// A blok a task shows a person: with its own hold (`HELD`), to ask for values typed by its
+/// `returns`, or on its own (`INFORM`), to show something while it carries on.
+///
+/// Exactly one of `key` (a blok the agent's app declares), `id` (any blok of the organization)
+/// or `source` (BSX, which the server parses into a blok the task owns) names it. The server
+/// makes it for the task alone: it is never listed and goes when the task goes. A blok it
+/// cannot make (unparsable BSX, a component the catalog lacks, args or bindings that do not
+/// fit) is answered with `BLOK_REFUSED` and nothing of the frame is kept.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct TaskBlok {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    /// A title for whoever sees it; the blok's own name when left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// What it is opened on, read by its tree under `@args.<key>`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub args: Option<Map<String, Value>>,
+    /// What an answer holds (return ports, as a definition declares them). A `source` blok
+    /// declares them here; a named one has its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub returns: Option<Vec<Value>>,
+    /// A `source` blok's agent dependencies (as a declared blok's). It always has `self`,
+    /// the agent that sent it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dependencies: Option<Vec<Value>>,
+    /// Dependency key to agent id. A dependency left out that the sending agent satisfies is
+    /// bound to it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_mappings: Option<Map<String, Value>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub demo_state: Option<Value>,
+    /// The UI catalog a `source` blok renders against; the server's default when left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog: Option<String>,
+    /// The backend services a `source` blok's `query` components read
+    /// (`{key, service, version, schema_hash}`), each frozen at the version it was written
+    /// against. A query on a service it does not name is refused.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub services: Option<Vec<Value>>,
+}
+
 /// A condition on the running agent's state that must hold for a task to run.
 ///
 /// The agent tests it after taking the action's locks and the locks the named state
@@ -166,6 +212,15 @@ pub enum ToAgent {
         answer: Option<String>,
         #[serde(default)]
         auto: bool,
+        /// The answer through the hold's blok, keyed by its `returns`, checked against them.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        values: Option<Map<String, Value>>,
+    },
+    /// The blok a `HELD` or an `INFORM` carried could not be made, and why: the frame was not
+    /// kept (the task is not held, nothing is shown). Fix the blok and send it again.
+    BlokRefused {
+        task: String,
+        reason: String,
     },
     Heartbeat {},
     Bounce {
@@ -428,6 +483,16 @@ pub enum FromAgent<D = AgentDeclaration> {
         prompt: Option<AssignPrompt>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         details: Option<Value>,
+        /// Ask through a blok: the person answers in it, and `DECIDE` carries its `values`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        blok: Option<TaskBlok>,
+    },
+    /// Show a person a blok while the task carries on (a chart of its progress, a result).
+    Inform {
+        task: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
+        blok: TaskBlok,
     },
     /// One RFC 6902 operation on a state. `old_value` is always null, as in Python.
     StatePatch {
@@ -679,6 +744,7 @@ impl<D> FromAgent<D> {
             | FromAgent::Interrupted { task }
             | FromAgent::Paused { task, .. }
             | FromAgent::Held { task, .. }
+            | FromAgent::Inform { task, .. }
             | FromAgent::Resumed { task }
             | FromAgent::Effect { task, .. }
             | FromAgent::Lock { task, .. } => Some(task),
