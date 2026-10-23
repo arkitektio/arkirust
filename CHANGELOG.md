@@ -1,6 +1,20 @@
 # CHANGELOG
 
 
+## v0.7.0 (2026-10-23)
+
+### Features
+
+- **rekuest-protocol**: Protocol hints on an action definition
+  ([`4218c4f`](https://github.com/arkitektio/arkirust/commit/4218c4f485e519a7e1e1a71fcc0ef0e13c7529dc))
+
+`Definition.protocols` names where an action means to hook in (`on_scene_annotation`): hints a
+  caller filters on, never a contract, and not part of the action's hash. Left off the wire when
+  empty, so a definition without hints is what a server that predates them accepts.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+
 ## v0.6.0 (2026-10-23)
 
 ### Features
