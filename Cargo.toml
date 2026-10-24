@@ -15,7 +15,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.13.0"
+version = "0.14.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/arkitektio/arkirust"
@@ -26,18 +26,18 @@ categories = ["science", "api-bindings"]
 [workspace.dependencies]
 # Without its `ring` default: the crypto provider is the application's choice
 # (arkitekt's `ring` feature, or one the app installs).
-fakts = { path = "crates/fakts", version = "0.13.0", default-features = false }
+fakts = { path = "crates/fakts", version = "0.14.0", default-features = false }
 # Without `std` (default): crates that want reqwest and typed queries turn it on.
-rath = { path = "crates/rath", version = "0.13.0", package = "arkitekt-rath", default-features = false }
+rath = { path = "crates/rath", version = "0.14.0", package = "arkitekt-rath", default-features = false }
 # Without its `wal` default (the SQLite journal, C): arkitekt's `wal` turns it on.
-rekuest = { path = "crates/rekuest", version = "0.13.0", default-features = false }
+rekuest = { path = "crates/rekuest", version = "0.14.0", default-features = false }
 # no_std: crates that want `Envelope::new` turn on `std`.
-rekuest-protocol = { path = "crates/rekuest-protocol", version = "0.13.0", default-features = false }
-rekuest-session = { path = "crates/rekuest-session", version = "0.13.0" }
-rekuest-macros = { path = "crates/rekuest-macros", version = "0.13.0" }
-arkitekt = { path = "crates/arkitekt", version = "0.13.0" }
-mikro = { path = "crates/mikro", version = "0.13.0", package = "arkitekt-mikro" }
-lovekit = { path = "crates/lovekit", version = "0.13.0", package = "arkitekt-lovekit" }
+rekuest-protocol = { path = "crates/rekuest-protocol", version = "0.14.0", default-features = false }
+rekuest-session = { path = "crates/rekuest-session", version = "0.14.0" }
+rekuest-macros = { path = "crates/rekuest-macros", version = "0.14.0" }
+arkitekt = { path = "crates/arkitekt", version = "0.14.0" }
+mikro = { path = "crates/mikro", version = "0.14.0", package = "arkitekt-mikro" }
+lovekit = { path = "crates/lovekit", version = "0.14.0", package = "arkitekt-lovekit" }
 # Released from its own repository (arkitektio/arkitekt-mesh), not in lockstep.
 mesh = { version = "0.7", package = "arkitekt-mesh" }
 

@@ -1,6 +1,101 @@
 # CHANGELOG
 
 
+## v0.14.0 (2026-10-24)
+
+### Bug Fixes
+
+- **embassy**: Bodies of any size; rath on embassy and wasm against the real stack
+  ([`5202a9d`](https://github.com/arkitektio/arkirust/commit/5202a9ddb52a8e7b95f8a5a52cc1a7f29a895d9c))
+
+serve_http read a response's headers and body into one fixed buffer, so a real GraphQL answer did
+  not fit; the body now streams into memory (only the headers must fit, 8 KiB), and exchanges ask
+  for Connection: close (one connection each, so a body without a length ends where it does).
+
+The real-stack runs now call rath too, with the agent's token: on embassy through NetHost, an
+  introspection answer larger than the header buffer; on wasm over fetch.
+
+The TLS note was wrong: embedded-tls 0.19 builds (for a Cortex-M too); it is reqwless 0.14 that
+  brings 0.18, which does not. TLS needs an HTTP client of our own over 0.19.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+### Features
+
+- **embassy**: Arkitekt-embassy, the agent on embassy, run against the real stack
+  ([`7de8938`](https://github.com/arkitektio/arkirust/commit/7de89384e49118eb35ac3fe7c6d2be8a38bf68e6))
+
+New crate arkitekt-embassy (no_std, publish = false until its name is reserved): - Embassy:
+  rekuest's rt::Runtime on an embassy executor (a pool of boxed tasks, embassy-time; the board's RNG
+  and wall clock come in through it); - NetHost + serve_http: fakts' Host (and so rath's) as
+  reqwless over embedded-nal-async, made by one network task: callers wait on embassy-sync channels,
+  so the futures are Send although embassy-net's sockets are not; replies of callers that gave up
+  are dropped by id; - Agent: rekuest's Driver over a websocket client of its own (RFC 6455: accept
+  checked, pings answered, fragments joined, buffers that grow, and cancel-safe as long as the
+  stream's read is).
+
+checks/embassy: board.rs wires it over a real embassy-net stack (TcpClient, DnsSocket) and builds
+  for thumbv7em; bin/real_stack runs it on the host over async-io TCP. rekuest's real_rekuest starts
+  the stack and runs it: the embassy agent logs in at lok, registers with takt and gets its journal
+  acknowledged, beside the native and wasm agents.
+
+Plain http/ws only: reqwless 0.14's TLS (embedded-tls 0.18) does not build against a released der,
+  so https:// and wss:// are refused for now.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+- **fakts,rath**: Fakts and rath without std: the login and GraphQL on a Host
+  ([`fd8209f`](https://github.com/arkitektio/arkirust/commit/fd8209fc997e1c52a38a3be59e87e186a7565023))
+
+fakts' login (discovery, device code, mandate key, refresh, alias challenges) runs against
+  fakts::Host: HTTP exchanges as plain data (Request/Reply), sleep, the clock, randomness. With the
+  new std feature (default) that is fakts::http::Reqwest, reqwest natively and over fetch on wasm,
+  keeping each request's semantics (challenges follow no redirects and time out after 3 s, 20 s
+  through the mesh; discovery after 10 s): a test checks that a challenge answered with a redirect
+  does not count. Without std, fakts is no_std + alloc and the app gives the builder a Host. The
+  reqwest-taking grants functions and Fakts::http stay (std) and wrap the *_with ones. The file
+  cache, environment variables, the mesh and ring need std.
+
+arkitekt-rath sends through a fakts::Host too (Rath::with_host); with std (default) it builds a
+  reqwest one and has typed graphql_client operations. The task token is a poll-scoped local without
+  std as well, so rekuest's rath feature no longer needs std.
+
+Both build for thumbv7em-none-eabihf without std; CI lints them there.
+
+BREAKING CHANGE: fakts and arkitekt-rath have a std feature; dependencies without default features
+  turn it on (the workspace's rath entry now has default-features = false). FaktsError::Transport
+  and RathError::Transport are new variants.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+- **rekuest**: Rekuest without std: a real #[action] on embassy
+  ([`8acd92d`](https://github.com/arkitektio/arkirust/commit/8acd92d674655579f902c08438661f511b360520))
+
+rekuest's new std feature (default; tokio, web, rath, wal and serve imply it). Without it the crate
+  is no_std + alloc: locks are spin's (crate::sync, which never poisons with std either), maps
+  hashbrown's (indexmap hashed by it), the task local a global slot, TaskGate::close spins instead
+  of waiting on a Condvar, and a panicking action aborts. The runtime brings the wall clock and
+  randomness (Runtime::wall_clock_micros, Runtime::fill_random, defaulted with std; rt::now,
+  rt::uuid, rt::fill_random). The state diff is json-patch's algorithm in src/patch.rs (json-patch
+  needs std; it stays a dev-dependency the diff is checked against). #[action] and #[derive(State)]
+  expand without naming std.
+
+checks/embassy runs the scripted scenario with a real #[action] through Driver on an embassy
+  rt::Runtime (boxed-task pool, embassy-time), on the host and built for thumbv7em-none-eabihf; CI
+  clippy-builds rekuest for it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+### Testing
+
+- **rekuest**: The wasm agent's real-stack run calls rath over fetch
+  ([`9977471`](https://github.com/arkitektio/arkirust/commit/99774711d08dfb559de20c2c3259d6b7e98d8ab2))
+
+The edit meant for 5202a9d did not apply; this is it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+
 ## v0.13.0 (2026-10-24)
 
 ### Bug Fixes
