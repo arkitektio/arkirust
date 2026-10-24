@@ -1,6 +1,21 @@
 # CHANGELOG
 
 
+## v0.11.0 (2026-10-24)
+
+### Features
+
+- **fakts,arkitekt**: Meshjoiner, for a mesh node the app runs itself
+  ([`93913e5`](https://github.com/arkitektio/arkirust/commit/93913e57269c753f22919ef7f8c5f53df28b4031))
+
+fakts asks for a mesh key at login, hands it with the coordination server and the node's hostname to
+  the joiner, and reaches mesh aliases through the proxy it returns (ConnectOptions::mesh_joiner).
+  For targets where neither the meshd sidecar nor the native backend's state directory fits, e.g. a
+  firmware keeping its node in NVS.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+
 ## v0.10.0 (2026-10-24)
 
 ### Features
