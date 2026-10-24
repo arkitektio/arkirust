@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
     types: [opened, edited, synchronize, reopened]
+  # Publish what a release tagged but did not get onto crates.io (e.g. after
+  # a failed run); semantic-release then finds nothing new to release.
+  workflow_dispatch:
 
 jobs:
   test:
@@ -115,7 +118,7 @@ jobs:
   # arkitektio/arkitekt-mesh.
   release:
     needs: [test, platforms, esp32s3, e2e]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository_owner == 'arkitektio'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && github.repository_owner == 'arkitektio'
     runs-on: ubuntu-latest
     concurrency:
       group: release
@@ -138,7 +141,7 @@ jobs:
       # Publishes every crate whose version is not on crates.io yet, in
       # dependency order (release-plz.toml).
       - uses: release-plz/action@v0.5
-        if: steps.version.outputs.released == 'true'
+        if: steps.version.outputs.released == 'true' || github.event_name == 'workflow_dispatch'
         with:
           command: release
         env:
