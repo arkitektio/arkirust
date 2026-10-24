@@ -177,11 +177,13 @@ impl FaktsBuilder {
         grants::check_transport(&well_known.token_endpoint, self.allow_insecure_transport)?;
 
         let cache_key = cache::cache_key(&self.manifest, &base_url);
-        let store = self.use_cache.then(|| {
-            self.store.clone().unwrap_or_else(|| {
-                Arc::new(FileStore::default_for(&self.manifest, &base_url)) as Arc<dyn FaktsStore>
-            })
-        });
+        let store = if self.use_cache {
+            self.store
+                .clone()
+                .or_else(|| default_store(&self.manifest, &base_url))
+        } else {
+            None
+        };
 
         let cached = match &store {
             Some(store) => store.load(&cache_key).await,
@@ -311,6 +313,18 @@ async fn start_mesh(
     MeshNode::start(options, statedir, &hostname, join)
         .await
         .map(Some)
+}
+
+/// The cache file in the user's state directory; nothing without one.
+#[cfg(feature = "user-dirs")]
+fn default_store(manifest: &Manifest, url: &str) -> Option<Arc<dyn FaktsStore>> {
+    Some(Arc::new(FileStore::default_for(manifest, url)))
+}
+
+#[cfg(not(feature = "user-dirs"))]
+fn default_store(_manifest: &Manifest, _url: &str) -> Option<Arc<dyn FaktsStore>> {
+    tracing::debug!("no fakts store: the app logs in again on every start");
+    None
 }
 
 fn report_endpoint(well_known: &WellKnown) -> Option<String> {

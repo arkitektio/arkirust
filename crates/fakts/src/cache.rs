@@ -6,7 +6,6 @@ use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 use crate::error::Result;
 use crate::models::{ActiveFakts, Manifest};
@@ -39,6 +38,7 @@ impl FileStore {
     }
 
     /// The per-user default for this app and server (see [`default_cache_path`]).
+    #[cfg(feature = "user-dirs")]
     pub fn default_for(manifest: &Manifest, url: &str) -> Self {
         Self::new(default_cache_path(manifest, url))
     }
@@ -78,7 +78,10 @@ pub struct CacheFile {
 /// The `.rs` keeps it apart from the Python client's cache in the same
 /// directory: the two formats differ, and sharing a file would make each
 /// client discard (and so re-authorize over) the other's rotating credential.
+#[cfg(feature = "user-dirs")]
 pub fn default_cache_path(manifest: &Manifest, url: &str) -> PathBuf {
+    use sha2::{Digest, Sha256};
+
     let base = dirs::state_dir()
         .or_else(dirs::data_local_dir)
         .unwrap_or_else(|| PathBuf::from(".arkitekt"));

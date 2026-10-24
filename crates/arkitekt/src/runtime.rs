@@ -276,7 +276,8 @@ impl Runtime {
 }
 
 /// A stable id for this installation: `ARKITEKT_DEVICE_ID`, else the OS
-/// machine id, else a UUID persisted in the user's config directory.
+/// machine id, else a UUID persisted in the user's config directory (the
+/// `user-dirs` feature).
 pub fn device_id() -> anyhow::Result<String> {
     if let Ok(id) = std::env::var("ARKITEKT_DEVICE_ID") {
         if !id.trim().is_empty() {
@@ -290,6 +291,16 @@ pub fn device_id() -> anyhow::Result<String> {
             }
         }
     }
+    persisted_device_id()
+}
+
+#[cfg(not(feature = "user-dirs"))]
+fn persisted_device_id() -> anyhow::Result<String> {
+    anyhow::bail!("no device id: set ARKITEKT_DEVICE_ID or ConnectOptions::device_id")
+}
+
+#[cfg(feature = "user-dirs")]
+fn persisted_device_id() -> anyhow::Result<String> {
     let path = dirs::config_dir()
         .context("no config directory")?
         .join("arkitekt")

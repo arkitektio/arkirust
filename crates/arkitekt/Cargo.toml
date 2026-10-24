@@ -22,11 +22,15 @@ serde_json.workspace = true
 tokio = { workspace = true, features = ["rt", "macros", "net"] }
 tracing.workspace = true
 uuid.workspace = true
-dirs.workspace = true
+dirs = { workspace = true, optional = true }
 axum = { workspace = true, optional = true }
 
 [features]
-default = ["signal", "ring", "wal"]
+default = ["signal", "ring", "wal", "user-dirs"]
+# Default places in the user's directories: the fakts cache and the
+# persisted device id (`device_id`). Without it (ESP-IDF) the app passes a
+# store and a device id in `ConnectOptions`.
+user-dirs = ["fakts/user-dirs", "dep:dirs"]
 # The agent's write-ahead journal in SQLite (`rekuest/wal`): unsent reports
 # survive a restart. Off on targets SQLite's C does not build for.
 wal = ["rekuest/wal"]

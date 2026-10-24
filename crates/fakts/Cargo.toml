@@ -14,7 +14,7 @@ readme = "../../README.md"
 async-trait.workspace = true
 base64.workspace = true
 chrono.workspace = true
-dirs.workspace = true
+dirs = { workspace = true, optional = true }
 ed25519-dalek.workspace = true
 hex.workspace = true
 rand.workspace = true
@@ -29,14 +29,18 @@ tracing.workspace = true
 mesh = { workspace = true, optional = true, features = ["session"] }
 
 [features]
-default = ["ring"]
+default = ["ring", "user-dirs"]
 # Install ring as rustls' crypto provider (`install_crypto_provider`). Without
 # it the application installs one before connecting (e.g. rustls-rustcrypto on
 # ESP-IDF, where ring's C does not build).
 ring = ["rustls/ring"]
+# Default places in the user's directories: the fakts cache file
+# (`FileStore::default_for`) and the mesh node's state. Without it (e.g. on
+# ESP-IDF, which has no users) nothing is cached unless the app gives a store.
+user-dirs = ["dep:dirs"]
 # Join the deployment's mesh with the `arkitekt-meshd` sidecar
 # (`FaktsBuilder::mesh`); mesh aliases are reached through its proxy.
-mesh = ["tokio/process", "tokio/io-util", "tokio/net"]
+mesh = ["user-dirs", "tokio/process", "tokio/io-util", "tokio/net"]
 # Also run the node in-process with our own Tailscale-compatible client
 # (`MeshBackend::Native`, the `arkitekt-mesh` crate): no sidecar binary.
 mesh-native = ["mesh", "dep:mesh"]

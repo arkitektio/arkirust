@@ -354,6 +354,10 @@ features:
   `rustls_rustcrypto::provider().install_default()` on ESP-IDF, where ring's C
   does not build.
 * `signal` (`arkitekt`, on by default): stop on Ctrl-C.
+* `user-dirs` (`arkitekt` and `fakts`, on by default): default places in the
+  user's directories, for the fakts cache and the persisted device id.
+  Without it (ESP-IDF has no users) give `ConnectOptions` a `store` and a
+  `device_id`.
 * `wal` (`arkitekt` and `rekuest`, on by default): the SQLite journal. Without
   it the journal stays in memory.
 
