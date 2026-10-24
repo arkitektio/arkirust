@@ -1,6 +1,57 @@
 # CHANGELOG
 
 
+## v0.12.0 (2026-10-24)
+
+### Features
+
+- **rekuest**: The agent session as a sans-IO core, driven on tokio, wasm and embassy
+  ([`1834b8c`](https://github.com/arkitektio/arkirust/commit/1834b8cecfe182f13c02ddcc6876786edbdb883c))
+
+rekuest-session (new, no_std + alloc) holds the /agi session as a state machine: handshake,
+  heartbeats, bounce/kick/close codes, backoff, activation gating and the outbox that keeps numbered
+  frames until JOURNAL_ACK. Time, frames and randomness come from the driver. rekuest::Agent is now
+  its tokio driver; checks/wasm (node) and checks/embassy (host + thumbv7em) drive it with a minimal
+  driver each against the shared scripted scenario, in CI.
+
+rekuest-protocol is no_std + alloc too (Envelope::new behind its default std feature,
+  Envelope::with_id without it). The public API of rekuest and the macros are unchanged.
+
+Behaviour changes, each tested: - every task message (ASSIGN, CANCEL, PAUSE, DECIDE, ...) waits for
+  activation in order, so a CANCEL can no longer overtake its ASSIGN - close code 3004 (before
+  registration) is a bounce, as in Python - the idle timeout counts frames from the server only - an
+  activation failure ends the run even while disconnected
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+### Testing
+
+- **rekuest**: A real agent registers with takt and gets its journal acknowledged
+  ([`a8e236d`](https://github.com/arkitektio/arkirust/commit/a8e236d409a5a6710b34356b51a722c3da53086d))
+
+The test stack now routes rekuest's address through a Caddy gateway (/agi to takt, the rest to the
+  server) as a hub does, and rekuest trusts the tokens lok issues under the run's address
+  (rekuest.yaml is rendered like lok.yaml). Both e2e tests share testing/stack/harness.rs, which
+  prints the services' logs when a test fails.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+- **rekuest**: The tokio Agent runs the shared scripted scenario; run() starts over
+  ([`afcc62a`](https://github.com/arkitektio/arkirust/commit/afcc62a93de686bd414c41902e8bd466fc09239c))
+
+The std control: tests/scenario.rs runs the real Agent, executor and action against
+  rekuest_session::testing::FakeServer over a localhost websocket. FakeServer::check now asserts
+  protocol invariants (registration, the heartbeat answer, t1 up to YIELD and COMPLETED, every
+  numbered frame of the first connection re-sent in order, seq from 1 per connection), so a real
+  executor's extra frames pass as Echo's do.
+
+Session::restart: Agent::run called again after the session ended, or after it stopped while
+  connecting, connects again with a fresh retry budget, keeping the outbox and the activation (as
+  run() did before the core).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+
 ## v0.11.1 (2026-10-24)
 
 ### Bug Fixes
