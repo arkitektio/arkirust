@@ -144,8 +144,8 @@ jobs:
       # and the browser agent with its login (fakts) and GraphQL client (rath).
       - run: cargo clippy -p rekuest --no-default-features --target wasm32-unknown-unknown -- -D warnings
       # ... and without std, for a microcontroller (embassy).
-      - run: cargo clippy -p rekuest --no-default-features --target thumbv7em-none-eabihf -- -D warnings
-      - run: cargo clippy -p rekuest -p fakts -p arkitekt-rath --no-default-features --features rekuest/web,rekuest/rath --target wasm32-unknown-unknown -- -D warnings
+      - run: cargo clippy -p rekuest -p fakts -p arkitekt-rath --no-default-features --features rekuest/rath --target thumbv7em-none-eabihf -- -D warnings
+      - run: cargo clippy -p rekuest -p fakts -p arkitekt-rath --no-default-features --features rekuest/web,rekuest/rath,fakts/std,arkitekt-rath/std --target wasm32-unknown-unknown -- -D warnings
       - run: wasm-pack test --node
         working-directory: checks/wasm
       - run: cargo clippy --target wasm32-unknown-unknown --all-targets -- -D warnings

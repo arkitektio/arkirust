@@ -12,7 +12,7 @@ readme = "../../README.md"
 
 [dependencies]
 fakts = { workspace = true, optional = true }
-rath = { workspace = true, optional = true }
+rath = { workspace = true, optional = true, default-features = false }
 rekuest-macros.workspace = true
 rekuest-protocol.workspace = true
 rekuest-session.workspace = true
@@ -61,7 +61,7 @@ default = ["std", "wal", "tokio", "rath"]
 std = [
     "rekuest-protocol/std", "anyhow/std", "chrono/std", "chrono/clock", "futures/std",
     "hex/std", "indexmap/std", "dep:rand", "serde/std", "serde_json/std", "sha2/std",
-    "thiserror/std", "async-channel/std", "tracing/std", "uuid/std", "uuid/v4",
+    "thiserror/std", "async-channel/std", "tracing/std", "uuid/std", "uuid/v4", "rath?/std",
 ]
 # tokio as the runtime (`rt::Tokio`) and the websocket `Agent` on it (with
 # fakts for its tokens). Without it, install a `rt::Runtime` and drive the
@@ -71,7 +71,7 @@ tokio = ["std", "dep:tokio", "dep:tokio-tungstenite", "dep:fakts"]
 # with fakts for its tokens, and `rt::Js` (the JS event loop) as the runtime.
 web = ["std", "dep:fakts", "dep:web-sys", "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys", "dep:gloo-timers", "dep:send_wrapper"]
 # Actions' GraphQL calls (rath) carry their task's token.
-rath = ["std", "dep:rath"]
+rath = ["dep:rath"]
 # Keep the journal in a local SQLite file (write-ahead: unsent reports survive restarts).
 wal = ["std", "dep:rusqlite", "tokio"]
 # Serve an app over HTTP + websocket without a rekuest server (port of rekuest.contrib.fastapi).

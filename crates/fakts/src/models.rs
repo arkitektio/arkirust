@@ -1,6 +1,9 @@
 //! Wire and cache models of the fakts v2 protocol.
 
-use std::collections::{BTreeMap, HashMap};
+use alloc::collections::BTreeMap;
+
+use crate::collections::HashMap;
+use crate::prelude::*;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -152,7 +155,7 @@ impl Alias {
             Some(kind) => kind == "mesh",
             None => self
                 .host
-                .parse::<std::net::Ipv4Addr>()
+                .parse::<core::net::Ipv4Addr>()
                 .is_ok_and(|ip| ip.octets()[0] == 100 && (ip.octets()[1] & 0b1100_0000) == 64),
         }
     }
@@ -163,6 +166,7 @@ impl Alias {
     }
 
     /// A client for this alias: proxied through the mesh sidecar when needed.
+    #[cfg(feature = "std")]
     pub fn http_client_builder(&self) -> reqwest::Result<reqwest::ClientBuilder> {
         let builder = reqwest::Client::builder();
         #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
@@ -176,6 +180,7 @@ impl Alias {
     }
 
     /// See [`Alias::http_client_builder`].
+    #[cfg(feature = "std")]
     pub fn http_client(&self) -> reqwest::Result<reqwest::Client> {
         crate::install_crypto_provider();
         self.http_client_builder()?.build()
@@ -267,8 +272,8 @@ pub struct MeshClaim {
     pub ionscale_coord_url: Option<String>,
 }
 
-impl std::fmt::Debug for MeshClaim {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Debug for MeshClaim {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("MeshClaim")
             .field("ionscale_auth_key", &"***")
             .field("ionscale_coord_url", &self.ionscale_coord_url)
@@ -394,7 +399,7 @@ impl ActiveFakts {
             .or_else(|| fallback_refresh.map(str::to_owned));
         let expires_at = response
             .expires_in
-            .map(|exp| now + exp - std::cmp::min(30, exp / 2));
+            .map(|exp| now + exp - core::cmp::min(30, exp / 2));
         Ok(Self {
             self_: response.self_,
             auth: AuthFakt {

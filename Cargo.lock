@@ -211,6 +211,7 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "spin",
  "thiserror 2.0.21",
  "tokio",
  "tracing",
@@ -1234,6 +1235,7 @@ name = "fakts"
 version = "0.13.0"
 dependencies = [
  "arkitekt-mesh",
+ "async-lock",
  "async-trait",
  "axum",
  "base64 0.22.1",
@@ -1243,6 +1245,7 @@ dependencies = [
  "futures",
  "getrandom 0.2.15",
  "gloo-timers",
+ "hashbrown 0.15.5",
  "hex",
  "rand 0.8.5",
  "reqwest 0.12.28",
@@ -1256,7 +1259,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
- "web-time",
+ "url",
  "wiremock",
 ]
 
@@ -1634,6 +1637,7 @@ dependencies = [
  "allocator-api2",
  "equivalent",
  "foldhash 0.1.5",
+ "serde",
 ]
 
 [[package]]

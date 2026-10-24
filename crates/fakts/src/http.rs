@@ -1,13 +1,139 @@
-//! One HTTP exchange and one wait, as every target makes them.
+//! The [`Host`] with std: reqwest over rustls natively, over `fetch` on wasm.
 //!
-//! On wasm, reqwest runs over `fetch` and its futures hold JS values, so they
-//! are not `Send`; fakts' futures must be (`TokenLoader`). An exchange is
-//! therefore made whole here (send, read the body) and handed back as plain
-//! data, its future wrapped on wasm, where there is one thread. The GraphQL
-//! client (rath) makes its requests through here too.
+//! On wasm, reqwest's futures hold JS values, so they are not `Send`; fakts'
+//! futures must be (`TokenLoader`). An exchange is therefore made whole here
+//! (send, read the body) and handed back as plain data, its future wrapped on
+//! wasm, where there is one thread.
 
 use std::future::Future;
+use std::sync::OnceLock;
 use std::time::Duration;
+
+use async_trait::async_trait;
+
+use crate::host::{Body, Host, HostError, Method, Reply as HostReply, Request};
+
+/// reqwest as the [`Host`]: a client for requests that follow redirects, and
+/// one built alike that does not (alias challenges), through `proxy` if set.
+#[derive(Debug)]
+pub struct Reqwest {
+    client: reqwest::Client,
+    #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), allow(dead_code))]
+    proxy: Option<String>,
+    #[cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), allow(dead_code))]
+    no_redirects: OnceLock<reqwest::Client>,
+}
+
+impl Reqwest {
+    /// Requests through `client` (redirect-free ones through a client like it).
+    pub fn new(client: reqwest::Client) -> Self {
+        Self {
+            client,
+            proxy: None,
+            no_redirects: OnceLock::new(),
+        }
+    }
+
+    /// A fresh client with fakts' user agent.
+    pub fn default_client() -> reqwest::Result<reqwest::Client> {
+        crate::install_crypto_provider();
+        reqwest::Client::builder()
+            .user_agent(concat!("fakts-rs/", env!("CARGO_PKG_VERSION")))
+            .build()
+    }
+
+    /// Everything through the HTTP proxy at `proxy` (the mesh's).
+    pub fn with_proxy(proxy: &str) -> crate::Result<Self> {
+        crate::install_crypto_provider();
+        let builder =
+            reqwest::Client::builder().user_agent(concat!("fakts-rs/", env!("CARGO_PKG_VERSION")));
+        #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+        let builder = builder.proxy(reqwest::Proxy::all(proxy)?);
+        Ok(Self {
+            client: builder.build()?,
+            proxy: Some(proxy.to_owned()),
+            no_redirects: OnceLock::new(),
+        })
+    }
+
+    pub fn client(&self) -> &reqwest::Client {
+        &self.client
+    }
+
+    fn client_for(&self, follow_redirects: bool) -> reqwest::Result<reqwest::Client> {
+        if follow_redirects {
+            return Ok(self.client.clone());
+        }
+        // fetch follows redirects and has no proxy: there is one client on wasm.
+        #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+        return Ok(self.client.clone());
+        #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+        {
+            if let Some(client) = self.no_redirects.get() {
+                return Ok(client.clone());
+            }
+            let builder = reqwest::Client::builder()
+                .user_agent(concat!("fakts-rs/", env!("CARGO_PKG_VERSION")))
+                .redirect(reqwest::redirect::Policy::none());
+            let builder = match &self.proxy {
+                Some(proxy) => builder.proxy(reqwest::Proxy::all(proxy)?),
+                None => builder,
+            };
+            let client = builder.build()?;
+            Ok(self.no_redirects.get_or_init(|| client).clone())
+        }
+    }
+
+    fn build(&self, request: &Request) -> reqwest::Result<reqwest::RequestBuilder> {
+        let client = self.client_for(request.follow_redirects)?;
+        let mut builder = match request.method {
+            Method::Get => client.get(&request.url),
+            Method::Post => client.post(&request.url),
+        };
+        if !request.query.is_empty() {
+            builder = builder.query(&request.query);
+        }
+        for (name, value) in &request.headers {
+            builder = builder.header(name, value);
+        }
+        builder = match &request.body {
+            Body::Empty => builder,
+            Body::Json(bytes) => builder
+                .header("content-type", "application/json")
+                .body(bytes.clone()),
+            Body::Form(fields) => builder.form(fields),
+        };
+        #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+        if let Some(timeout) = request.timeout {
+            builder = builder.timeout(timeout);
+        }
+        Ok(builder)
+    }
+}
+
+#[async_trait]
+impl Host for Reqwest {
+    async fn send(&self, request: Request) -> Result<HostReply, HostError> {
+        let builder = self.build(&request).map_err(|e| HostError(e.to_string()))?;
+        let reply = fetch(builder).await.map_err(|e| HostError(e.to_string()))?;
+        Ok(HostReply {
+            status: reply.status.as_u16(),
+            body: reply.body,
+        })
+    }
+
+    async fn sleep(&self, duration: Duration) {
+        sleep(duration).await
+    }
+
+    fn now_unix(&self) -> i64 {
+        chrono::Utc::now().timestamp()
+    }
+
+    fn fill_random(&self, bytes: &mut [u8]) {
+        rand::RngCore::fill_bytes(&mut rand::thread_rng(), bytes)
+    }
+}
 
 /// A response, read to its end.
 pub struct Reply {

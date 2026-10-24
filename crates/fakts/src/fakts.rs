@@ -1,22 +1,26 @@
 //! The `Fakts` handle: loads (or grants) the active configuration, hands out
 //! access tokens and resolves service aliases.
 
-use std::collections::HashMap;
+use core::time::Duration;
+#[cfg(feature = "std")]
 use std::path::PathBuf;
-use std::sync::Arc;
-use std::time::Duration;
 
+use async_lock::Mutex;
 use async_trait::async_trait;
 use base64::Engine;
-use rand::RngCore;
+#[cfg(feature = "std")]
 use reqwest::Client;
-use tokio::sync::Mutex;
 
-use crate::cache::{self, FaktsStore, FileStore};
+#[cfg(feature = "std")]
+use crate::cache::FileStore;
+use crate::cache::{self, FaktsStore};
+use crate::collections::HashMap;
 use crate::error::{FaktsError, Result};
 use crate::grants::{self, DeviceCodeOptions, MandateKeyOptions};
+use crate::host::{Host, Request};
 use crate::mesh_join::{MeshJoin, MeshJoiner};
 use crate::models::{ActiveFakts, Alias, Instance, Manifest, WellKnown};
+use crate::prelude::*;
 
 /// Anything that can hand out a bearer token and renew a stale one.
 ///
@@ -57,6 +61,8 @@ pub struct FaktsBuilder {
     store: Option<Arc<dyn FaktsStore>>,
     use_cache: bool,
     allow_insecure_transport: bool,
+    host: Option<Arc<dyn Host>>,
+    #[cfg(feature = "std")]
     http: Option<Client>,
     mesh_proxy: Option<String>,
     mesh_joiner: Option<Arc<dyn MeshJoiner>>,
@@ -65,13 +71,21 @@ pub struct FaktsBuilder {
 }
 
 impl FaktsBuilder {
+    /// With std the grant comes from `FAKTS_MANDATE_KEY` or `FAKTS_TOKEN` if
+    /// set, else the device code; without std it is the device code until
+    /// [`grant`](Self::grant) says otherwise.
     pub fn new(url: impl Into<String>, manifest: Manifest) -> Self {
+        #[cfg(feature = "std")]
         let mandate_key = std::env::var("FAKTS_MANDATE_KEY")
             .ok()
             .filter(|k| !k.is_empty());
-        let grant = match (mandate_key, std::env::var("FAKTS_TOKEN")) {
+        #[cfg(feature = "std")]
+        let token = std::env::var("FAKTS_TOKEN").ok();
+        #[cfg(not(feature = "std"))]
+        let (mandate_key, token): (Option<String>, Option<String>) = (None, None);
+        let grant = match (mandate_key, token) {
             (Some(key), _) => Grant::MandateKey(Arc::new(MandateKeyOptions::new(key))),
-            (None, Ok(token)) if token.contains(':') => {
+            (None, Some(token)) if token.contains(':') => {
                 let (client_id, refresh_token) = token.split_once(':').expect("checked");
                 Grant::RefreshToken {
                     client_id: client_id.to_owned(),
@@ -87,6 +101,8 @@ impl FaktsBuilder {
             store: None,
             use_cache: true,
             allow_insecure_transport: false,
+            host: None,
+            #[cfg(feature = "std")]
             http: None,
             mesh_proxy: None,
             mesh_joiner: None,
@@ -101,6 +117,7 @@ impl FaktsBuilder {
     }
 
     /// Use a specific cache file instead of the per-user state directory.
+    #[cfg(feature = "std")]
     pub fn cache_path(mut self, path: impl Into<PathBuf>) -> Self {
         self.store = Some(Arc::new(FileStore::new(path)));
         self
@@ -123,8 +140,16 @@ impl FaktsBuilder {
         self
     }
 
+    #[cfg(feature = "std")]
     pub fn http_client(mut self, http: Client) -> Self {
         self.http = Some(http);
+        self
+    }
+
+    /// Make every request through `host` (required without std; with std the
+    /// default is reqwest, see [`http_client`](Self::http_client)).
+    pub fn host(mut self, host: Arc<dyn Host>) -> Self {
+        self.host = Some(host);
         self
     }
 
@@ -184,16 +209,26 @@ impl FaktsBuilder {
 
     /// Discover the server, then load the cached credential or run the grant.
     pub async fn load(self) -> Result<Fakts> {
-        crate::install_crypto_provider();
         let grant = self.effective_grant();
-        let http = match self.http {
-            Some(http) => http,
-            None => Client::builder()
-                .user_agent(concat!("fakts-rs/", env!("CARGO_PKG_VERSION")))
-                .build()?,
+        #[cfg(feature = "std")]
+        let (host, http) = {
+            crate::install_crypto_provider();
+            let http = match self.http {
+                Some(http) => http,
+                None => crate::http::Reqwest::default_client()?,
+            };
+            let host: Arc<dyn Host> = match self.host {
+                Some(host) => host,
+                None => Arc::new(crate::http::Reqwest::new(http.clone())),
+            };
+            (host, http)
         };
+        #[cfg(not(feature = "std"))]
+        let host = self.host.ok_or_else(|| {
+            FaktsError::Protocol("without std fakts needs a Host (FaktsBuilder::host)".into())
+        })?;
 
-        let (base_url, well_known) = grants::discover(&http, &self.url).await?;
+        let (base_url, well_known) = grants::discover_with(&*host, &self.url).await?;
         grants::check_transport(&well_known.token_endpoint, self.allow_insecure_transport)?;
 
         let cache_key = cache::cache_key(&self.manifest, &base_url);
@@ -216,7 +251,7 @@ impl FaktsBuilder {
                 active
             }
             None => {
-                let active = run_grant(&http, &well_known, &self.manifest, &grant).await?;
+                let active = run_grant(&*host, &well_known, &self.manifest, &grant).await?;
                 if let Some(store) = &store {
                     store.save(&cache_key, &active).await?;
                 }
@@ -246,9 +281,22 @@ impl FaktsBuilder {
             .or_else(|| mesh_node.as_ref().map(|n| n.proxy_url().to_owned()));
         #[cfg(not(feature = "mesh"))]
         let mesh_proxy = self.mesh_proxy.or(joined);
+        // Mesh aliases are challenged through the proxy (with std; without
+        // it there is no proxy client, and mesh aliases are skipped).
+        #[cfg(feature = "std")]
+        let mesh_host = mesh_proxy
+            .as_deref()
+            .map(crate::http::Reqwest::with_proxy)
+            .transpose()?
+            .map(|host| Arc::new(host) as Arc<dyn Host>);
+        #[cfg(not(feature = "std"))]
+        let mesh_host: Option<Arc<dyn Host>> = None;
 
         Ok(Fakts {
             inner: Arc::new(Inner {
+                host,
+                mesh_host,
+                #[cfg(feature = "std")]
                 http,
                 base_url,
                 well_known,
@@ -261,7 +309,7 @@ impl FaktsBuilder {
                 cache_key,
                 active: Mutex::new(active),
                 refresh_lock: Mutex::new(()),
-                aliases: Mutex::new(HashMap::new()),
+                aliases: Mutex::new(HashMap::default()),
                 mesh_proxy,
                 #[cfg(feature = "mesh")]
                 mesh_node: mesh_node.map(Mutex::new),
@@ -376,15 +424,16 @@ fn report_endpoint(well_known: &WellKnown) -> Option<String> {
 }
 
 async fn run_grant(
-    http: &Client,
+    host: &dyn Host,
     well_known: &WellKnown,
     manifest: &Manifest,
     grant: &Grant,
 ) -> Result<ActiveFakts> {
-    let now = chrono::Utc::now().timestamp();
+    let now = host.now_unix();
     match grant {
         Grant::DeviceCode(options) => {
-            let outcome = grants::device_code_grant(http, well_known, manifest, options).await?;
+            let outcome =
+                grants::device_code_grant_with(host, well_known, manifest, options).await?;
             ActiveFakts::from_token_response(
                 outcome.response,
                 &outcome.client_id,
@@ -398,9 +447,13 @@ async fn run_grant(
             client_id,
             refresh_token,
         } => {
-            let response =
-                grants::refresh_grant(http, &well_known.token_endpoint, client_id, refresh_token)
-                    .await?;
+            let response = grants::refresh_grant_with(
+                host,
+                &well_known.token_endpoint,
+                client_id,
+                refresh_token,
+            )
+            .await?;
             ActiveFakts::from_token_response(
                 response,
                 client_id,
@@ -411,8 +464,8 @@ async fn run_grant(
             )
         }
         Grant::MandateKey(options) => {
-            let response = grants::mandate_key_grant(
-                http,
+            let response = grants::mandate_key_grant_with(
+                host,
                 &well_known.token_endpoint,
                 manifest,
                 options,
@@ -435,6 +488,10 @@ async fn run_grant(
 }
 
 struct Inner {
+    host: Arc<dyn Host>,
+    /// Through the mesh proxy, for mesh aliases.
+    mesh_host: Option<Arc<dyn Host>>,
+    #[cfg(feature = "std")]
     http: Client,
     base_url: String,
     well_known: WellKnown,
@@ -460,8 +517,8 @@ pub struct Fakts {
     inner: Arc<Inner>,
 }
 
-impl std::fmt::Debug for Fakts {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Debug for Fakts {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Fakts")
             .field("base_url", &self.inner.base_url)
             .field("manifest", &self.inner.manifest.identifier)
@@ -489,8 +546,14 @@ impl Fakts {
         &self.inner.well_known
     }
 
+    #[cfg(feature = "std")]
     pub fn http(&self) -> &Client {
         &self.inner.http
+    }
+
+    /// What every request goes through.
+    pub fn host(&self) -> &Arc<dyn Host> {
+        &self.inner.host
     }
 
     /// The HTTP proxy mesh aliases are reached through, if the mesh is on.
@@ -583,77 +646,60 @@ impl Fakts {
     }
 
     async fn resolve_alias(&self, key: &str, instance: &Instance) -> Result<Alias> {
-        // The first request to a mesh peer sets up its tunnel (a WireGuard
-        // handshake, through a DERP relay at first): seconds, on a board.
-        let challenge_client = |proxy: Option<&str>| -> Result<Client> {
-            let timeout = if proxy.is_some() {
-                MESH_CHALLENGE_TIMEOUT
-            } else {
-                CHALLENGE_TIMEOUT
-            };
-            #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
-            let builder = {
-                let builder = Client::builder()
-                    .redirect(reqwest::redirect::Policy::none())
-                    .timeout(timeout);
-                match proxy {
-                    Some(proxy) => builder.proxy(reqwest::Proxy::all(proxy)?),
-                    None => builder,
-                }
-            };
-            // fetch follows redirects and has no proxy; there is no mesh in a browser.
-            #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
-            let builder = {
-                let _ = (proxy, timeout);
-                Client::builder()
-            };
-            Ok(builder.build()?)
-        };
-        let direct = challenge_client(None)?;
-        let proxied = self
-            .mesh_proxy()
-            .map(|p| challenge_client(Some(p)))
-            .transpose()?;
-
         let mut skipped_mesh = false;
         for alias in &instance.aliases {
-            let (http, proxy) = if alias.is_mesh() {
-                match (&proxied, self.mesh_proxy()) {
-                    (Some(http), Some(proxy)) => (http, Some(proxy)),
+            // The first request to a mesh peer sets up its tunnel (a WireGuard
+            // handshake, through a DERP relay at first): seconds, on a board.
+            let (host, proxy, timeout) = if alias.is_mesh() {
+                match (&self.inner.mesh_host, self.mesh_proxy()) {
+                    (Some(host), Some(proxy)) => (host, Some(proxy), MESH_CHALLENGE_TIMEOUT),
                     _ => {
                         skipped_mesh = true;
                         tracing::debug!(
-                            "skipping alias {} of {key}: it needs the mesh, which is off",
-                            alias.id
+                            "skipping alias {} of {}: it needs the mesh, which is off",
+                            alias.id,
+                            key
                         );
                         continue;
                     }
                 }
             } else {
-                (&direct, None)
+                (&self.inner.host, None, CHALLENGE_TIMEOUT)
             };
-            match self.challenge(http, instance, alias).await {
+            match self.challenge(&**host, timeout, instance, alias).await {
                 Ok(()) => {
                     let mut alias = alias.clone();
                     alias.proxy = proxy.map(str::to_owned);
                     return Ok(alias);
                 }
-                Err(e) => tracing::debug!("alias {} of {key} failed its challenge: {e}", alias.id),
+                Err(e) => {
+                    tracing::debug!("alias {} of {} failed its challenge: {}", alias.id, key, e)
+                }
             }
         }
         if skipped_mesh {
             tracing::warn!(
-                "{key} has aliases only reachable over the mesh; enable the mesh to use them"
+                "{} has aliases only reachable over the mesh; enable the mesh to use them",
+                key
             );
         }
         Err(FaktsError::NoReachableAlias(key.to_owned()))
     }
 
-    async fn challenge(&self, http: &Client, instance: &Instance, alias: &Alias) -> Result<()> {
-        let url = alias.challenge_path();
+    /// A challenge answers itself: redirects are not followed.
+    async fn challenge(
+        &self,
+        host: &dyn Host,
+        timeout: Duration,
+        instance: &Instance,
+        alias: &Alias,
+    ) -> Result<()> {
+        let request = Request::get(alias.challenge_path())
+            .no_redirects()
+            .timeout(timeout);
         let Some(key) = &instance.challenge_key else {
-            let reply = crate::http::fetch(http.get(&url)).await?;
-            return if reply.status.is_success() {
+            let reply = host.send(request).await?;
+            return if reply.is_success() {
                 Ok(())
             } else {
                 Err(FaktsError::Protocol(format!(
@@ -664,10 +710,10 @@ impl Fakts {
         };
 
         let mut raw = [0u8; 24];
-        rand::thread_rng().fill_bytes(&mut raw);
+        host.fill_random(&mut raw);
         let nonce = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(raw);
-        let reply = crate::http::fetch(http.get(&url).query(&[("nonce", &nonce)])).await?;
-        if !reply.status.is_success() {
+        let reply = host.send(request.query("nonce", nonce.clone())).await?;
+        if !reply.is_success() {
             return Err(FaktsError::Protocol(format!(
                 "challenge answered {}",
                 reply.status
@@ -699,8 +745,8 @@ impl Fakts {
     /// envelope. Never asks for a mesh key: the node keeps the one it joined with.
     async fn renew_with_mandate_key(&self, options: &MandateKeyOptions) -> Result<String> {
         let auth = self.inner.active.lock().await.auth.clone();
-        let response = grants::mandate_key_grant(
-            &self.inner.http,
+        let response = grants::mandate_key_grant_with(
+            &*self.inner.host,
             &auth.token_endpoint,
             &self.inner.manifest,
             options,
@@ -713,7 +759,7 @@ impl Fakts {
             &auth.token_endpoint,
             auth.report_endpoint.clone(),
             None,
-            chrono::Utc::now().timestamp(),
+            self.inner.host.now_unix(),
         )?;
         active.mesh = self.inner.active.lock().await.mesh.clone();
         self.persist(&active).await?;
@@ -734,8 +780,8 @@ impl Fakts {
                     "the credential has no refresh token and the app holds no mandate key".into(),
                 ));
             };
-            match grants::refresh_grant(
-                &self.inner.http,
+            match grants::refresh_grant_with(
+                &*self.inner.host,
                 &auth.token_endpoint,
                 &auth.client_id,
                 &refresh_token,
@@ -749,7 +795,7 @@ impl Fakts {
                         &auth.token_endpoint,
                         auth.report_endpoint.clone(),
                         Some(&refresh_token),
-                        chrono::Utc::now().timestamp(),
+                        self.inner.host.now_unix(),
                     )?;
                     if active.mesh.is_none() {
                         active.mesh = self.inner.active.lock().await.mesh.clone();
@@ -765,7 +811,7 @@ impl Fakts {
                     match self.adopt_from_cache(&refresh_token).await {
                         Some(newer) => {
                             tracing::debug!("adopting a credential rotated by another process");
-                            let expired = newer.auth.is_expired(chrono::Utc::now().timestamp());
+                            let expired = newer.auth.is_expired(self.inner.host.now_unix());
                             let token = newer.auth.access_token.clone();
                             *self.inner.active.lock().await = newer;
                             if !expired {
@@ -796,7 +842,7 @@ impl TokenLoader for Fakts {
             let active = self.inner.active.lock().await;
             (
                 active.auth.access_token.clone(),
-                active.auth.is_expired(chrono::Utc::now().timestamp()),
+                active.auth.is_expired(self.inner.host.now_unix()),
             )
         };
         if expired {

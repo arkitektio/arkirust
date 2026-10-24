@@ -1,15 +1,18 @@
 //! The HTTP legs of fakts v2: discovery, device-code demand + polling,
 //! refresh, and the headless mandate-key login.
+//!
+//! Each is written against a [`Host`] (`*_with`); with std the same names
+//! without the suffix take a reqwest `Client`.
 
-use std::time::Duration;
+use core::time::Duration;
 
-use web_time::Instant;
-
-use reqwest::{Client, StatusCode, Url};
 use serde::Serialize;
+use url::Url;
 
 use crate::error::{FaktsError, Result};
+use crate::host::{Host, Reply, Request};
 use crate::models::{DeviceCodeResponse, Manifest, OAuthError, TokenResponse, WellKnown};
+use crate::prelude::*;
 
 pub const DEVICE_CODE_GRANT: &str = "urn:ietf:params:oauth:grant-type:device_code";
 pub const MANDATE_KEY_GRANT: &str = "urn:fakts:grant-type:mandate-key";
@@ -55,9 +58,12 @@ impl ClientRole {
 }
 
 fn allow_insecure() -> bool {
-    std::env::var("FAKTS_ALLOW_INSECURE_TRANSPORT")
+    #[cfg(feature = "std")]
+    return std::env::var("FAKTS_ALLOW_INSECURE_TRANSPORT")
         .map(|v| matches!(v.as_str(), "1" | "true" | "yes"))
-        .unwrap_or(false)
+        .unwrap_or(false);
+    #[cfg(not(feature = "std"))]
+    false
 }
 
 /// Plain http is fine against loopback; anywhere else it needs an opt-in.
@@ -71,7 +77,7 @@ pub fn check_transport(url: &str, allow_insecure_transport: bool) -> Result<()> 
     let loopback = host == "localhost"
         || host
             .trim_matches(|c| c == '[' || c == ']')
-            .parse::<std::net::IpAddr>()
+            .parse::<core::net::IpAddr>()
             .is_ok_and(|ip| ip.is_loopback());
     if loopback {
         Ok(())
@@ -91,12 +97,15 @@ fn candidates(url: &str) -> Vec<String> {
 
 /// `GET {url}/.well-known/fakts`. A url without a scheme is tried over https
 /// first, then http. Returns the base url that answered and its document.
-pub async fn discover(http: &Client, url: &str) -> Result<(String, WellKnown)> {
+pub async fn discover_with(host: &dyn Host, url: &str) -> Result<(String, WellKnown)> {
     let mut last_error = String::from("no candidate urls");
     for base in candidates(url) {
         let endpoint = format!("{base}/.well-known/fakts");
-        match crate::http::fetch(with_timeout(http.get(&endpoint), Duration::from_secs(10))).await {
-            Ok(reply) if reply.status.is_success() => {
+        match host
+            .send(Request::get(&endpoint).timeout(Duration::from_secs(10)))
+            .await
+        {
+            Ok(reply) if reply.is_success() => {
                 let doc: WellKnown = reply.json().map_err(|e| {
                     FaktsError::Discovery(format!("{endpoint}: invalid document: {e}"))
                 })?;
@@ -124,22 +133,28 @@ struct DemandBody<'a> {
     redirect_uris: Vec<String>,
     requested_client_kind: ClientKind,
     requested_client_role: ClientRole,
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    #[serde(skip_serializing_if = "core::ops::Not::not")]
     request_auth_key: bool,
 }
 
 /// Called with the approval URL and user code while the device code is pending.
-pub type DeviceCodeHook = std::sync::Arc<dyn Fn(&str, &str) + Send + Sync>;
+pub type DeviceCodeHook = Arc<dyn Fn(&str, &str) + Send + Sync>;
 
+/// Prints the URL and code (with std; without it, logs them).
 pub fn default_device_code_hook() -> DeviceCodeHook {
-    std::sync::Arc::new(|uri: &str, user_code: &str| {
-        eprintln!();
-        eprintln!("  Please authorize this app by visiting:");
-        eprintln!("    {uri}");
-        if !user_code.is_empty() {
-            eprintln!("  and confirm the code: {user_code}");
+    Arc::new(|uri: &str, user_code: &str| {
+        #[cfg(feature = "std")]
+        {
+            eprintln!();
+            eprintln!("  Please authorize this app by visiting:");
+            eprintln!("    {uri}");
+            if !user_code.is_empty() {
+                eprintln!("  and confirm the code: {user_code}");
+            }
+            eprintln!();
         }
-        eprintln!();
+        #[cfg(not(feature = "std"))]
+        tracing::info!("authorize this app at {} (code {})", uri, user_code);
     })
 }
 
@@ -175,8 +190,8 @@ pub struct GrantOutcome {
 }
 
 /// RFC 8628 device authorization, extended with the fakts manifest.
-pub async fn device_code_grant(
-    http: &Client,
+pub async fn device_code_grant_with(
+    host: &dyn Host,
     well_known: &WellKnown,
     manifest: &Manifest,
     options: &DeviceCodeOptions,
@@ -200,9 +215,9 @@ pub async fn device_code_grant(
     };
 
     let demand = loop {
-        let reply = crate::http::fetch(http.post(endpoint).json(&body)).await?;
-        if reply.status == StatusCode::TOO_MANY_REQUESTS {
-            crate::http::sleep(Duration::from_secs(5)).await;
+        let reply = host.send(Request::json(endpoint, &body)?).await?;
+        if reply.status == 429 {
+            host.sleep(Duration::from_secs(5)).await;
             continue;
         }
         let demand: DeviceCodeResponse = reply.json()?;
@@ -235,20 +250,26 @@ pub async fn device_code_grant(
     );
 
     let mut interval = Duration::from_secs(demand.interval.unwrap_or(5).max(1));
-    let deadline = Instant::now() + Duration::from_secs(demand.expires_in.unwrap_or(300));
+    let deadline = host.now_unix() + demand.expires_in.unwrap_or(300) as i64;
 
     loop {
-        if Instant::now() >= deadline {
+        let left = deadline - host.now_unix();
+        if left <= 0 {
             return Err(FaktsError::Expired);
         }
-        crate::http::sleep(interval.min(deadline.saturating_duration_since(Instant::now()))).await;
+        host.sleep(interval.min(Duration::from_secs(left as u64)))
+            .await;
 
-        let reply = crate::http::fetch(http.post(&token_endpoint).form(&[
-            ("grant_type", DEVICE_CODE_GRANT),
-            ("device_code", device_code.as_str()),
-            ("client_id", client_id.as_str()),
-        ]))
-        .await?;
+        let reply = host
+            .send(Request::form(
+                &token_endpoint,
+                &[
+                    ("grant_type", DEVICE_CODE_GRANT),
+                    ("device_code", device_code.as_str()),
+                    ("client_id", client_id.as_str()),
+                ],
+            ))
+            .await?;
 
         match parse_token_response(reply)? {
             Ok(response) => {
@@ -302,8 +323,8 @@ impl MandateKeyOptions {
     }
 }
 
-impl std::fmt::Debug for MandateKeyOptions {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Debug for MandateKeyOptions {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         // Only the key's prefix: the key logs in as its grantor.
         f.debug_struct("MandateKeyOptions")
             .field(
@@ -319,26 +340,30 @@ impl std::fmt::Debug for MandateKeyOptions {
 
 /// `grant_type=urn:fakts:grant-type:mandate-key`. The manifest goes as a JSON
 /// string in a form field (unlike the device-code demand, which nests it).
-pub async fn mandate_key_grant(
-    http: &Client,
+pub async fn mandate_key_grant_with(
+    host: &dyn Host,
     token_endpoint: &str,
     manifest: &Manifest,
     options: &MandateKeyOptions,
     request_auth_key: bool,
 ) -> Result<TokenResponse> {
     let manifest = serde_json::to_string(manifest)?;
-    let reply = crate::http::fetch(http.post(token_endpoint).form(&[
-        ("grant_type", MANDATE_KEY_GRANT),
-        ("key", options.key.as_str()),
-        ("manifest", manifest.as_str()),
-        ("requested_client_kind", options.client_kind.as_str()),
-        ("requested_client_role", options.client_role.as_str()),
-        (
-            "request_auth_key",
-            if request_auth_key { "true" } else { "false" },
-        ),
-    ]))
-    .await?;
+    let reply = host
+        .send(Request::form(
+            token_endpoint,
+            &[
+                ("grant_type", MANDATE_KEY_GRANT),
+                ("key", options.key.as_str()),
+                ("manifest", manifest.as_str()),
+                ("requested_client_kind", options.client_kind.as_str()),
+                ("requested_client_role", options.client_role.as_str()),
+                (
+                    "request_auth_key",
+                    if request_auth_key { "true" } else { "false" },
+                ),
+            ],
+        ))
+        .await?;
     match parse_token_response(reply)? {
         Ok(response) => Ok(response),
         Err(err) if err.error == "invalid_grant" => Err(FaktsError::InvalidGrant(format!(
@@ -355,18 +380,22 @@ pub async fn mandate_key_grant(
 
 /// `grant_type=refresh_token`. Refresh tokens rotate: the caller must persist
 /// the new one before using the new access token.
-pub async fn refresh_grant(
-    http: &Client,
+pub async fn refresh_grant_with(
+    host: &dyn Host,
     token_endpoint: &str,
     client_id: &str,
     refresh_token: &str,
 ) -> Result<TokenResponse> {
-    let reply = crate::http::fetch(http.post(token_endpoint).form(&[
-        ("grant_type", "refresh_token"),
-        ("refresh_token", refresh_token),
-        ("client_id", client_id),
-    ]))
-    .await?;
+    let reply = host
+        .send(Request::form(
+            token_endpoint,
+            &[
+                ("grant_type", "refresh_token"),
+                ("refresh_token", refresh_token),
+                ("client_id", client_id),
+            ],
+        ))
+        .await?;
     match parse_token_response(reply)? {
         Ok(response) => Ok(response),
         Err(err) if matches!(err.error.as_str(), "invalid_grant" | "invalid_client") => {
@@ -379,12 +408,10 @@ pub async fn refresh_grant(
     }
 }
 
-fn parse_token_response(
-    reply: crate::http::Reply,
-) -> Result<std::result::Result<TokenResponse, OAuthError>> {
+fn parse_token_response(reply: Reply) -> Result<core::result::Result<TokenResponse, OAuthError>> {
     let status = reply.status;
     let bytes = reply.body;
-    if status.is_success() {
+    if (200..300).contains(&status) {
         return Ok(Ok(serde_json::from_slice(&bytes)?));
     }
     match serde_json::from_slice::<OAuthError>(&bytes) {
@@ -396,16 +423,65 @@ fn parse_token_response(
     }
 }
 
-/// A per-request timeout where the target has one (fetch has none in reqwest).
-fn with_timeout(request: reqwest::RequestBuilder, timeout: Duration) -> reqwest::RequestBuilder {
-    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
-    return request.timeout(timeout);
-    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
-    {
-        let _ = timeout;
-        request
+/// The same with std, through a reqwest `Client`.
+#[cfg(feature = "std")]
+mod with_reqwest {
+    use super::*;
+    use crate::http::Reqwest;
+    use reqwest::Client;
+
+    /// [`discover_with`] through `http`.
+    pub async fn discover(http: &Client, url: &str) -> Result<(String, WellKnown)> {
+        discover_with(&Reqwest::new(http.clone()), url).await
+    }
+
+    /// [`device_code_grant_with`] through `http`.
+    pub async fn device_code_grant(
+        http: &Client,
+        well_known: &WellKnown,
+        manifest: &Manifest,
+        options: &DeviceCodeOptions,
+    ) -> Result<GrantOutcome> {
+        device_code_grant_with(&Reqwest::new(http.clone()), well_known, manifest, options).await
+    }
+
+    /// [`mandate_key_grant_with`] through `http`.
+    pub async fn mandate_key_grant(
+        http: &Client,
+        token_endpoint: &str,
+        manifest: &Manifest,
+        options: &MandateKeyOptions,
+        request_auth_key: bool,
+    ) -> Result<TokenResponse> {
+        mandate_key_grant_with(
+            &Reqwest::new(http.clone()),
+            token_endpoint,
+            manifest,
+            options,
+            request_auth_key,
+        )
+        .await
+    }
+
+    /// [`refresh_grant_with`] through `http`.
+    pub async fn refresh_grant(
+        http: &Client,
+        token_endpoint: &str,
+        client_id: &str,
+        refresh_token: &str,
+    ) -> Result<TokenResponse> {
+        refresh_grant_with(
+            &Reqwest::new(http.clone()),
+            token_endpoint,
+            client_id,
+            refresh_token,
+        )
+        .await
     }
 }
+
+#[cfg(feature = "std")]
+pub use with_reqwest::{device_code_grant, discover, mandate_key_grant, refresh_grant};
 
 #[cfg(test)]
 mod tests {

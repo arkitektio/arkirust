@@ -5,6 +5,7 @@
 
 use crate::error::Result;
 use crate::models::Manifest;
+use crate::prelude::*;
 
 /// What fakts knows about joining, once the app is logged in.
 pub struct MeshJoin {
@@ -18,8 +19,8 @@ pub struct MeshJoin {
     pub hostname: String,
 }
 
-impl std::fmt::Debug for MeshJoin {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Debug for MeshJoin {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("MeshJoin")
             .field("coord_url", &self.coord_url)
             .field("auth_key", &self.auth_key.as_ref().map(|_| "***"))

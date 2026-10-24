@@ -1,3 +1,5 @@
+#![cfg_attr(not(feature = "std"), no_std)]
+
 //! Rath: a small authenticated GraphQL client for Arkitekt services.
 //!
 //! Mirrors the Python `rath` link chain that every service uses:
@@ -6,15 +8,24 @@
 //! forwards the current rekuest task (if any) as a `Rekuest-Task` header so
 //! that work done inside an action is attributed to that task.
 //!
-//! Operations are typed with `graphql_client`:
+//! Every request goes through a [`fakts::Host`] (reqwest with std, the app's
+//! without it), so the client runs wherever fakts does. Typed operations use
+//! `graphql_client` (with std); [`Rath::execute_raw`] works everywhere:
 //!
 //! ```ignore
 //! let data = client.execute::<GetArrayDataset>(get_array_dataset::Variables { id }).await?;
 //! ```
 
-use std::sync::Arc;
+extern crate alloc;
 
+use alloc::format;
+use alloc::string::String;
+use alloc::sync::Arc;
+use alloc::vec::Vec;
+
+use fakts::host::{Host, HostError, Request};
 use fakts::TokenLoader;
+#[cfg(feature = "std")]
 use graphql_client::GraphQLQuery;
 use serde::Deserialize;
 use thiserror::Error;
@@ -22,10 +33,22 @@ use thiserror::Error;
 /// Header carrying the token of the rekuest task a request is made for.
 pub const TASK_HEADER: &str = "Rekuest-Task";
 
+#[cfg(feature = "std")]
 std::thread_local! {
     /// The token of the rekuest task whose future is being polled, if any.
-    static CURRENT_TASK_TOKEN: std::cell::RefCell<Option<String>> =
-        const { std::cell::RefCell::new(None) };
+    static CURRENT_TASK_TOKEN: core::cell::RefCell<Option<String>> =
+        const { core::cell::RefCell::new(None) };
+}
+
+/// Without std, one executor thread: a global slot.
+#[cfg(not(feature = "std"))]
+static CURRENT_TASK_TOKEN: spin::Mutex<Option<String>> = spin::Mutex::new(None);
+
+fn swap_task_token(token: Option<String>) -> Option<String> {
+    #[cfg(feature = "std")]
+    return CURRENT_TASK_TOKEN.with(|t| t.replace(token));
+    #[cfg(not(feature = "std"))]
+    core::mem::replace(&mut *CURRENT_TASK_TOKEN.lock(), token)
 }
 
 /// Run `fut` with `token` as the current task token, so every GraphQL request
@@ -33,19 +56,22 @@ std::thread_local! {
 ///
 /// Set while `fut` is polled (on any runtime, as a task local is): work it
 /// hands to another thread does not carry it.
-pub async fn with_task_token<F: std::future::Future>(token: Option<String>, fut: F) -> F::Output {
-    let mut fut = std::pin::pin!(fut);
-    std::future::poll_fn(move |cx| {
-        let previous = CURRENT_TASK_TOKEN.with(|t| t.replace(token.clone()));
+pub async fn with_task_token<F: core::future::Future>(token: Option<String>, fut: F) -> F::Output {
+    let mut fut = core::pin::pin!(fut);
+    core::future::poll_fn(move |cx| {
+        let previous = swap_task_token(token.clone());
         let poll = fut.as_mut().poll(cx);
-        CURRENT_TASK_TOKEN.with(|t| *t.borrow_mut() = previous);
+        swap_task_token(previous);
         poll
     })
     .await
 }
 
 fn current_task_token() -> Option<String> {
-    CURRENT_TASK_TOKEN.with(|t| t.borrow().clone())
+    #[cfg(feature = "std")]
+    return CURRENT_TASK_TOKEN.with(|t| t.borrow().clone());
+    #[cfg(not(feature = "std"))]
+    CURRENT_TASK_TOKEN.lock().clone()
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -65,8 +91,12 @@ impl GraphQLError {
 
 #[derive(Debug, Error)]
 pub enum RathError {
+    #[cfg(feature = "std")]
     #[error("http error: {0}")]
     Http(#[from] reqwest::Error),
+    /// The host could not make the exchange.
+    #[error("http error: {0}")]
+    Transport(#[from] HostError),
     #[error("token error: {0}")]
     Token(#[from] fakts::FaktsError),
     #[error("graphql errors: {}", .0.iter().map(|e| e.message.as_str()).collect::<Vec<_>>().join("; "))]
@@ -81,7 +111,7 @@ pub enum RathError {
     Decode(#[from] serde_json::Error),
 }
 
-pub type Result<T, E = RathError> = std::result::Result<T, E>;
+pub type Result<T, E = RathError> = core::result::Result<T, E>;
 
 #[derive(Deserialize)]
 struct RawResponse<D> {
@@ -93,14 +123,14 @@ struct RawResponse<D> {
 /// An authenticated GraphQL client for one service endpoint. Cheap to clone.
 #[derive(Clone)]
 pub struct Rath {
-    http: reqwest::Client,
+    host: Arc<dyn Host>,
     endpoint: String,
     token_loader: Arc<dyn TokenLoader>,
     max_refresh_attempts: usize,
 }
 
-impl std::fmt::Debug for Rath {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Debug for Rath {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Rath")
             .field("endpoint", &self.endpoint)
             .finish_non_exhaustive()
@@ -108,21 +138,38 @@ impl std::fmt::Debug for Rath {
 }
 
 impl Rath {
-    pub fn new(endpoint: impl Into<String>, token_loader: Arc<dyn TokenLoader>) -> Self {
-        fakts::install_crypto_provider();
+    /// A client for `endpoint` whose requests go through `host`.
+    pub fn with_host(
+        host: Arc<dyn Host>,
+        endpoint: impl Into<String>,
+        token_loader: Arc<dyn TokenLoader>,
+    ) -> Self {
         Self {
-            http: reqwest::Client::builder()
-                .user_agent(concat!("rath-rs/", env!("CARGO_PKG_VERSION")))
-                .build()
-                .expect("reqwest client builds"),
+            host,
             endpoint: endpoint.into(),
             token_loader,
             max_refresh_attempts: 3,
         }
     }
 
+    /// A client for `endpoint` over reqwest.
+    #[cfg(feature = "std")]
+    pub fn new(endpoint: impl Into<String>, token_loader: Arc<dyn TokenLoader>) -> Self {
+        fakts::install_crypto_provider();
+        let http = reqwest::Client::builder()
+            .user_agent(concat!("rath-rs/", env!("CARGO_PKG_VERSION")))
+            .build()
+            .expect("reqwest client builds");
+        Self::with_host(
+            Arc::new(fakts::http::Reqwest::new(http)),
+            endpoint,
+            token_loader,
+        )
+    }
+
     /// A client for `append` under `alias`, proxied through the mesh when
     /// the alias needs it.
+    #[cfg(feature = "std")]
     pub fn from_alias(
         alias: &fakts::Alias,
         append: impl AsRef<str>,
@@ -139,8 +186,10 @@ impl Rath {
         Ok(Self::new(alias.to_http_path(append), token_loader).with_http_client(http))
     }
 
+    /// Make requests through `http`.
+    #[cfg(feature = "std")]
     pub fn with_http_client(mut self, http: reqwest::Client) -> Self {
-        self.http = http;
+        self.host = Arc::new(fakts::http::Reqwest::new(http));
         self
     }
 
@@ -153,6 +202,7 @@ impl Rath {
     }
 
     /// Execute a typed query or mutation.
+    #[cfg(feature = "std")]
     pub async fn execute<Q: GraphQLQuery>(
         &self,
         variables: Q::Variables,
@@ -166,34 +216,33 @@ impl Rath {
     /// Execute an untyped `{query, variables, operationName}` body and return `data`.
     pub async fn execute_raw(&self, body: &serde_json::Value) -> Result<serde_json::Value> {
         let mut token = self.token_loader.get_token().await?;
+        let body = serde_json::to_vec(body)?;
         for attempt in 0..=self.max_refresh_attempts {
-            let mut request = self
-                .http
-                .post(&self.endpoint)
-                .bearer_auth(&token)
-                .json(body);
+            let mut request =
+                Request::post(self.endpoint.clone(), fakts::host::Body::Json(body.clone()))
+                    .header("authorization", format!("Bearer {token}"));
             if let Some(task) = current_task_token() {
                 request = request.header(TASK_HEADER, task);
             }
-            let reply = fakts::http::fetch(request).await?;
+            let reply = self.host.send(request).await?;
             let status = reply.status;
 
-            if status == reqwest::StatusCode::UNAUTHORIZED {
+            if status == 401 {
                 tracing::debug!(
-                    "{} rejected the token (attempt {attempt}), refreshing",
-                    self.endpoint
+                    "{} rejected the token (attempt {}), refreshing",
+                    self.endpoint,
+                    attempt
                 );
                 token = self.token_loader.refresh_token(&token).await?;
                 continue;
             }
 
-            let bytes = reply.body;
-            let parsed: RawResponse<serde_json::Value> = match serde_json::from_slice(&bytes) {
+            let parsed: RawResponse<serde_json::Value> = match serde_json::from_slice(&reply.body) {
                 Ok(parsed) => parsed,
-                Err(_) if !status.is_success() => {
+                Err(_) if !(200..300).contains(&status) => {
                     return Err(RathError::Status {
-                        status: status.as_u16(),
-                        body: String::from_utf8_lossy(&bytes).into_owned(),
+                        status,
+                        body: String::from_utf8_lossy(&reply.body).into_owned(),
                     })
                 }
                 Err(e) => return Err(e.into()),

@@ -1,9 +1,16 @@
 use thiserror::Error;
 
+use crate::prelude::*;
+
 #[derive(Debug, Error)]
 pub enum FaktsError {
+    #[cfg(feature = "std")]
     #[error("http error: {0}")]
     Http(#[from] reqwest::Error),
+    /// The [`Host`](crate::host::Host) could not make the exchange.
+    #[error("http error: {0}")]
+    Transport(#[from] crate::host::HostError),
+    #[cfg(feature = "std")]
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
     #[error("json error: {0}")]
@@ -36,4 +43,4 @@ pub enum FaktsError {
     Mesh(String),
 }
 
-pub type Result<T, E = FaktsError> = std::result::Result<T, E>;
+pub type Result<T, E = FaktsError> = core::result::Result<T, E>;

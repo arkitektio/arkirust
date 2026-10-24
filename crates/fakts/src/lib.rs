@@ -21,22 +21,52 @@
 //! # Ok(()) }
 //! ```
 
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
+
+/// What std's prelude would bring, for the build without std.
+#[allow(unused_imports)]
+pub(crate) mod prelude {
+    pub use alloc::borrow::ToOwned;
+    pub use alloc::boxed::Box;
+    pub use alloc::string::{String, ToString};
+    pub use alloc::sync::Arc;
+    pub use alloc::vec::Vec;
+    pub use alloc::{format, vec};
+}
+
+/// Hash maps: std's with std, hashbrown's without.
+pub(crate) mod collections {
+    #[cfg(not(feature = "std"))]
+    pub use hashbrown::HashMap;
+    #[cfg(feature = "std")]
+    pub use std::collections::HashMap;
+}
+
 pub mod cache;
+#[cfg(feature = "std")]
+mod cache_file;
 mod error;
 mod fakts;
 pub mod grants;
+pub mod host;
+#[cfg(feature = "std")]
 pub mod http;
 #[cfg(feature = "mesh")]
 pub mod mesh;
 pub mod mesh_join;
 mod models;
 
-pub use crate::cache::{FaktsStore, FileStore};
+pub use crate::cache::FaktsStore;
+#[cfg(feature = "std")]
+pub use crate::cache::FileStore;
 pub use crate::error::{FaktsError, Result};
 pub use crate::fakts::{Fakts, FaktsBuilder, Grant, TokenLoader};
 pub use crate::grants::{
     ClientKind, ClientRole, DeviceCodeHook, DeviceCodeOptions, MandateKeyOptions,
 };
+pub use crate::host::Host;
 #[cfg(feature = "mesh")]
 pub use crate::mesh::{MeshBackend, MeshOptions};
 pub use crate::mesh_join::{MeshJoin, MeshJoiner};

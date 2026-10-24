@@ -439,3 +439,56 @@ async fn mesh_aliases_go_through_the_proxy() {
     assert!(resp.status().is_success());
     assert_eq!(count.load(Ordering::SeqCst), 2);
 }
+
+/// A challenge answers itself: an alias whose challenge redirects elsewhere
+/// (to an address that would answer) is not taken, even though the request
+/// goes through the same host as every other one.
+#[tokio::test]
+async fn a_challenge_that_redirects_does_not_count() {
+    let server = MockServer::start().await;
+    let uri = server.uri();
+    let port = server.address().port();
+    Mock::given(method("GET"))
+        .and(path("/.well-known/fakts"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "name": "test", "protocol_version": "2", "base_url": format!("{uri}/f/"),
+            "token_endpoint": format!("{uri}/token/"),
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/token/"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "access_token": "access", "token_type": "Bearer", "expires_in": 3600,
+            "scope": "openid", "client_id": "client-1",
+            "instances": {"mikro": {"service": "live.arkitekt.mikro", "identifier": "1", "aliases": [
+                {"id": "moved", "host": "127.0.0.1", "port": port, "path": "moved", "challenge": "ht"},
+                {"id": "ok", "host": "127.0.0.1", "port": port, "path": "ok", "challenge": "ht"}
+            ]}},
+            "statuses": {"mikro": "granted"}
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/moved/ht"))
+        .respond_with(ResponseTemplate::new(302).insert_header("location", format!("{uri}/ok/ht")))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/ok/ht"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+
+    let mut manifest = Manifest::new("redirect-test", "0.1.0");
+    manifest
+        .requirements
+        .push(Requirement::new("mikro", "live.arkitekt.mikro"));
+    let fakts = Fakts::builder(uri, manifest)
+        .grant(Grant::MandateKey(Arc::new(MandateKeyOptions::new("key"))))
+        .no_cache(true)
+        .load()
+        .await
+        .unwrap();
+    assert_eq!(fakts.get_alias("mikro").await.unwrap().id, "ok");
+}

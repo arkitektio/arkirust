@@ -411,6 +411,14 @@ runtime brings what std would (`Runtime::wall_clock_micros`,
 `Runtime::fill_random`). `checks/embassy` runs a real `#[action]` through
 `Driver` on an embassy runtime that way, on the host and built for a Cortex-M4F.
 
+fakts and rath have the same `std` feature. Without it, fakts' login
+(discovery, grants, refresh, alias challenges) runs against a `fakts::Host`
+the app implements (HTTP exchanges, sleep, the clock, randomness; with std
+that is `fakts::http::Reqwest`), and rath sends through the same host; typed
+`graphql_client` operations stay std-only (`execute_raw` works everywhere).
+An embassy app implements `fakts::Host` and `rekuest::rt::Runtime` on one
+struct.
+
 ## Development
 
 ```sh
