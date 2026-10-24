@@ -14,26 +14,29 @@ readme = "../../README.md"
 fakts = { workspace = true, optional = true }
 rath = { workspace = true, optional = true }
 rekuest-macros.workspace = true
-rekuest-protocol = { workspace = true, features = ["std"] }
+rekuest-protocol.workspace = true
 rekuest-session.workspace = true
-anyhow.workspace = true
+# no_std + alloc unless `std` (default): every dependency without its own
+# defaults, `std` turns them on.
+anyhow = { version = "1", default-features = false }
 async-trait.workspace = true
-chrono.workspace = true
-futures.workspace = true
-hex.workspace = true
-indexmap.workspace = true
-json-patch.workspace = true
-rand.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-sha2.workspace = true
-thiserror.workspace = true
+chrono = { version = "0.4", default-features = false, features = ["alloc", "serde"] }
+futures = { version = "0.3", default-features = false, features = ["alloc", "async-await"] }
+hex = { version = "0.4", default-features = false, features = ["alloc"] }
+indexmap = { version = "2", default-features = false, features = ["serde"] }
+hashbrown = "0.15"
+spin = { version = "0.10", default-features = false, features = ["mutex", "spin_mutex", "rwlock", "once"] }
+rand = { workspace = true, optional = true }
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+sha2 = { version = "0.10", default-features = false }
+thiserror = { version = "2", default-features = false }
 # Runtime-agnostic waiting and channels; the runtime itself is `rt::Runtime`.
-async-channel = "2"
+async-channel = { version = "2", default-features = false }
 tokio = { workspace = true, features = ["rt", "macros", "sync", "time", "net", "io-util"], optional = true }
 tokio-tungstenite = { workspace = true, optional = true }
-tracing.workspace = true
-uuid.workspace = true
+tracing = { version = "0.1", default-features = false }
+uuid = { version = "1", default-features = false, features = ["serde"] }
 # The `web` agent: the JS WebSocket and event loop (wasm32).
 web-sys = { version = "0.3", features = ["WebSocket", "MessageEvent", "CloseEvent", "Event", "BinaryType"], optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
@@ -48,28 +51,37 @@ reqwest = { workspace = true, optional = true }
 # wasm32-unknown-unknown: the clock, uuids and random bytes come from JS.
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }
-uuid = { workspace = true, features = ["js"] }
-chrono = { workspace = true, features = ["wasmbind"] }
+uuid = { version = "1", default-features = false, features = ["js"] }
+chrono = { version = "0.4", default-features = false, features = ["wasmbind"] }
 
 [features]
-default = ["wal", "tokio", "rath"]
+default = ["std", "wal", "tokio", "rath"]
+# Without it the crate is no_std + alloc (embassy): the runtime brings the
+# wall clock and randomness (`rt::Runtime`), locks spin, maps are hashbrown's.
+std = [
+    "rekuest-protocol/std", "anyhow/std", "chrono/std", "chrono/clock", "futures/std",
+    "hex/std", "indexmap/std", "dep:rand", "serde/std", "serde_json/std", "sha2/std",
+    "thiserror/std", "async-channel/std", "tracing/std", "uuid/std", "uuid/v4",
+]
 # tokio as the runtime (`rt::Tokio`) and the websocket `Agent` on it (with
 # fakts for its tokens). Without it, install a `rt::Runtime` and drive the
 # session yourself (`checks/wasm`).
-tokio = ["dep:tokio", "dep:tokio-tungstenite", "dep:fakts"]
+tokio = ["std", "dep:tokio", "dep:tokio-tungstenite", "dep:fakts"]
 # The agent in a browser or node (wasm32): `web::Agent` over the JS WebSocket,
 # with fakts for its tokens, and `rt::Js` (the JS event loop) as the runtime.
-web = ["dep:fakts", "dep:web-sys", "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys", "dep:gloo-timers", "dep:send_wrapper"]
+web = ["std", "dep:fakts", "dep:web-sys", "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys", "dep:gloo-timers", "dep:send_wrapper"]
 # Actions' GraphQL calls (rath) carry their task's token.
-rath = ["dep:rath"]
+rath = ["std", "dep:rath"]
 # Keep the journal in a local SQLite file (write-ahead: unsent reports survive restarts).
-wal = ["dep:rusqlite", "tokio"]
+wal = ["std", "dep:rusqlite", "tokio"]
 # Serve an app over HTTP + websocket without a rekuest server (port of rekuest.contrib.fastapi).
 serve = ["wal", "dep:axum"]
 # AgentTestClient for testing served apps.
 testing = ["serve", "dep:reqwest"]
 
 [dev-dependencies]
+# The state diff is checked against it (src/patch.rs).
+json-patch.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "signal", "process"] }
 # The tests are an application: they pick ring as the TLS provider.
 fakts = { workspace = true, features = ["ring"] }

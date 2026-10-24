@@ -3,10 +3,12 @@
 //! Locks are local and FIFO: an assignment waits until it gets them, it is
 //! never refused. Taking and releasing a lock is reported as `LOCK`/`UNLOCK`.
 
-use std::collections::HashSet;
-use std::sync::{Arc, Mutex};
+use crate::collections::HashSet;
+#[allow(unused_imports)]
+use crate::prelude::*;
+use crate::sync::Mutex;
 
-use indexmap::IndexMap;
+use crate::collections::IndexMap;
 use serde::Serialize;
 
 use crate::emit::Emitter;
@@ -24,8 +26,8 @@ pub struct LockTable {
     slots: IndexMap<String, Arc<Slot>>,
 }
 
-impl std::fmt::Debug for LockTable {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Debug for LockTable {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_list().entries(self.slots.keys()).finish()
     }
 }
@@ -84,12 +86,8 @@ impl LockTable {
             let Some(_pass) = gate.enter() else {
                 return false;
             };
-            *slot.holder.lock().expect("lock holder") = Some(task.to_owned());
-            held.inner
-                .lock()
-                .expect("held locks")
-                .0
-                .push((key.clone(), slot, guard));
+            *slot.holder.lock() = Some(task.to_owned());
+            held.inner.lock().0.push((key.clone(), slot, guard));
             emitter.emit(
                 FromAgent::Lock {
                     key: key.clone(),
@@ -111,7 +109,7 @@ impl LockTable {
                     LockView {
                         interface: key.clone(),
                         key: key.clone(),
-                        task_id: slot.holder.lock().expect("lock holder").clone(),
+                        task_id: slot.holder.lock().clone(),
                     },
                 )
             })
@@ -135,7 +133,7 @@ impl Drop for HeldInner {
     /// Frees what was never released (the executor went away) without reporting.
     fn drop(&mut self) {
         while let Some((_, slot, guard)) = self.0.pop() {
-            *slot.holder.lock().expect("lock holder") = None;
+            *slot.holder.lock() = None;
             drop(guard);
         }
     }
@@ -159,9 +157,9 @@ impl Default for HeldLocks {
 impl HeldLocks {
     /// Release every lock (in reverse order), reporting `UNLOCK` for `task`.
     pub(crate) fn release(&self, task: &str, emitter: &dyn Emitter) {
-        let held = std::mem::take(&mut self.inner.lock().expect("held locks").0);
+        let held = core::mem::take(&mut self.inner.lock().0);
         for (key, slot, guard) in held.into_iter().rev() {
-            *slot.holder.lock().expect("lock holder") = None;
+            *slot.holder.lock() = None;
             emitter.emit(
                 FromAgent::Unlock {
                     key,
@@ -202,7 +200,7 @@ mod tests {
             }
         }
         for handle in handles {
-            tokio::time::timeout(std::time::Duration::from_secs(5), handle)
+            tokio::time::timeout(core::time::Duration::from_secs(5), handle)
                 .await
                 .expect("no deadlock")
                 .unwrap();

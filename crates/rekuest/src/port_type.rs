@@ -9,8 +9,10 @@
 //! `{"__identifier", "object"}` reference and is expanded back to the full
 //! object through the service's client.
 
-use std::collections::HashMap;
-use std::future::Future;
+use crate::collections::HashMap;
+#[allow(unused_imports)]
+use crate::prelude::*;
+use core::future::Future;
 
 use serde_json::{json, Value};
 

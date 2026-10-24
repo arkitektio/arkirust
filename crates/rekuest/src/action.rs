@@ -1,7 +1,7 @@
 //! Actions: typed functions exposed to Arkitekt, and the registry holding them.
 
-use std::sync::Arc;
-
+#[allow(unused_imports)]
+use crate::prelude::*;
 use futures::future::BoxFuture;
 use serde_json::{Map, Value};
 
@@ -33,20 +33,20 @@ pub enum ActionError {
 
 impl ActionError {
     /// Wrap an error returned by the action body.
-    pub fn from_body<E: std::fmt::Display>(error: E) -> Self {
+    pub fn from_body<E: core::fmt::Display>(error: E) -> Self {
         ActionError::Critical(format!("{error:#}"))
     }
 }
 
-impl std::fmt::Display for ActionError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for ActionError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             ActionError::Failed(m) | ActionError::Critical(m) => f.write_str(m),
         }
     }
 }
 
-impl std::error::Error for ActionError {}
+impl core::error::Error for ActionError {}
 
 /// Something an agent can run. Implemented by `#[action]`.
 pub trait Action: Send + Sync + 'static {
@@ -95,8 +95,8 @@ pub struct Registry {
     hooks: Hooks,
 }
 
-impl std::fmt::Debug for Registry {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Debug for Registry {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Registry")
             .field(
                 "actions",
@@ -146,7 +146,7 @@ impl Registry {
     pub fn startup<F, Fut>(&mut self, hook: F) -> &mut Self
     where
         F: Fn(Startup) -> Fut + Send + Sync + 'static,
-        Fut: std::future::Future<Output = anyhow::Result<()>> + Send + 'static,
+        Fut: core::future::Future<Output = anyhow::Result<()>> + Send + 'static,
     {
         self.hooks.startup.push(hook_fn(hook));
         self
@@ -156,7 +156,7 @@ impl Registry {
     pub fn background<F, Fut>(&mut self, hook: F) -> &mut Self
     where
         F: Fn(Background) -> Fut + Send + Sync + 'static,
-        Fut: std::future::Future<Output = anyhow::Result<()>> + Send + 'static,
+        Fut: core::future::Future<Output = anyhow::Result<()>> + Send + 'static,
     {
         self.hooks.background.push(hook_fn(hook));
         self
@@ -166,7 +166,7 @@ impl Registry {
     pub fn shutdown<F, Fut>(&mut self, hook: F) -> &mut Self
     where
         F: Fn(Background) -> Fut + Send + Sync + 'static,
-        Fut: std::future::Future<Output = anyhow::Result<()>> + Send + 'static,
+        Fut: core::future::Future<Output = anyhow::Result<()>> + Send + 'static,
     {
         self.hooks.shutdown.push(hook_fn(hook));
         self

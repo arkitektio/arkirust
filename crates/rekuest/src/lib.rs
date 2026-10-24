@@ -16,8 +16,97 @@
 //! }
 //! ```
 
+#![cfg_attr(not(feature = "std"), no_std)]
+
 // Lets `#[action]` expand to `::rekuest::…` inside this crate's own tests.
 extern crate self as rekuest;
+
+extern crate alloc;
+
+/// What std's prelude would bring, for the build without std.
+#[allow(unused_imports)]
+pub(crate) mod prelude {
+    pub use alloc::borrow::ToOwned;
+    pub use alloc::boxed::Box;
+    pub use alloc::string::{String, ToString};
+    pub use alloc::sync::Arc;
+    pub use alloc::vec::Vec;
+    pub use alloc::{format, vec};
+}
+
+/// Locks that do not poison: std's with std, spinlocks without (an embassy
+/// executor runs its tasks on one core; critical sections here are short).
+pub(crate) mod sync {
+    #[cfg(feature = "std")]
+    pub struct Mutex<T: ?Sized>(std::sync::Mutex<T>);
+
+    #[cfg(feature = "std")]
+    impl<T> Mutex<T> {
+        pub const fn new(value: T) -> Self {
+            Self(std::sync::Mutex::new(value))
+        }
+    }
+
+    #[cfg(feature = "std")]
+    impl<T: ?Sized> Mutex<T> {
+        pub fn lock(&self) -> std::sync::MutexGuard<'_, T> {
+            self.0
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+        }
+    }
+
+    #[cfg(feature = "std")]
+    impl<T: Default> Default for Mutex<T> {
+        fn default() -> Self {
+            Self::new(T::default())
+        }
+    }
+
+    #[cfg(feature = "std")]
+    pub struct RwLock<T: ?Sized>(std::sync::RwLock<T>);
+
+    #[cfg(feature = "std")]
+    impl<T> RwLock<T> {
+        pub const fn new(value: T) -> Self {
+            Self(std::sync::RwLock::new(value))
+        }
+    }
+
+    #[cfg(feature = "std")]
+    impl<T: ?Sized> RwLock<T> {
+        pub fn read(&self) -> std::sync::RwLockReadGuard<'_, T> {
+            self.0
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+        }
+
+        pub fn write(&self) -> std::sync::RwLockWriteGuard<'_, T> {
+            self.0
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+        }
+    }
+
+    #[cfg(not(feature = "std"))]
+    pub use spin::{Mutex, RwLock};
+}
+
+/// Hash maps: std's with std, hashbrown's without.
+#[allow(unused_imports)]
+pub(crate) mod collections {
+    #[cfg(not(feature = "std"))]
+    pub use hashbrown::{HashMap, HashSet};
+    #[cfg(feature = "std")]
+    pub use std::collections::{HashMap, HashSet};
+
+    /// Insertion-ordered maps: indexmap's, hashed by hashbrown's hasher
+    /// without std (indexmap's default hasher needs std).
+    #[cfg(feature = "std")]
+    pub use indexmap::IndexMap;
+    #[cfg(not(feature = "std"))]
+    pub type IndexMap<K, V> = indexmap::IndexMap<K, V, hashbrown::DefaultHashBuilder>;
+}
 
 mod action;
 #[cfg(feature = "tokio")]
@@ -31,6 +120,7 @@ pub mod executor;
 mod hooks;
 pub mod journal;
 mod locks;
+mod patch;
 mod port_type;
 pub mod rt;
 #[cfg(feature = "serve")]
@@ -81,6 +171,11 @@ pub mod __private {
     pub use tokio;
 
     pub use crate::rt;
+    // So the expansion builds in a crate without std.
+    pub use alloc::boxed::Box;
+    pub use alloc::string::{String, ToString};
+    pub use alloc::vec::Vec;
+    pub use alloc::{format, vec};
 
     pub use crate::action::{Action, ActionError, Concurrency};
     pub use crate::context::Context;

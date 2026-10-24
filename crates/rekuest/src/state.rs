@@ -9,12 +9,14 @@
 //! app) therefore always knows every state. Reading state is not what actions
 //! are for: do not write "getter" actions that only return a state.
 
-use std::any::Any;
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use crate::collections::HashMap;
+#[allow(unused_imports)]
+use crate::prelude::*;
+use crate::sync::Mutex;
+use core::any::Any;
 
+use crate::collections::IndexMap;
 use async_trait::async_trait;
-use indexmap::IndexMap;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -86,8 +88,8 @@ pub struct StateDeclaration {
     initial: Option<Arc<dyn Fn() -> Box<dyn Any + Send> + Send + Sync>>,
 }
 
-impl std::fmt::Debug for StateDeclaration {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Debug for StateDeclaration {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("StateDeclaration")
             .field("name", &self.name)
             .field("required_locks", &self.required_locks)
@@ -152,21 +154,20 @@ impl<T: StateType> StateCell<T> {
     /// Replace the value without publishing (initialization).
     fn set(&self, value: T) -> Result<(), StateError> {
         let json = Self::to_json(&value)?;
-        *self.value.lock().expect("state lock") = Some(value);
-        *self.json.lock().expect("state lock") = json;
+        *self.value.lock() = Some(value);
+        *self.json.lock() = json;
         Ok(())
     }
 
     fn get(&self) -> Result<T, StateError> {
         self.value
             .lock()
-            .expect("state lock")
             .clone()
             .ok_or_else(|| StateError::Uninitialized(T::NAME.to_owned()))
     }
 
     fn read<R>(&self, f: impl FnOnce(&T) -> R) -> Result<R, StateError> {
-        let guard = self.value.lock().expect("state lock");
+        let guard = self.value.lock();
         let value = guard
             .as_ref()
             .ok_or_else(|| StateError::Uninitialized(T::NAME.to_owned()))?;
@@ -196,20 +197,20 @@ impl<T: StateType> StateCell<T> {
 
         // The value lock is held until the operations are queued, so changes
         // to one state are published in the order they were made.
-        let mut guard = self.value.lock().expect("state lock");
+        let mut guard = self.value.lock();
         let value = guard
             .as_mut()
             .ok_or_else(|| StateError::Uninitialized(T::NAME.to_owned()))?;
         let result = f(value);
         let new_json = Self::to_json(value)?;
 
-        let mut json = self.json.lock().expect("state lock");
+        let mut json = self.json.lock();
         let ops = diff_ops(&json, &new_json);
         *json = new_json;
         drop(json);
 
         if !ops.is_empty() {
-            if let Some(hub) = self.hub.lock().expect("state lock").as_ref() {
+            if let Some(hub) = self.hub.lock().as_ref() {
                 let ts = now_ts();
                 for (op, path, value) in ops {
                     hub.queue(QueuedPatch {
@@ -243,38 +244,22 @@ impl<T: StateType> AnyCell for StateCell<T> {
     fn value_json(&self) -> Option<Value> {
         self.value
             .lock()
-            .expect("state lock")
             .is_some()
-            .then(|| self.json.lock().expect("state lock").clone())
+            .then(|| self.json.lock().clone())
     }
 
     fn bind(&self, hub: Arc<HubInner>) {
-        *self.hub.lock().expect("state lock") = Some(hub);
+        *self.hub.lock() = Some(hub);
     }
 }
 
 /// `(op, path, value)` for each RFC 6902 operation turning `old` into `new`.
 fn diff_ops(old: &Value, new: &Value) -> Vec<(String, String, Value)> {
-    let patch = json_patch::diff(old, new);
-    let Ok(Value::Array(ops)) = serde_json::to_value(&patch) else {
-        return vec![];
-    };
-    ops.into_iter()
-        .filter_map(|op| {
-            let kind = op.get("op")?.as_str()?.to_owned();
-            let path = op.get("path")?.as_str()?.to_owned();
-            let value = if kind == "remove" {
-                Value::Null
-            } else {
-                op.get("value").cloned().unwrap_or(Value::Null)
-            };
-            Some((kind, path, value))
-        })
-        .collect()
+    crate::patch::diff_ops(old, new)
 }
 
 fn now_ts() -> f64 {
-    let now = chrono::Utc::now();
+    let now = crate::rt::now();
     now.timestamp() as f64 + f64::from(now.timestamp_subsec_micros()) / 1e6
 }
 
@@ -342,14 +327,14 @@ struct HubState {
 pub(crate) struct HubInner {
     state: Mutex<HubState>,
     /// Sink writes queued but not yet done.
-    pending: std::sync::atomic::AtomicUsize,
+    pending: core::sync::atomic::AtomicUsize,
     /// Set whenever `pending` drops to zero.
     drained: crate::rt::Watch<()>,
 }
 
 impl HubInner {
     fn queue(&self, patch: QueuedPatch) {
-        let mut state = self.state.lock().expect("hub lock");
+        let mut state = self.state.lock();
         let Some(emitter) = state.emitter.clone() else {
             return;
         };
@@ -413,7 +398,7 @@ impl HubInner {
     fn persist(&self, state: &HubState, write: SinkWrite) {
         if let Some(tx) = &state.sink {
             self.pending
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                .fetch_add(1, core::sync::atomic::Ordering::SeqCst);
             if tx.try_send(write).is_err() {
                 self.done();
             }
@@ -423,7 +408,7 @@ impl HubInner {
     fn done(&self) {
         if self
             .pending
-            .fetch_sub(1, std::sync::atomic::Ordering::SeqCst)
+            .fetch_sub(1, core::sync::atomic::Ordering::SeqCst)
             == 1
         {
             self.drained.set(());
@@ -438,8 +423,8 @@ pub struct StateHub {
     inner: Arc<HubInner>,
 }
 
-impl std::fmt::Debug for StateHub {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Debug for StateHub {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("StateHub")
             .field(
                 "states",
@@ -466,7 +451,7 @@ impl StateHub {
                 state: Mutex::new(HubState {
                     session_id: String::new(),
                     global_rev: 0,
-                    shrunk: IndexMap::new(),
+                    shrunk: IndexMap::default(),
                     emitter: None,
                     sink: None,
                 }),
@@ -525,19 +510,13 @@ impl StateHub {
 
     /// The current session id and revision.
     pub fn revision(&self) -> (String, u64) {
-        let state = self.inner.state.lock().expect("hub lock");
+        let state = self.inner.state.lock();
         (state.session_id.clone(), state.global_rev)
     }
 
     /// The published value of a state (None if it has none yet).
     pub fn value(&self, name: &str) -> Option<Value> {
-        self.inner
-            .state
-            .lock()
-            .expect("hub lock")
-            .shrunk
-            .get(name)
-            .cloned()
+        self.inner.state.lock().shrunk.get(name).cloned()
     }
 
     /// Open a session: check every state has a value, publish SESSION_INIT
@@ -609,7 +588,7 @@ impl StateHub {
         });
 
         {
-            let mut state = self.inner.state.lock().expect("hub lock");
+            let mut state = self.inner.state.lock();
             state.session_id = session_id;
             state.global_rev = 0;
             state.shrunk = baseline.into_iter().collect();
@@ -623,11 +602,13 @@ impl StateHub {
     }
 
     /// Wait (bounded) until every change has been persisted.
-    pub async fn flush(&self, timeout: std::time::Duration) {
-        let wait = self
-            .inner
-            .drained
-            .wait_for(|()| self.inner.pending.load(std::sync::atomic::Ordering::SeqCst) == 0);
+    pub async fn flush(&self, timeout: core::time::Duration) {
+        let wait = self.inner.drained.wait_for(|()| {
+            self.inner
+                .pending
+                .load(core::sync::atomic::Ordering::SeqCst)
+                == 0
+        });
         if crate::rt::timeout(timeout, wait).await.is_err() {
             tracing::warn!("state history was still being persisted after {timeout:?}");
         }
@@ -637,17 +618,8 @@ impl StateHub {
 /// Apply one RFC 6902 operation to `doc`, ignoring failures (the cache is
 /// rebuilt from the cells at the next session).
 pub(crate) fn apply_op(doc: &mut Value, op: &str, path: &str, value: &Value) {
-    let mut operation = serde_json::json!({ "op": op, "path": path });
-    if op != "remove" {
-        operation["value"] = value.clone();
-    }
-    match serde_json::from_value::<json_patch::Patch>(Value::Array(vec![operation])) {
-        Ok(patch) => {
-            if let Err(e) = json_patch::patch(doc, &patch) {
-                tracing::warn!("could not apply {op} {path}: {e}");
-            }
-        }
-        Err(e) => tracing::warn!("invalid patch {op} {path}: {e}"),
+    if let Err(e) = crate::patch::apply(doc, op, path, value) {
+        tracing::warn!("could not apply {op} {path}: {e}");
     }
 }
 
@@ -667,8 +639,8 @@ impl<T: StateType> Clone for StateMut<T> {
     }
 }
 
-impl<T: StateType> std::fmt::Debug for StateMut<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl<T: StateType> core::fmt::Debug for StateMut<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("StateMut").field("state", &T::NAME).finish()
     }
 }
@@ -713,8 +685,8 @@ impl<T: StateType> Clone for StateRef<T> {
     }
 }
 
-impl<T: StateType> std::fmt::Debug for StateRef<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl<T: StateType> core::fmt::Debug for StateRef<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("StateRef").field("state", &T::NAME).finish()
     }
 }
@@ -783,7 +755,7 @@ mod tests {
         let camera = hub.state_mut::<Camera>(task).unwrap();
         camera.update(|c| c.exposure_ms = 20.0).unwrap();
         camera.update(|c| c.tags.push("a".into())).unwrap();
-        hub.flush(std::time::Duration::from_secs(1)).await;
+        hub.flush(core::time::Duration::from_secs(1)).await;
 
         let messages = recorder.0.lock().unwrap().clone();
         assert!(
@@ -903,7 +875,7 @@ mod tests {
         for i in 1..=SNAPSHOT_INTERVAL {
             camera.update(|c| c.exposure_ms = i as f64).unwrap();
         }
-        hub.flush(std::time::Duration::from_secs(2)).await;
+        hub.flush(core::time::Duration::from_secs(2)).await;
         let messages = recorder.0.lock().unwrap().clone();
         let snapshot_at = messages
             .iter()

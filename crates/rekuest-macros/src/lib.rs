@@ -612,13 +612,13 @@ fn expand_action(options: ActionOptions, mut function: ItemFn) -> syn::Result<To
                         &__rk_ctx,
                     )
                     .await
-                    .map_err(|e| #p::ActionError::Failed(e.at(#key).to_string()))?;
+                    .map_err(|e| #p::ActionError::Failed(#p::ToString::to_string(&e.at(#key))))?;
                 }
             }
             ParamKind::Inject => quote_spanned! {ty.span()=>
                 let #ident: #ty = __rk_ctx
                     .require::<#ty>()
-                    .map_err(|e| #p::ActionError::Failed(e.to_string()))?;
+                    .map_err(|e| #p::ActionError::Failed(#p::ToString::to_string(&e)))?;
             },
             ParamKind::Task => quote!(let #ident: #ty = __rk_task.clone();),
             ParamKind::State { state, write } => {
@@ -626,7 +626,7 @@ fn expand_action(options: ActionOptions, mut function: ItemFn) -> syn::Result<To
                 quote_spanned! {ty.span()=>
                     let #ident: #ty = __rk_task
                         .#getter::<#state>()
-                        .map_err(|e| #p::ActionError::Failed(e.to_string()))?;
+                        .map_err(|e| #p::ActionError::Failed(#p::ToString::to_string(&e)))?;
                 }
             }
         }
@@ -639,7 +639,7 @@ fn expand_action(options: ActionOptions, mut function: ItemFn) -> syn::Result<To
         quote! {
             #p::rt::spawn_blocking(move || #fn_ident::call(#(#call_args),*))
                 .await
-                .map_err(|e| #p::ActionError::Critical(format!("the action panicked: {e}")))?
+                .map_err(|e| #p::ActionError::Critical(#p::format!("the action panicked: {e}")))?
         }
     };
     let unwrap_outer =
@@ -663,10 +663,10 @@ fn expand_action(options: ActionOptions, mut function: ItemFn) -> syn::Result<To
             let key = format!("return{i}");
             quote! {
                 returns.insert(
-                    #key.to_owned(),
+                    #p::String::from(#key),
                     #p::PortType::shrink(#n, &__rk_ctx)
                         .await
-                        .map_err(|e| #p::ActionError::Failed(e.at(#key).to_string()))?,
+                        .map_err(|e| #p::ActionError::Failed(#p::ToString::to_string(&e.at(#key))))?,
                 );
             }
         });
@@ -683,7 +683,7 @@ fn expand_action(options: ActionOptions, mut function: ItemFn) -> syn::Result<To
         quote! {
             let value = #invoke;
             #unwrap_outer
-            let mut stream = ::std::pin::pin!(value);
+            let mut stream = ::core::pin::pin!(value);
             while let Some(value) = #p::futures::StreamExt::next(&mut stream).await {
                 #shrink_value
             }
@@ -754,16 +754,16 @@ fn expand_action(options: ActionOptions, mut function: ItemFn) -> syn::Result<To
         }
 
         impl #p::Action for #fn_ident {
-            fn interface(&self) -> ::std::string::String {
-                #interface.to_owned()
+            fn interface(&self) -> #p::String {
+                #p::String::from(#interface)
             }
 
-            fn locks(&self) -> ::std::vec::Vec<::std::string::String> {
-                let mut locks: ::std::vec::Vec<::std::string::String> =
-                    ::std::vec![#(#declared_locks.to_owned()),*];
+            fn locks(&self) -> #p::Vec<#p::String> {
+                let mut locks: #p::Vec<#p::String> =
+                    #p::vec![#(#p::String::from(#declared_locks)),*];
                 #(
                     locks.extend(
-                        <#lock_states as #p::StateType>::REQUIRED_LOCKS.iter().map(|l| l.to_string()),
+                        <#lock_states as #p::StateType>::REQUIRED_LOCKS.iter().map(|l| #p::String::from(*l)),
                     );
                 )*
                 locks.sort();
@@ -771,9 +771,9 @@ fn expand_action(options: ActionOptions, mut function: ItemFn) -> syn::Result<To
                 locks
             }
 
-            fn manipulates(&self) -> ::std::vec::Vec<::std::string::String> {
-                let mut states: ::std::vec::Vec<::std::string::String> =
-                    ::std::vec![#(<#written_states as #p::StateType>::NAME.to_owned()),*];
+            fn manipulates(&self) -> #p::Vec<#p::String> {
+                let mut states: #p::Vec<#p::String> =
+                    #p::vec![#(#p::String::from(<#written_states as #p::StateType>::NAME)),*];
                 states.sort();
                 states.dedup();
                 states
@@ -785,26 +785,26 @@ fn expand_action(options: ActionOptions, mut function: ItemFn) -> syn::Result<To
 
             fn definition(&self) -> #p::Definition {
                 let mut definition = #p::Definition::new(#key, #name, #kind);
-                definition.description = ::std::option::Option::Some(#description.to_owned());
+                definition.description = ::core::option::Option::Some(#p::String::from(#description));
                 definition.is_dev = #is_dev;
                 definition.stateful = #stateful;
-                definition.collections = ::std::vec![#(#collections.to_owned()),*];
-                definition.args = ::std::vec![#(#arg_ports),*];
-                definition.returns = ::std::vec![#(#return_ports),*];
+                definition.collections = #p::vec![#(#p::String::from(#collections)),*];
+                definition.args = #p::vec![#(#arg_ports),*];
+                definition.returns = #p::vec![#(#return_ports),*];
                 definition
             }
 
             #[allow(unused_mut, unused_variables)]
             fn run(
                 &self,
-                mut __rk_args: #p::serde_json::Map<::std::string::String, #p::serde_json::Value>,
+                mut __rk_args: #p::serde_json::Map<#p::String, #p::serde_json::Value>,
                 __rk_ctx: #p::Context,
                 __rk_task: #p::Task,
-            ) -> #p::futures::future::BoxFuture<'static, ::std::result::Result<(), #p::ActionError>> {
-                ::std::boxed::Box::pin(async move {
+            ) -> #p::futures::future::BoxFuture<'static, ::core::result::Result<(), #p::ActionError>> {
+                #p::Box::pin(async move {
                     #(#bindings)*
                     #body
-                    ::std::result::Result::Ok(())
+                    ::core::result::Result::Ok(())
                 })
             }
         }
@@ -903,8 +903,8 @@ fn expand_state(input: syn::DeriveInput) -> syn::Result<TokenStream2> {
             const NAME: &'static str = #name;
             const REQUIRED_LOCKS: &'static [&'static str] = &[#(#locks),*];
 
-            fn ports() -> ::std::vec::Vec<#p::Port> {
-                ::std::vec![#(#ports),*]
+            fn ports() -> #p::Vec<#p::Port> {
+                #p::vec![#(#ports),*]
             }
         }
     })

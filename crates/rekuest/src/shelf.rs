@@ -7,10 +7,12 @@
 //! reaches the server before anything that references it. The server's
 //! `COLLECT` (or [`Shelf::remove`]) drops a value and records `UNSHELVE`.
 
-use std::any::Any;
-use std::collections::HashMap;
-use std::ops::Deref;
-use std::sync::{Arc, Mutex};
+use crate::collections::HashMap;
+#[allow(unused_imports)]
+use crate::prelude::*;
+use crate::sync::Mutex;
+use core::any::Any;
+use core::ops::Deref;
 
 use serde_json::{json, Value};
 
@@ -23,18 +25,22 @@ use crate::ports::{Port, PortKind};
 
 type Stored = Arc<dyn Any + Send + Sync>;
 
+#[cfg(feature = "std")]
 std::thread_local! {
-    static SHELVING_SLOT: std::cell::RefCell<Option<(String, TaskGate)>> =
-        const { std::cell::RefCell::new(None) };
+    static SHELVING_SLOT: core::cell::RefCell<Option<(String, TaskGate)>> =
+        const { core::cell::RefCell::new(None) };
 }
 
 /// The task whose action is running (set by the executor around it).
+#[cfg(feature = "std")]
 static SHELVING: crate::rt::TaskLocal<(String, TaskGate)> =
     crate::rt::TaskLocal::new(&SHELVING_SLOT);
+#[cfg(not(feature = "std"))]
+static SHELVING: crate::rt::TaskLocal<(String, TaskGate)> = crate::rt::TaskLocal::new();
 
 /// Run `fut` (an action of `task`) so that what it shelves is attributed to
 /// `task`, and nothing is shelved once the task's gate is closed.
-pub(crate) async fn shelving_for<F: std::future::Future>(
+pub(crate) async fn shelving_for<F: core::future::Future>(
     task: String,
     gate: TaskGate,
     fut: F,
@@ -54,8 +60,8 @@ pub struct Shelf {
     inner: Arc<Inner>,
 }
 
-impl std::fmt::Debug for Shelf {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Debug for Shelf {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Shelf")
             .field("values", &self.len())
             .finish()
@@ -81,7 +87,7 @@ impl Shelf {
         value: Arc<T>,
         label: Option<String>,
     ) -> String {
-        let id = uuid::Uuid::new_v4().simple().to_string();
+        let id = crate::rt::uuid().simple().to_string();
         let owner = SHELVING.get();
         let _pass = match &owner {
             Some((task, gate)) => match gate.enter() {
@@ -93,11 +99,7 @@ impl Shelf {
             },
             None => None,
         };
-        self.inner
-            .values
-            .lock()
-            .expect("shelf lock")
-            .insert(id.clone(), value as Stored);
+        self.inner.values.lock().insert(id.clone(), value as Stored);
         self.inner.emitter.emit(
             FromAgent::Shelve {
                 reference: Some(id.clone()),
@@ -114,25 +116,13 @@ impl Shelf {
 
     /// The value shelved under `id`, if it is a `T`.
     pub fn get<T: Send + Sync + 'static>(&self, id: &str) -> Option<Arc<T>> {
-        let value = self
-            .inner
-            .values
-            .lock()
-            .expect("shelf lock")
-            .get(id)
-            .cloned()?;
+        let value = self.inner.values.lock().get(id).cloned()?;
         value.downcast::<T>().ok()
     }
 
     /// Drop a value. Records `UNSHELVE` if there was one.
     pub fn remove(&self, id: &str) -> bool {
-        let removed = self
-            .inner
-            .values
-            .lock()
-            .expect("shelf lock")
-            .remove(id)
-            .is_some();
+        let removed = self.inner.values.lock().remove(id).is_some();
         if removed {
             self.inner.emitter.emit(
                 FromAgent::Unshelve {
@@ -148,7 +138,7 @@ impl Shelf {
     }
 
     pub fn len(&self) -> usize {
-        self.inner.values.lock().expect("shelf lock").len()
+        self.inner.values.lock().len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -189,8 +179,8 @@ impl<T> Deref for Memory<T> {
     }
 }
 
-impl<T: std::fmt::Debug> std::fmt::Debug for Memory<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl<T: core::fmt::Debug> core::fmt::Debug for Memory<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_tuple("Memory").field(&self.0).finish()
     }
 }

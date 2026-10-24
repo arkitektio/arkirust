@@ -4,9 +4,10 @@
 //! every service client is stored by its type, and actions or structures ask
 //! for the type they need.
 
-use std::any::{type_name, Any, TypeId};
-use std::collections::HashMap;
-use std::sync::Arc;
+use crate::collections::HashMap;
+#[allow(unused_imports)]
+use crate::prelude::*;
+use core::any::{type_name, Any, TypeId};
 
 #[derive(Debug, thiserror::Error)]
 #[error("no client of type {0} is available; did you add its service to the App?")]
@@ -37,8 +38,8 @@ pub struct Context {
     clients: Arc<HashMap<TypeId, Arc<dyn Any + Send + Sync>>>,
 }
 
-impl std::fmt::Debug for Context {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Debug for Context {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Context")
             .field("clients", &self.clients.len())
             .finish()

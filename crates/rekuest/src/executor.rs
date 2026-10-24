@@ -5,14 +5,19 @@
 //! transport (the websocket [`Agent`](crate::Agent), or a served app) feeds it
 //! commands and receives its messages through an [`Emitter`].
 
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::panic::AssertUnwindSafe;
-use std::sync::{Arc, Mutex, RwLock};
-use std::time::Duration;
+#[allow(unused_imports)]
+use crate::prelude::*;
+use alloc::collections::VecDeque;
 
+use crate::collections::{HashMap, HashSet};
+use crate::sync::{Mutex, RwLock};
+#[cfg(feature = "std")]
+use core::panic::AssertUnwindSafe;
+use core::time::Duration;
+
+use crate::collections::IndexMap;
 use crate::rt::{self, FifoMutex, TaskHandle};
 use futures::FutureExt;
-use indexmap::IndexMap;
 use serde::Serialize;
 use serde_json::Value;
 
@@ -114,7 +119,7 @@ struct Inner {
     background: Mutex<Vec<TaskHandle>>,
     /// Activation runs once: whoever comes second waits for the first.
     activating: Arc<FifoMutex>,
-    activated: std::sync::atomic::AtomicBool,
+    activated: core::sync::atomic::AtomicBool,
     /// The session to open when there is no sink to create one.
     session_id: Option<String>,
 }
@@ -125,8 +130,8 @@ pub struct Executor {
     inner: Arc<Inner>,
 }
 
-impl std::fmt::Debug for Executor {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Debug for Executor {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Executor")
             .field("registry", &self.inner.registry)
             .finish_non_exhaustive()
@@ -162,7 +167,7 @@ impl Executor {
             .collect();
         let actor_ids = registry
             .iter()
-            .map(|a| (a.interface(), uuid::Uuid::new_v4().to_string()))
+            .map(|a| (a.interface(), crate::rt::uuid().to_string()))
             .collect();
         // Memory structures shrink onto (and expand from) the shelf in the context.
         let shelf = Shelf::new(emitter.clone());
@@ -196,7 +201,7 @@ impl Executor {
     }
 
     pub fn context(&self) -> Context {
-        self.inner.ctx.read().expect("ctx lock").clone()
+        self.inner.ctx.read().clone()
     }
 
     pub fn states(&self) -> &Arc<StateHub> {
@@ -215,7 +220,7 @@ impl Executor {
     pub fn is_activated(&self) -> bool {
         self.inner
             .activated
-            .load(std::sync::atomic::Ordering::SeqCst)
+            .load(core::sync::atomic::Ordering::SeqCst)
     }
 
     /// Start the agent's session, once: run startup hooks, open the session
@@ -231,7 +236,7 @@ impl Executor {
         self.do_activate().await?;
         self.inner
             .activated
-            .store(true, std::sync::atomic::Ordering::SeqCst);
+            .store(true, core::sync::atomic::Ordering::SeqCst);
         Ok(())
     }
 
@@ -242,7 +247,7 @@ impl Executor {
             None => inner
                 .session_id
                 .clone()
-                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+                .unwrap_or_else(|| crate::rt::uuid().to_string()),
         };
 
         inner.hub.apply_initial_values()?;
@@ -258,13 +263,13 @@ impl Executor {
                     anyhow::anyhow!("a startup hook took longer than {HOOK_TIMEOUT:?}")
                 })??;
         }
-        let edits = std::mem::take(&mut *startup.contexts.lock().expect("context edits"));
+        let edits = core::mem::take(&mut *startup.contexts.lock());
         if !edits.is_empty() {
             let mut builder = self.context().to_builder();
             for edit in edits {
                 edit(&mut builder);
             }
-            *inner.ctx.write().expect("ctx lock") = builder.build();
+            *inner.ctx.write() = builder.build();
         }
 
         inner
@@ -276,7 +281,7 @@ impl Executor {
             ctx: self.context(),
             hub: inner.hub.clone(),
         };
-        let mut handles = inner.background.lock().expect("background lock");
+        let mut handles = inner.background.lock();
         for hook in &inner.registry.hooks().background {
             let run = hook(background.clone());
             handles.push(rt::spawn(async move {
@@ -291,13 +296,7 @@ impl Executor {
     /// Stop: cancel background hooks, run shutdown hooks (in reverse order),
     /// then wait (bounded) until state changes are published and persisted.
     pub async fn teardown(&self) {
-        for handle in self
-            .inner
-            .background
-            .lock()
-            .expect("background lock")
-            .drain(..)
-        {
+        for handle in self.inner.background.lock().drain(..) {
             handle.abort();
         }
         if self.is_activated() {
@@ -339,27 +338,17 @@ impl Executor {
     }
 
     pub fn is_running(&self, task: &str) -> bool {
-        self.inner
-            .tasks
-            .lock()
-            .expect("tasks lock")
-            .managed
-            .contains_key(task)
+        self.inner.tasks.lock().managed.contains_key(task)
     }
 
     pub fn has_finished(&self, task: &str) -> bool {
-        self.inner
-            .tasks
-            .lock()
-            .expect("tasks lock")
-            .finished_set
-            .contains(task)
+        self.inner.tasks.lock().finished_set.contains(task)
     }
 
     /// Start running an assignment.
     pub fn assign(&self, assign: Assign) {
         let inner = &self.inner;
-        let mut tasks = inner.tasks.lock().expect("tasks lock");
+        let mut tasks = inner.tasks.lock();
         let task_id = assign.task.clone();
         if tasks.managed.contains_key(&task_id) || tasks.finished_set.contains(&task_id) {
             tracing::debug!("ignoring duplicate ASSIGN for task {task_id}");
@@ -460,7 +449,13 @@ impl Executor {
                 );
                 #[cfg(feature = "rath")]
                 let body = rath::with_task_token(assign.token.clone(), body);
-                match AssertUnwindSafe(body).catch_unwind().await {
+                // A panicking action is the task's critical error (with
+                // std; without it a panic aborts).
+                #[cfg(feature = "std")]
+                let body = AssertUnwindSafe(body).catch_unwind();
+                #[cfg(not(feature = "std"))]
+                let body = body.map(Ok::<_, Box<dyn core::any::Any + Send>>);
+                match body.await {
                     Ok(Ok(())) => FromAgent::Completed { task: id.clone() },
                     Ok(Err(ActionError::Failed(error))) => FromAgent::Failed {
                         task: id.clone(),
@@ -480,7 +475,7 @@ impl Executor {
             // Reported while still holding the locks: UNLOCK follows the end, as in Python.
             // A cancelled task was already reported (and forgotten, and its
             // locks released) by `stop`.
-            let mut tasks = inner.tasks.lock().expect("tasks lock");
+            let mut tasks = inner.tasks.lock();
             if tasks.managed.contains_key(&id) {
                 gate.close();
                 this.emit(event, Some(&key));
@@ -508,7 +503,7 @@ impl Executor {
     }
 
     fn stop(&self, task: &str, report: impl FnOnce(String) -> FromAgent) {
-        let mut tasks = self.inner.tasks.lock().expect("tasks lock");
+        let mut tasks = self.inner.tasks.lock();
         let Some(managed) = tasks.managed.get(task) else {
             tracing::debug!("cannot stop task {task}: it is not running");
             return;
@@ -556,7 +551,6 @@ impl Executor {
         self.inner
             .tasks
             .lock()
-            .expect("tasks lock")
             .managed
             .get(task)
             .map(|m| m.brk.clone())
@@ -565,7 +559,7 @@ impl Executor {
     /// A lifecycle request for a task this agent does not run. For a task
     /// that already ended nothing is recorded (its end was reported).
     fn not_managed(&self, task: &str) {
-        let tasks = self.inner.tasks.lock().expect("tasks lock");
+        let tasks = self.inner.tasks.lock();
         if tasks.finished_set.contains(task) {
             tracing::debug!("ignoring a lifecycle request for task {task}: it already ended");
             return;
@@ -586,7 +580,6 @@ impl Executor {
         self.inner
             .tasks
             .lock()
-            .expect("tasks lock")
             .managed
             .iter()
             .filter(|(_, m)| action_keys.is_none_or(|keys| keys.contains(&m.action_key)))
@@ -639,7 +632,7 @@ impl Executor {
     }
 }
 
-fn panic_message(panic: &Box<dyn std::any::Any + Send>) -> String {
+fn panic_message(panic: &Box<dyn core::any::Any + Send>) -> String {
     panic
         .downcast_ref::<&str>()
         .map(|s| s.to_string())
@@ -658,7 +651,7 @@ mod tests {
     #[crate::action(locks = ["stage"])]
     async fn hold(task: Task) {
         task.log("holding");
-        std::future::pending::<()>().await;
+        core::future::pending::<()>().await;
     }
 
     /// Quick
@@ -676,13 +669,12 @@ mod tests {
     impl Emitter for Recorder {
         fn emit(&self, message: FromAgent, _: Option<&str>) {
             let task = message.task().map(str::to_owned);
-            self.0.lock().unwrap().push((kind_of(&message), task, None));
+            self.0.lock().push((kind_of(&message), task, None));
         }
         fn emit_entry(&self, message: FromAgent, _: Option<&str>, entry: &JournalEntry) {
             let task = message.task().map(str::to_owned);
             self.0
                 .lock()
-                .unwrap()
                 .push((entry.kind.clone(), task, Some(entry.pos)));
         }
     }
@@ -740,7 +732,7 @@ mod tests {
         .expect("the lock was released");
         tokio::time::sleep(Duration::from_millis(50)).await;
 
-        let frames = recorder.0.lock().unwrap().clone();
+        let frames = recorder.0.lock().clone();
         for round in 0..50 {
             let task = format!("t{round}");
             let cancelled = pos_of(&frames, "CANCELLED", &task);
@@ -784,7 +776,7 @@ mod tests {
         })
         .await
         .unwrap();
-        let frames = recorder.0.lock().unwrap().clone();
+        let frames = recorder.0.lock().clone();
         let ends: Vec<_> = frames
             .iter()
             .filter(|(k, t, _)| t.as_deref() == Some("t") && (k == "FAILED" || k == "COMPLETED"))
@@ -804,14 +796,14 @@ mod tests {
         })
         .await
         .unwrap();
-        let before = recorder.0.lock().unwrap().len();
+        let before = recorder.0.lock().len();
         executor.pause("t");
         executor.resume("t", false);
-        assert_eq!(recorder.0.lock().unwrap().len(), before);
+        assert_eq!(recorder.0.lock().len(), before);
 
         // An unknown task is still answered.
         executor.pause("never");
-        let frames = recorder.0.lock().unwrap().clone();
+        let frames = recorder.0.lock().clone();
         assert_eq!(frames.last().unwrap().0, "CRITICAL");
     }
 }

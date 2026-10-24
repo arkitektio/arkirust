@@ -401,8 +401,15 @@ with tokens from `fakts`, which logs in over `fetch` there (as `rath` makes
 its requests); there is no cache file and no mesh. The e2e job runs it under
 node against the real stack (`checks/wasm/tests/real_stack.rs`). Node does
 not enforce CORS; a browser needs lok and takt to allow its origin.
-`arkitekt` itself is not on wasm yet. Not yet without std (embassy): the
-executor still uses std's mutexes, maps and thread locals.
+`arkitekt` itself is not on wasm yet.
+
+Without its `std` feature (on by default; `tokio`, `web`, `rath`, `wal` and
+`serve` imply it) rekuest is `no_std` + `alloc`, for a microcontroller: locks
+spin, maps are hashbrown's, the task local is a global slot (one executor
+thread), a panicking action aborts instead of failing its task, and the
+runtime brings what std would (`Runtime::wall_clock_micros`,
+`Runtime::fill_random`). `checks/embassy` runs a real `#[action]` through
+`Driver` on an embassy runtime that way, on the host and built for a Cortex-M4F.
 
 ## Development
 

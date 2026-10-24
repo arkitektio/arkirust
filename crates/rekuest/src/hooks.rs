@@ -7,8 +7,10 @@
 //!   shutdown. It may change states, but only ones that require no locks.
 //! * A **shutdown** hook runs once when the agent stops.
 
-use std::future::Future;
-use std::sync::{Arc, Mutex};
+#[allow(unused_imports)]
+use crate::prelude::*;
+use crate::sync::Mutex;
+use core::future::Future;
 
 use futures::future::BoxFuture;
 
@@ -34,8 +36,8 @@ pub struct Hooks {
     pub(crate) shutdown: Vec<HookFn<Background>>,
 }
 
-impl std::fmt::Debug for Hooks {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Debug for Hooks {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Hooks")
             .field("startup", &self.startup.len())
             .field("background", &self.background.len())
@@ -72,11 +74,11 @@ impl Startup {
     /// Provide a context (any shared value, e.g. a device handle) that actions
     /// take with `#[inject]`.
     pub fn set_context<T: Clone + Send + Sync + 'static>(&self, value: T) {
-        self.contexts.lock().expect("context edits").push(Box::new(
-            move |builder: &mut ContextBuilder| {
+        self.contexts
+            .lock()
+            .push(Box::new(move |builder: &mut ContextBuilder| {
                 builder.insert(value);
-            },
-        ));
+            }));
     }
 }
 

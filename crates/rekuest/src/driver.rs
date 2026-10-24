@@ -12,8 +12,10 @@
 //!
 //! [`Agent`](crate::Agent) is this with a tokio websocket.
 
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+#[allow(unused_imports)]
+use crate::prelude::*;
+use crate::sync::Mutex;
+use core::time::Duration;
 
 use rekuest_session::{to_text, Event, Outbox, Session, SessionConfig};
 
@@ -37,8 +39,8 @@ struct Shared {
 }
 
 impl Shared {
-    fn lock(&self) -> std::sync::MutexGuard<'_, Session> {
-        self.session.lock().expect("session lock")
+    fn lock(&self) -> impl core::ops::DerefMut<Target = Session> + '_ {
+        self.session.lock()
     }
 }
 
@@ -130,8 +132,8 @@ impl Driver {
         let mut session = self.shared.lock();
         session.handle_timeout(now);
         Polled {
-            events: std::iter::from_fn(|| session.poll_event()).collect(),
-            frames: std::iter::from_fn(|| session.poll_transmit())
+            events: core::iter::from_fn(|| session.poll_event()).collect(),
+            frames: core::iter::from_fn(|| session.poll_transmit())
                 .map(|envelope| to_text(&envelope))
                 .collect(),
             deadline: session.poll_timeout(),
@@ -258,7 +260,7 @@ mod tests {
     }
 
     fn drain(driver: &Driver) -> Vec<Envelope> {
-        driver.with_session(|session| std::iter::from_fn(|| session.poll_transmit()).collect())
+        driver.with_session(|session| core::iter::from_fn(|| session.poll_transmit()).collect())
     }
 
     fn log(task: &str) -> FromAgent {

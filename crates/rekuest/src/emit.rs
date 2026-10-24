@@ -2,6 +2,8 @@
 
 use crate::journal::JournalEntry;
 use crate::messages::FromAgent;
+#[allow(unused_imports)]
+use crate::prelude::*;
 
 /// A transport's outgoing side.
 ///

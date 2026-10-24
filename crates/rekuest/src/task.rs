@@ -1,6 +1,8 @@
 //! The handle an action gets to talk about its own execution.
 
-use std::sync::{Arc, Mutex};
+#[allow(unused_imports)]
+use crate::prelude::*;
+use crate::sync::Mutex;
 
 use serde_json::{Map, Value};
 
@@ -19,7 +21,7 @@ pub(crate) struct Break {
 impl Break {
     /// Arm a pause. Returns false if one was already armed.
     pub(crate) fn arm(&self) -> bool {
-        let mut armed = self.armed.lock().expect("break lock");
+        let mut armed = self.armed.lock();
         if armed.is_some() {
             return false;
         }
@@ -30,7 +32,7 @@ impl Break {
     /// Release the pause; with `step`, arm the next one right away.
     /// Returns false if nothing was armed.
     pub(crate) fn release(&self, step: bool) -> bool {
-        let mut armed = self.armed.lock().expect("break lock");
+        let mut armed = self.armed.lock();
         let Some(current) = armed.take() else {
             return false;
         };
@@ -42,7 +44,7 @@ impl Break {
     }
 
     fn current(&self) -> Option<Arc<Latch>> {
-        self.armed.lock().expect("break lock").clone()
+        self.armed.lock().clone()
     }
 }
 
@@ -71,8 +73,8 @@ pub struct Task {
     gate: TaskGate,
 }
 
-impl std::fmt::Debug for Task {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Debug for Task {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Task")
             .field("id", &self.id)
             .finish_non_exhaustive()
@@ -106,7 +108,7 @@ impl Task {
     /// Useful to call an action directly, e.g. in tests.
     pub fn local() -> Self {
         Self {
-            id: format!("local-{}", uuid::Uuid::new_v4()),
+            id: format!("local-{}", crate::rt::uuid()),
             assignment: None,
             emitter: None,
             action_key: None,
@@ -213,17 +215,16 @@ impl Task {
     /// The current time, recorded as an `EFFECT` (`NOW`, epoch seconds).
     pub fn now(&self) -> chrono::DateTime<chrono::Utc> {
         let value = self.effect(EffectKind::Now, || {
-            Value::from(chrono::Utc::now().timestamp_micros() as f64 / 1e6)
+            Value::from(crate::rt::now().timestamp_micros() as f64 / 1e6)
         });
-        from_epoch_seconds(&value).unwrap_or_else(chrono::Utc::now)
+        from_epoch_seconds(&value).unwrap_or_else(crate::rt::now)
     }
 
     /// `n` random bytes, recorded as an `EFFECT` (`RANDOM`, hex).
     pub fn random(&self, n: usize) -> Vec<u8> {
         let value = self.effect(EffectKind::Random, || {
-            use rand::RngCore;
             let mut bytes = vec![0u8; n];
-            rand::thread_rng().fill_bytes(&mut bytes);
+            crate::rt::fill_random(&mut bytes);
             Value::from(hex::encode(bytes))
         });
         value
@@ -234,14 +235,13 @@ impl Task {
 
     /// Sleep for `duration`: records the deadline as an `EFFECT` (`SLEEP`,
     /// epoch seconds), then sleeps until it.
-    pub async fn sleep(&self, duration: std::time::Duration) {
+    pub async fn sleep(&self, duration: core::time::Duration) {
         let value = self.effect(EffectKind::Sleep, || {
-            let until =
-                chrono::Utc::now() + chrono::Duration::from_std(duration).unwrap_or_default();
+            let until = crate::rt::now() + chrono::Duration::from_std(duration).unwrap_or_default();
             Value::from(until.timestamp_micros() as f64 / 1e6)
         });
         let left = from_epoch_seconds(&value)
-            .and_then(|until| (until - chrono::Utc::now()).to_std().ok())
+            .and_then(|until| (until - crate::rt::now()).to_std().ok())
             .unwrap_or_default();
         crate::rt::sleep(left).await;
     }
@@ -276,6 +276,12 @@ impl Task {
 }
 
 fn from_epoch_seconds(value: &Value) -> Option<chrono::DateTime<chrono::Utc>> {
-    let micros = (value.as_f64()? * 1e6).round() as i64;
+    // Rounded half away from zero (core has no `f64::round`).
+    let scaled = value.as_f64()? * 1e6;
+    let micros = if scaled < 0.0 {
+        scaled - 0.5
+    } else {
+        scaled + 0.5
+    } as i64;
     chrono::DateTime::from_timestamp_micros(micros)
 }

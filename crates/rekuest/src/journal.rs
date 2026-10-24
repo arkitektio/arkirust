@@ -23,13 +23,18 @@
 //! and every frame of a probe task (see [`crate::messages::is_probe_task`]).
 //! They are handed on as they are and never recorded.
 
-use std::collections::VecDeque;
-use std::sync::{Arc, Condvar, Mutex};
-use std::time::Duration;
+#[allow(unused_imports)]
+use crate::prelude::*;
+use alloc::collections::VecDeque;
+#[cfg(feature = "std")]
+use std::sync::Condvar;
 
+use crate::sync::Mutex;
+use core::time::Duration;
+
+use crate::collections::IndexMap;
 use crate::rt::{self, Watch};
 use async_trait::async_trait;
-use indexmap::IndexMap;
 use serde::Serialize;
 use serde_json::Value;
 
@@ -46,7 +51,7 @@ const WRITE_BATCH: usize = 256;
 
 /// Milliseconds since the epoch.
 pub(crate) fn now_ms() -> i64 {
-    chrono::Utc::now().timestamp_millis()
+    crate::rt::now().timestamp_millis()
 }
 
 /// ISO 8601 with `Z`, microseconds only when non-zero (pydantic's format).
@@ -235,11 +240,20 @@ struct GateState {
 /// waits for the ones in flight. Entering twice on one thread is fine.
 #[derive(Clone, Default)]
 pub struct TaskGate {
-    inner: Arc<(Mutex<GateState>, Condvar)>,
+    inner: Arc<Gate>,
 }
 
-impl std::fmt::Debug for TaskGate {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+#[derive(Default)]
+struct Gate {
+    state: Mutex<GateState>,
+    /// Woken when the last pass is dropped (with std; without it, `close`
+    /// spins: one executor thread finishes its passes synchronously).
+    #[cfg(feature = "std")]
+    done: Condvar,
+}
+
+impl core::fmt::Debug for TaskGate {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("TaskGate")
             .field("closed", &self.is_closed())
             .finish()
@@ -253,11 +267,11 @@ pub struct GatePass<'a> {
 
 impl Drop for GatePass<'_> {
     fn drop(&mut self) {
-        let (lock, done) = &*self.gate.inner;
-        let mut state = lock.lock().expect("gate lock");
+        let mut state = self.gate.inner.state.lock();
         state.active -= 1;
+        #[cfg(feature = "std")]
         if state.active == 0 {
-            done.notify_all();
+            self.gate.inner.done.notify_all();
         }
     }
 }
@@ -265,7 +279,7 @@ impl Drop for GatePass<'_> {
 impl TaskGate {
     /// `None` once the gate is closed (or closing).
     pub fn enter(&self) -> Option<GatePass<'_>> {
-        let mut state = self.inner.0.lock().expect("gate lock");
+        let mut state = self.inner.state.lock();
         if state.closed {
             return None;
         }
@@ -275,16 +289,26 @@ impl TaskGate {
 
     /// Refuse new entries, then wait until those in flight are done.
     pub fn close(&self) {
-        let (lock, done) = &*self.inner;
-        let mut state = lock.lock().expect("gate lock");
+        let mut state = self.inner.state.lock();
         state.closed = true;
+        #[cfg(feature = "std")]
         while state.active > 0 {
-            state = done.wait(state).expect("gate lock");
+            state = self
+                .inner
+                .done
+                .wait(state)
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+        }
+        #[cfg(not(feature = "std"))]
+        while state.active > 0 {
+            drop(state);
+            core::hint::spin_loop();
+            state = self.inner.state.lock();
         }
     }
 
     pub fn is_closed(&self) -> bool {
-        self.inner.0.lock().expect("gate lock").closed
+        self.inner.state.lock().closed
     }
 }
 
@@ -360,7 +384,7 @@ struct JournalState {
     fold: Fold,
     finished: VecDeque<String>,
     /// The last step of each task.
-    steps: std::collections::HashMap<String, u64>,
+    steps: crate::collections::HashMap<String, u64>,
     writer: Option<async_channel::Sender<Arc<JournalEntry>>>,
 }
 
@@ -373,9 +397,9 @@ pub struct Journal {
     durable: Arc<Watch<(String, u64)>>,
 }
 
-impl std::fmt::Debug for Journal {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let state = self.state.lock().expect("journal lock");
+impl core::fmt::Debug for Journal {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let state = self.state.lock();
         f.debug_struct("Journal")
             .field("session", &state.session)
             .field("pos", &state.pos)
@@ -411,13 +435,13 @@ impl Journal {
     /// what `f` reads is consistent with the watermark, and a subscription
     /// made in `f` gets exactly the entries after it.
     pub fn locked<R>(&self, f: impl FnOnce(&JournalView<'_>) -> R) -> R {
-        let state = self.state.lock().expect("journal lock");
+        let state = self.state.lock();
         f(&JournalView { state: &state })
     }
 
     /// Wait (bounded) until everything up to `pos` of the current session is persisted.
     pub async fn flush_to(&self, pos: u64, timeout: Duration) -> bool {
-        let Some(session) = self.state.lock().expect("journal lock").session.clone() else {
+        let Some(session) = self.state.lock().session.clone() else {
             return true;
         };
         if self.sink.is_none() || pos == 0 {
@@ -435,7 +459,7 @@ impl Journal {
 
     /// Wait (bounded) until every entry so far is persisted.
     pub async fn flush(&self, timeout: Duration) -> bool {
-        let pos = self.state.lock().expect("journal lock").pos;
+        let pos = self.state.lock().pos;
         self.flush_to(pos, timeout).await
     }
 
@@ -455,7 +479,7 @@ impl Journal {
             *step += 1;
             *step
         });
-        let message_id = uuid::Uuid::new_v4().to_string();
+        let message_id = crate::rt::uuid().to_string();
         if let Value::Object(map) = &mut payload {
             map.insert("id".into(), Value::String(message_id.clone()));
         }
@@ -573,7 +597,7 @@ impl Journal {
         if message.is_unnumbered() {
             return self.inner.emit(message, action_key);
         }
-        let mut state = self.state.lock().expect("journal lock");
+        let mut state = self.state.lock();
         match &message {
             FromAgent::SessionInit { session_id, .. } => {
                 if state.session.as_deref() != Some(session_id.as_str()) {
@@ -931,11 +955,11 @@ mod tests {
 
     #[tokio::test]
     async fn the_durable_watermark_never_passes_a_failed_write() {
-        struct Failing(std::sync::atomic::AtomicUsize, usize, StdMutex<Vec<u64>>);
+        struct Failing(core::sync::atomic::AtomicUsize, usize, StdMutex<Vec<u64>>);
         #[async_trait]
         impl JournalSink for Failing {
             async fn write_entries(&self, entries: &[Arc<JournalEntry>]) -> anyhow::Result<()> {
-                let n = self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let n = self.0.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
                 if n < self.1 {
                     anyhow::bail!("disk full");
                 }

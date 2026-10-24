@@ -13,13 +13,15 @@
 //! The primitives here ([`FifoMutex`], [`Latch`], [`Watch`]) need nothing
 //! from a runtime: they wake whoever polls them.
 
-use std::collections::VecDeque;
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
-use std::task::{Context, Poll, Waker};
-use std::time::Duration;
+#[allow(unused_imports)]
+use crate::prelude::*;
+use crate::sync::Mutex;
+use alloc::collections::VecDeque;
+use core::future::Future;
+use core::pin::Pin;
+use core::sync::atomic::{AtomicBool, Ordering};
+use core::task::{Context, Poll, Waker};
+use core::time::Duration;
 
 use futures::future::{AbortHandle, Abortable};
 
@@ -39,21 +41,45 @@ pub trait Runtime: Send + Sync + 'static {
     /// target has nowhere else to run it).
     fn spawn_blocking(&self, work: Box<dyn FnOnce() + Send>) -> BoxFuture {
         work();
-        Box::pin(std::future::ready(()))
+        Box::pin(core::future::ready(()))
     }
 
     /// Whether [`Runtime::spawn`] works from here (tokio: inside a runtime).
     fn is_available(&self) -> bool {
         true
     }
+
+    /// Microseconds since the Unix epoch (UTC): journal and state
+    /// timestamps, `Task::now`. With std the system clock; a runtime without
+    /// std (embassy) brings its own, e.g. from SNTP.
+    #[cfg(feature = "std")]
+    fn wall_clock_micros(&self) -> i64 {
+        chrono::Utc::now().timestamp_micros()
+    }
+    #[cfg(not(feature = "std"))]
+    fn wall_clock_micros(&self) -> i64;
+
+    /// Fill `bytes` with random ones: message and task ids, `Task::random`.
+    /// With std the OS's; a runtime without std brings its own (a hardware RNG).
+    #[cfg(feature = "std")]
+    fn fill_random(&self, bytes: &mut [u8]) {
+        rand::RngCore::fill_bytes(&mut rand::thread_rng(), bytes)
+    }
+    #[cfg(not(feature = "std"))]
+    fn fill_random(&self, bytes: &mut [u8]);
 }
 
-static RUNTIME: OnceLock<Arc<dyn Runtime>> = OnceLock::new();
+static RUNTIME: spin::Once<Arc<dyn Runtime>> = spin::Once::new();
 
 /// Make `runtime` the process's runtime. Only the first call wins; later
 /// ones hand their runtime back.
 pub fn install(runtime: Arc<dyn Runtime>) -> Result<(), Arc<dyn Runtime>> {
-    RUNTIME.set(runtime)
+    let mut runtime = Some(runtime);
+    RUNTIME.call_once(|| runtime.take().expect("taken once"));
+    match runtime {
+        None => Ok(()),
+        Some(refused) => Err(refused),
+    }
 }
 
 /// The installed runtime, else the JS event loop (`web`, on wasm32), else
@@ -157,17 +183,17 @@ pub async fn sleep(duration: Duration) {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Elapsed;
 
-impl std::fmt::Display for Elapsed {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for Elapsed {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str("deadline elapsed")
     }
 }
 
-impl std::error::Error for Elapsed {}
+impl core::error::Error for Elapsed {}
 
 /// `future`, or [`Elapsed`] once `duration` passed.
 pub async fn timeout<F: Future>(duration: Duration, future: F) -> Result<F::Output, Elapsed> {
-    let future = std::pin::pin!(future);
+    let future = core::pin::pin!(future);
     match futures::future::select(future, current().sleep(duration)).await {
         futures::future::Either::Left((output, _)) => Ok(output),
         futures::future::Either::Right(_) => Err(Elapsed),
@@ -177,7 +203,7 @@ pub async fn timeout<F: Future>(duration: Duration, future: F) -> Result<F::Outp
 /// Let other tasks run.
 pub async fn yield_now() {
     let mut yielded = false;
-    std::future::poll_fn(|cx| {
+    core::future::poll_fn(|cx| {
         if yielded {
             Poll::Ready(())
         } else {
@@ -196,8 +222,12 @@ pub async fn spawn_blocking<R: Send + 'static>(
     let (tx, rx) = futures::channel::oneshot::channel();
     current()
         .spawn_blocking(Box::new(move || {
+            #[cfg(feature = "std")]
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(work))
                 .map_err(|panic| panic_message(&*panic));
+            // Without std a panic aborts: there is nothing to catch.
+            #[cfg(not(feature = "std"))]
+            let result: Result<R, String> = Ok(work());
             let _ = tx.send(result);
         }))
         .await;
@@ -205,12 +235,38 @@ pub async fn spawn_blocking<R: Send + 'static>(
         .unwrap_or_else(|_| Err("the blocking work never ran".into()))
 }
 
-pub(crate) fn panic_message(panic: &(dyn std::any::Any + Send)) -> String {
+#[cfg(feature = "std")]
+pub(crate) fn panic_message(panic: &(dyn core::any::Any + Send)) -> String {
     panic
         .downcast_ref::<&str>()
         .map(|s| s.to_string())
         .or_else(|| panic.downcast_ref::<String>().cloned())
         .unwrap_or_else(|| "unknown panic".into())
+}
+
+// ------------------------------------------------------- clock, randomness --
+
+/// The wall clock (UTC): std's, or the runtime's without std.
+pub fn now() -> chrono::DateTime<chrono::Utc> {
+    #[cfg(feature = "std")]
+    return chrono::Utc::now();
+    #[cfg(not(feature = "std"))]
+    chrono::DateTime::from_timestamp_micros(current().wall_clock_micros()).unwrap_or_default()
+}
+
+/// Random bytes: the OS's with std, the runtime's without.
+pub fn fill_random(bytes: &mut [u8]) {
+    #[cfg(feature = "std")]
+    rand::RngCore::fill_bytes(&mut rand::thread_rng(), bytes);
+    #[cfg(not(feature = "std"))]
+    current().fill_random(bytes);
+}
+
+/// A random (v4) uuid.
+pub fn uuid() -> uuid::Uuid {
+    let mut bytes = [0u8; 16];
+    fill_random(&mut bytes);
+    uuid::Builder::from_random_bytes(bytes).into_uuid()
 }
 
 // ------------------------------------------------------------- primitives --
@@ -243,7 +299,7 @@ impl FifoMutex {
     /// Wait for the lock, behind everyone who asked before.
     pub async fn lock_owned(self: Arc<Self>) -> FifoGuard {
         let ticket = {
-            let mut state = self.state.lock().expect("fifo lock");
+            let mut state = self.state.lock();
             if !state.locked && state.queue.is_empty() {
                 state.locked = true;
                 None
@@ -268,7 +324,7 @@ impl FifoMutex {
 
     fn unlock(&self) {
         let next = {
-            let mut state = self.state.lock().expect("fifo lock");
+            let mut state = self.state.lock();
             state.locked = false;
             state.queue.front().and_then(|(_, waker)| waker.clone())
         };
@@ -290,7 +346,7 @@ impl Future for Waiting {
     type Output = ();
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
-        let mut state = self.mutex.state.lock().expect("fifo lock");
+        let mut state = self.mutex.state.lock();
         let first = state.queue.front().map(|(t, _)| *t) == Some(self.ticket);
         if first && !state.locked {
             state.queue.pop_front();
@@ -312,7 +368,7 @@ impl Drop for Waiting {
             return;
         }
         let next = {
-            let mut state = self.mutex.state.lock().expect("fifo lock");
+            let mut state = self.mutex.state.lock();
             let was_first = state.queue.front().map(|(t, _)| *t) == Some(self.ticket);
             state.queue.retain(|(t, _)| *t != self.ticket);
             // The next in line may be free to go now.
@@ -346,7 +402,7 @@ impl Latch {
 
     pub fn open(&self) {
         self.open.store(true, Ordering::SeqCst);
-        let wakers = std::mem::take(&mut *self.wakers.lock().expect("latch lock"));
+        let wakers = core::mem::take(&mut *self.wakers.lock());
         for waker in wakers {
             waker.wake();
         }
@@ -357,7 +413,7 @@ impl Latch {
     }
 
     pub async fn wait(&self) {
-        std::future::poll_fn(|cx| {
+        core::future::poll_fn(|cx| {
             if self.is_open() {
                 return Poll::Ready(());
             }
@@ -388,7 +444,7 @@ impl Signal {
 
     pub fn raise(&self) {
         self.raised.store(true, Ordering::SeqCst);
-        let waker = self.waker.lock().expect("signal lock").take();
+        let waker = self.waker.lock().take();
         if let Some(waker) = waker {
             waker.wake();
         }
@@ -396,11 +452,11 @@ impl Signal {
 
     /// Wait for a raise (or take one that came before), and lower it.
     pub async fn wait(&self) {
-        std::future::poll_fn(|cx| {
+        core::future::poll_fn(|cx| {
             if self.raised.swap(false, Ordering::SeqCst) {
                 return Poll::Ready(());
             }
-            *self.waker.lock().expect("signal lock") = Some(cx.waker().clone());
+            *self.waker.lock() = Some(cx.waker().clone());
             if self.raised.swap(false, Ordering::SeqCst) {
                 Poll::Ready(())
             } else {
@@ -426,8 +482,8 @@ impl<T> Watch<T> {
     }
 
     pub fn set(&self, value: T) {
-        *self.value.lock().expect("watch lock") = value;
-        let wakers = std::mem::take(&mut *self.wakers.lock().expect("watch lock"));
+        *self.value.lock() = value;
+        let wakers = core::mem::take(&mut *self.wakers.lock());
         for waker in wakers {
             waker.wake();
         }
@@ -435,12 +491,12 @@ impl<T> Watch<T> {
 
     /// Wait until `ready(value)` holds.
     pub async fn wait_for(&self, mut ready: impl FnMut(&T) -> bool) {
-        std::future::poll_fn(|cx| {
-            if ready(&self.value.lock().expect("watch lock")) {
+        core::future::poll_fn(|cx| {
+            if ready(&self.value.lock()) {
                 return Poll::Ready(());
             }
             register(&self.wakers, cx.waker());
-            if ready(&self.value.lock().expect("watch lock")) {
+            if ready(&self.value.lock()) {
                 Poll::Ready(())
             } else {
                 Poll::Pending
@@ -452,7 +508,7 @@ impl<T> Watch<T> {
 
 /// Remember `waker` once (a task polled again keeps one entry).
 fn register(wakers: &Mutex<Vec<Waker>>, waker: &Waker) {
-    let mut wakers = wakers.lock().expect("wakers lock");
+    let mut wakers = wakers.lock();
     if !wakers.iter().any(|w| w.will_wake(waker)) {
         wakers.push(waker.clone());
     }
@@ -463,31 +519,56 @@ fn register(wakers: &Mutex<Vec<Waker>>, waker: &Waker) {
 /// A value visible to code polled inside [`TaskLocal::scope`], as tokio's
 /// task locals are, on any runtime: it is set while the scoped future is
 /// polled, so blocking work it hands to another thread does not see it.
-pub struct TaskLocal<T: 'static> {
-    slot: &'static std::thread::LocalKey<std::cell::RefCell<Option<T>>>,
+///
+/// With std it lives in a thread local; without std (one executor thread, as
+/// embassy runs) in a global slot.
+pub(crate) struct TaskLocal<T: 'static> {
+    #[cfg(feature = "std")]
+    slot: &'static std::thread::LocalKey<core::cell::RefCell<Option<T>>>,
+    #[cfg(not(feature = "std"))]
+    slot: spin::Mutex<Option<T>>,
 }
 
 impl<T: Clone + 'static> TaskLocal<T> {
-    #[doc(hidden)]
-    pub const fn new(slot: &'static std::thread::LocalKey<std::cell::RefCell<Option<T>>>) -> Self {
+    #[cfg(feature = "std")]
+    pub(crate) const fn new(
+        slot: &'static std::thread::LocalKey<core::cell::RefCell<Option<T>>>,
+    ) -> Self {
         Self { slot }
     }
 
+    #[cfg(not(feature = "std"))]
+    pub(crate) const fn new() -> Self {
+        Self {
+            slot: spin::Mutex::new(None),
+        }
+    }
+
+    fn replace(&'static self, value: Option<T>) -> Option<T> {
+        #[cfg(feature = "std")]
+        return self.slot.with(|s| s.replace(value));
+        #[cfg(not(feature = "std"))]
+        core::mem::replace(&mut *self.slot.lock(), value)
+    }
+
     /// Run `future` with `value` set.
-    pub async fn scope<F: Future>(&'static self, value: T, future: F) -> F::Output {
-        let mut future = std::pin::pin!(future);
-        std::future::poll_fn(move |cx| {
-            let previous = self.slot.with(|s| s.replace(Some(value.clone())));
+    pub(crate) async fn scope<F: Future>(&'static self, value: T, future: F) -> F::Output {
+        let mut future = core::pin::pin!(future);
+        core::future::poll_fn(move |cx| {
+            let previous = self.replace(Some(value.clone()));
             let poll = future.as_mut().poll(cx);
-            self.slot.with(|s| *s.borrow_mut() = previous);
+            self.replace(previous);
             poll
         })
         .await
     }
 
     /// The value of the scope being polled, if any.
-    pub fn get(&'static self) -> Option<T> {
-        self.slot.with(|s| s.borrow().clone())
+    pub(crate) fn get(&'static self) -> Option<T> {
+        #[cfg(feature = "std")]
+        return self.slot.with(|s| s.borrow().clone());
+        #[cfg(not(feature = "std"))]
+        self.slot.lock().clone()
     }
 }
 
@@ -505,7 +586,7 @@ mod tests {
             let (mutex, order) = (mutex.clone(), order.clone());
             handles.push(tokio::spawn(async move {
                 let _guard = mutex.lock_owned().await;
-                order.lock().unwrap().push(i);
+                order.lock().push(i);
                 yield_now().await;
             }));
             // Each has queued before the next one starts.
@@ -515,7 +596,7 @@ mod tests {
         for handle in handles {
             handle.await.unwrap();
         }
-        assert_eq!(*order.lock().unwrap(), (0..20).collect::<Vec<_>>());
+        assert_eq!(*order.lock(), (0..20).collect::<Vec<_>>());
     }
 
     #[tokio::test]

@@ -8,6 +8,8 @@
 
 extern crate alloc;
 
+pub mod agent;
+
 use alloc::string::String;
 use alloc::vec;
 use core::time::Duration;
