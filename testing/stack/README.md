@@ -1,7 +1,8 @@
 # The test stack
 
 A real lok and rekuest (with takt behind a Caddy gateway that sends `/agi`
-to takt, as a hub's does), plus their database, redis and RustFS,
+to takt, as a hub's does, over http and over https for `localhost` with
+Caddy's internal CA: `Stack::tls_root`), plus their database, redis and RustFS,
 for the SDK's end-to-end tests: nothing stands in for a server. Taken from the
 Python `fakts` package's integration stack (`tests/integration`).
 

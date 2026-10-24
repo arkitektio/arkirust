@@ -12,7 +12,8 @@ use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::sync::Arc;
 use std::time::Duration;
 
-use arkitekt_embassy::{serve_http, Agent, AgentOptions, Embassy, Entropy, NetHost};
+use arkitekt_embassy::conn::TlsBuffers;
+use arkitekt_embassy::{serve_http, Agent, AgentOptions, Embassy, Entropy, NetHost, Verify};
 use embassy_executor::Spawner;
 use embedded_io_adapters::futures_03::FromFutures;
 use embedded_nal_async::{AddrType, Dns, TcpConnect};
@@ -84,8 +85,20 @@ async fn add(a: i64, b: i64) -> i64 {
 }
 
 #[embassy_executor::task]
-async fn http() {
-    serve_http(&HOST, &HostTcp, &HostDns).await
+async fn http(verify: Verify) {
+    serve_http(&HOST, &HostTcp, &HostDns, verify).await
+}
+
+/// The DER inside a PEM certificate.
+fn der(pem: &str) -> Vec<u8> {
+    use base64::Engine;
+    let body: String = pem
+        .lines()
+        .filter(|line| !line.starts_with("-----"))
+        .collect();
+    base64::engine::general_purpose::STANDARD
+        .decode(body)
+        .expect("a PEM certificate")
 }
 
 #[embassy_executor::task]
@@ -112,7 +125,19 @@ async fn main(spawner: Spawner) {
     let runtime = Embassy::new(spawner.make_send(), HostEntropy);
     runtime.set_wall_clock(chrono_now_micros());
     let _ = rekuest::rt::install(Arc::new(runtime));
-    spawner.spawn(http().expect("the http task"));
+    // With the gateway's https port and CA, rekuest is reached over TLS.
+    let tls = match (
+        std::env::var("ARKIRUST_E2E_TLS_PORT"),
+        std::env::var("ARKIRUST_E2E_CA_PEM"),
+    ) {
+        (Ok(port), Ok(pem)) => Some((port.parse::<u16>().expect("a port"), der(&pem))),
+        _ => None,
+    };
+    let verify = match &tls {
+        Some((_, ca)) => Verify::Ca(ca.clone()),
+        None => Verify::Unverified,
+    };
+    spawner.spawn(http(verify.clone()).expect("the http task"));
 
     let mut manifest = Manifest::new("test_manifest", "0.1.0");
     manifest
@@ -135,11 +160,11 @@ async fn main(spawner: Spawner) {
 
     // rath through the same host, with the agent's token: an answer far
     // larger than the header buffer (the body streams into memory).
-    let graphql = rath::Rath::with_host(
-        Arc::new(&HOST),
-        alias.to_http_path("graphql"),
-        Arc::new(fakts.clone()),
-    );
+    let graphql_url = match &tls {
+        Some((port, _)) => format!("https://localhost:{port}/graphql"),
+        None => alias.to_http_path("graphql"),
+    };
+    let graphql = rath::Rath::with_host(Arc::new(&HOST), graphql_url, Arc::new(fakts.clone()));
     let schema = graphql
         .execute_raw(&serde_json::json!({"query": "{ __schema { types { name description } } }"}))
         .await
@@ -148,13 +173,40 @@ async fn main(spawner: Spawner) {
             std::process::exit(1)
         });
     let size = serde_json::to_string(&schema).map(|s| s.len()).unwrap_or(0);
-    if size <= arkitekt_embassy::http::HEADER_BUFFER {
+    // Larger than a fixed response buffer would hold: the body streams.
+    if size <= 8 * 1024 {
         eprintln!("embassy agent: the schema answer was only {size} bytes");
         std::process::exit(1);
     }
     println!("ARKIRUST_E2E_EMBASSY_RATH {size}");
 
-    let mut options = AgentOptions::new(alias.to_ws_path("agi"));
+    if let Some((port, ca)) = &tls {
+        // The right CA but the wrong name (the certificate is for localhost):
+        // refused, so the server really is checked.
+        let mut buffers = TlsBuffers::default();
+        let wrong = arkitekt_embassy::conn::open(
+            &HostTcp,
+            &HostDns,
+            true,
+            "127.0.0.1",
+            *port,
+            &Verify::Ca(ca.clone()),
+            &mut buffers,
+        )
+        .await;
+        if wrong.is_ok() {
+            eprintln!("embassy agent: TLS to 127.0.0.1 was accepted with a localhost certificate");
+            std::process::exit(1);
+        }
+        println!("ARKIRUST_E2E_EMBASSY_TLS_REFUSES_A_WRONG_NAME");
+    }
+
+    let endpoint = match &tls {
+        Some((port, _)) => format!("wss://localhost:{port}/agi"),
+        None => alias.to_ws_path("agi"),
+    };
+    let mut options = AgentOptions::new(endpoint);
+    options.verify = verify;
     options.name = Some("arkirust-e2e-embassy".into());
     options.policy.initial = Duration::from_millis(200);
     let mut registry = Registry::new();

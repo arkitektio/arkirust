@@ -1,7 +1,7 @@
 # arkitekt-embassy
 
 Arkitekt apps on [embassy](https://embassy.dev), without std: the rekuest
-agent, fakts' login and rath's GraphQL over embedded-nal-async TCP
+agent, fakts' login and rath's GraphQL over embedded-nal-async TCP and TLS
 (embassy-net's `TcpClient` and `DnsSocket` on a board).
 
 - `Embassy`: rekuest's runtime on an embassy executor; the board's RNG and
@@ -11,10 +11,12 @@ agent, fakts' login and rath's GraphQL over embedded-nal-async TCP
   channels, so their futures are `Send` although the sockets are not.
 - `Agent`: rekuest's driver over a websocket client of its own.
 
-Plain `http://` and `ws://` for now; `https://` and `wss://` are refused, so
-no hub behind TLS is reachable yet. reqwless 0.14 brings embedded-tls 0.18,
-which does not build against a released `der`; embedded-tls 0.19 does, so TLS
-needs a small HTTP/1.1 client of our own over it.
+`https://` and `wss://` are TLS 1.3 (embedded-tls 0.19, AES-128-GCM): the
+server's certificate chain and name are checked against the CA given as
+`Verify::Ca` (the root, DER, e.g. ISRG Root X1 for Let's Encrypt);
+`Verify::Unverified` skips that and logs it. HTTP is a small HTTP/1.1 client
+of its own (one exchange per connection).
 
-`checks/embassy` runs it on the host against the real stack (`real_stack`)
+`checks/embassy` runs it on the host against the real stack (`real_stack`,
+over https and wss, verified)
 and builds the board wiring for a Cortex-M4F (`board.rs`).

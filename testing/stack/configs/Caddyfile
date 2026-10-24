@@ -1,6 +1,14 @@
 # rekuest's address as a hub's gateway serves it: the agent protocol is
 # takt's (the agent socket at /agi, also /agent), everything else the server's.
-:80 {
+# Over plain http on :80, and over https on :443 for `localhost`, with a
+# certificate from Caddy's internal CA (the TLS clients' tests verify it
+# against that CA's root, /data/caddy/pki/authorities/local/root.crt).
+{
+	# Plain http stays plain: the http tests use it.
+	auto_https disable_redirects
+}
+
+(rekuest) {
 	@takt path /agent /agent/* /agi /agi/*
 	handle @takt {
 		reverse_proxy takt:8080
@@ -8,4 +16,13 @@
 	handle {
 		reverse_proxy rekuest:80
 	}
+}
+
+:80 {
+	import rekuest
+}
+
+https://localhost:443 {
+	tls internal
+	import rekuest
 }

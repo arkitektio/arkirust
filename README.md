@@ -421,17 +421,16 @@ struct.
 
 `arkitekt-embassy` (no_std, not on crates.io yet) is that for embassy:
 `Embassy` (the runtime; the board's RNG and clock come in through it),
-`NetHost` + `serve_http` (fakts' and rath's host: reqwless over
-embedded-nal-async, one network task, so the futures are `Send` although
+`NetHost` + `serve_http` (fakts' and rath's host: a small HTTP/1.1 client
+over embedded-nal-async, one network task, so the futures are `Send` although
 embassy-net's sockets are not) and `Agent` (the driver over its own websocket
-client). The e2e job runs it on the host against the real stack
-(`checks/embassy`'s `real_stack`, over async-io TCP); the board wiring over
-embassy-net builds for a Cortex-M4F. Plain `http://` and `ws://` only for now,
-so an embassy agent reaches no hub behind https yet: reqwless 0.14 brings
-embedded-tls 0.18, which does not build against a released `der`.
-embedded-tls 0.19 does (for a Cortex-M too), so TLS needs a small HTTP/1.1
-client of our own over it (the websocket handshake is most of one); how to
-verify the server's certificate there is the open question.
+client). `https://` and `wss://` are TLS 1.3 (embedded-tls), the server's
+chain and name checked against a CA the app gives (`Verify::Ca`, the root,
+DER). The e2e job runs it on the host against the real stack
+(`checks/embassy`'s `real_stack`, over async-io TCP): login, rath (over
+https) and the agent (over wss), verified against the test gateway's internal
+CA, and a wrong name refused; the board wiring over embassy-net builds for a
+Cortex-M4F.
 
 ## Development
 

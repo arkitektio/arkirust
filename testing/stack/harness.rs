@@ -1,6 +1,9 @@
 //! The test stack (`testing/stack`: lok, rekuest, takt) for the crates'
 //! end-to-end tests, which include it with `#[path]`.
 
+// Each test binary that includes it uses only some of it.
+#![allow(dead_code)]
+
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -30,13 +33,15 @@ pub struct Stack {
     env: Vec<(&'static str, String)>,
     pub lok: u16,
     pub rekuest: u16,
+    /// The same over https (Caddy's internal CA, see [`Stack::tls_root`]).
+    pub rekuest_tls: u16,
     _config: tempfile::TempDir,
 }
 
 impl Stack {
     pub fn up() -> Self {
-        let ports = free_ports(3);
-        let (lok, rekuest, rustfs) = (ports[0], ports[1], ports[2]);
+        let ports = free_ports(4);
+        let (lok, rekuest, rustfs, rekuest_tls) = (ports[0], ports[1], ports[2], ports[3]);
 
         // lok advertises rekuest's address and anchors its issuer to its own
         // port, which rekuest then trusts: the ports go into both configs
@@ -82,12 +87,14 @@ impl Stack {
             env: vec![
                 ("LOK_HOST_PORT", lok.to_string()),
                 ("REKUEST_HOST_PORT", rekuest.to_string()),
+                ("REKUEST_TLS_HOST_PORT", rekuest_tls.to_string()),
                 ("RUSTFS_HOST_PORT", rustfs.to_string()),
                 ("LOK_CONFIG_FILE", lok_config),
                 ("REKUEST_CONFIG_FILE", rekuest_config),
             ],
             lok,
             rekuest,
+            rekuest_tls,
             _config: config,
         };
         // A locally built tag has nothing to pull: keep going with the local image.
@@ -99,6 +106,31 @@ impl Stack {
             String::from_utf8_lossy(&up.stderr)
         );
         stack
+    }
+
+    /// The root certificate (PEM) of the gateway's internal CA, which signs
+    /// its `https://localhost` certificate. Waits until the gateway made it.
+    pub async fn tls_root(&self) -> String {
+        let deadline = Instant::now() + Duration::from_secs(60);
+        loop {
+            let out = self.compose(&[
+                "exec",
+                "-T",
+                "rekuest-gateway",
+                "cat",
+                "/data/caddy/pki/authorities/local/root.crt",
+            ]);
+            let pem = String::from_utf8_lossy(&out.stdout).into_owned();
+            if out.status.success() && pem.contains("BEGIN CERTIFICATE") {
+                return pem;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the gateway has no CA: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
     }
 
     pub fn compose(&self, args: &[&str]) -> Output {

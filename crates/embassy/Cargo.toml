@@ -1,6 +1,6 @@
 [package]
 name = "arkitekt-embassy"
-description = "Arkitekt apps on embassy: the rekuest agent, fakts' login and rath over embedded-nal-async TCP, without std (plain http/ws for now)"
+description = "Arkitekt apps on embassy: the rekuest agent, fakts' login and rath over embedded-nal-async TCP and TLS, without std"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -27,10 +27,8 @@ embassy-time = "0.5"
 embedded-io-async = "0.7"
 embedded-nal-async = "0.9"
 rand_core = "0.6"
-# No TLS yet: reqwless 0.14's embedded-tls (0.18) does not build against a
-# released `der` (0.19 does: TLS needs an HTTP client of our own over it).
-# https:// and wss:// are refused until then.
-reqwless = { version = "0.14", default-features = false }
+# TLS 1.3, certificates checked against a given CA (RSA and ECDSA chains).
+embedded-tls = { version = "0.19", default-features = false, features = ["rustpki", "p384", "rsa", "alloc"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 sha1 = { version = "0.10", default-features = false }
 spin = { version = "0.10", default-features = false, features = ["mutex", "spin_mutex"] }

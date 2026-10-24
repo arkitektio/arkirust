@@ -10,20 +10,21 @@
 //!
 //! `checks/embassy` runs it on the host against the real stack.
 //!
-//! Plain `http://` and `ws://` only for now, so no hub behind https is
-//! reachable yet: reqwless 0.14 brings embedded-tls 0.18, which does not
-//! build against a released `der`; embedded-tls 0.19 does, so TLS needs an
-//! HTTP/1.1 client of our own over it.
+//! `https://` and `wss://` are TLS 1.3 (embedded-tls), the server checked
+//! against a CA you give ([`conn::Verify`]).
 
 #![no_std]
 
 extern crate alloc;
 
 pub mod agent;
+pub mod conn;
 pub mod http;
+pub mod http1;
 pub mod runtime;
 pub mod ws;
 
 pub use crate::agent::{Agent, AgentError, AgentOptions};
+pub use crate::conn::Verify;
 pub use crate::http::{serve_http, NetHost};
 pub use crate::runtime::{Embassy, Entropy};

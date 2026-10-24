@@ -165,6 +165,9 @@ async fn an_embassy_agent_registers_and_the_server_acknowledges_its_journal() {
             format!("http://localhost:{}", stack.lok),
         )
         .env("ARKIRUST_E2E_KEY", MANDATE_KEY)
+        // rekuest over https and wss too, verified against the gateway's CA.
+        .env("ARKIRUST_E2E_TLS_PORT", stack.rekuest_tls.to_string())
+        .env("ARKIRUST_E2E_CA_PEM", stack.tls_root().await)
         .current_dir(checks)
         .output()
         .await
@@ -174,6 +177,7 @@ async fn an_embassy_agent_registers_and_the_server_acknowledges_its_journal() {
     assert!(
         output.status.success()
             && stdout.contains("ARKIRUST_E2E_EMBASSY_RATH")
+            && stdout.contains("ARKIRUST_E2E_EMBASSY_TLS_REFUSES_A_WRONG_NAME")
             && stdout.contains("ARKIRUST_E2E_EMBASSY_ACKED"),
         "the embassy agent did not get its journal acknowledged:\n{stdout}\n{stderr}"
     );

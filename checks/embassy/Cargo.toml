@@ -42,3 +42,4 @@ embedded-nal-async = "0.9"
 critical-section = { version = "1", features = ["std"] }
 rand = "0.8"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+base64 = "0.22"

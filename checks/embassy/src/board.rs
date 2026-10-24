@@ -5,7 +5,7 @@
 
 use alloc::sync::Arc;
 
-use arkitekt_embassy::{serve_http, Agent, AgentOptions, NetHost};
+use arkitekt_embassy::{serve_http, Agent, AgentOptions, NetHost, Verify};
 use embassy_net::dns::DnsSocket;
 use embassy_net::tcp::client::{TcpClient, TcpClientState};
 use embassy_net::Stack;
@@ -25,7 +25,8 @@ pub async fn http(stack: Stack<'static>) -> ! {
     let state: TcpClientState<2, 4096, 4096> = TcpClientState::new();
     let tcp = TcpClient::new(stack, &state);
     let dns = DnsSocket::new(stack);
-    serve_http(&HOST, &tcp, &dns).await
+    // A firmware checks the hub against its CA (the root of its chain).
+    serve_http(&HOST, &tcp, &dns, Verify::Unverified).await
 }
 
 /// Log in at `lok` with a mandate key and serve the app (the agent's own
