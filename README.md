@@ -185,7 +185,7 @@ tailnet). Build with the `mesh` feature and run with `ARKITEKT_MESH=1` (or
   sidecar's local HTTP proxy. This covers GraphQL, the agent websocket and S3.
 * `arkitekt-meshd` must be installed. Download it from the
   [arkitekt-mesh releases](https://github.com/arkitektio/arkitekt-mesh/releases)
-  or run `pip install arkitekt-meshd`. The app finds it through
+  or run `cargo install arkitekt-meshd`. The app finds it through
   `ARKITEKT_MESHD`, next to its own executable, in `~/.local/share/arkitekt/bin`,
   or on `PATH`. The Python client runs the same binary, or the same node
   in-process (`pip install arkitekt-mesh`).

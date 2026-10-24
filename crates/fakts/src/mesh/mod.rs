@@ -12,8 +12,9 @@
 //! against tailscale's own Go implementation. Two backends run it:
 //!
 //! - [`MeshBackend::Sidecar`] (the default): in a child process, the
-//!   `arkitekt-meshd` binary. The Python client can run the same binary the
-//!   same way (`pip install arkitekt-meshd`).
+//!   `arkitekt-meshd` binary (from the arkitekt-mesh GitHub releases, or
+//!   `cargo install arkitekt-meshd`). The Python client can run the same
+//!   binary the same way.
 //! - [`MeshBackend::Native`] (feature `mesh-native`): in this process, with no
 //!   extra binary. Only this backend offers the TURN relay and TCP forwards
 //!   (feature `mesh-relay`).

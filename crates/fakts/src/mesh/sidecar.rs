@@ -46,7 +46,7 @@ fn find_meshd(configured: Option<&Path>) -> Result<PathBuf> {
         .ok_or_else(|| {
             FaktsError::Mesh(
                 "`arkitekt-meshd` was not found; download it from \
-                 https://github.com/arkitektio/arkitekt-mesh/releases (or `pip install arkitekt-meshd`) \
+                 https://github.com/arkitektio/arkitekt-mesh/releases (or `cargo install arkitekt-meshd`) \
                  and put it on PATH, or set ARKITEKT_MESHD / MeshOptions::meshd"
                     .into(),
             )
