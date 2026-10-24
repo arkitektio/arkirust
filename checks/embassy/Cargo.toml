@@ -4,12 +4,16 @@
 # executor and journal on an embassy `rt::Runtime` (`run_agent`). `cargo run`
 # runs both on the host (platform-std executor, std time driver; rekuest
 # itself still without std); `cargo build --lib --target thumbv7em-none-eabihf`
-# proves they build for a microcontroller. Not a workspace member.
+# proves they build for a microcontroller (with `board`: arkitekt-embassy over
+# a real embassy-net stack). `cargo run --bin real_stack` logs in at a real
+# lok and registers with a real takt (rekuest's real_rekuest test runs it).
+# Not a workspace member.
 [package]
 name = "embassy-control"
 version = "0.0.0"
 edition = "2021"
 publish = false
+default-run = "embassy-control"
 
 [workspace]
 
@@ -20,8 +24,19 @@ embassy-sync = "0.8"
 embassy-futures = "0.1"
 embassy-executor = "0.10"
 spin = { version = "0.10", default-features = false, features = ["spin_mutex", "mutex"] }
-rekuest = { path = "../../crates/rekuest", default-features = false }
+rekuest = { path = "../../crates/rekuest", default-features = false, features = ["rath"] }
+fakts = { path = "../../crates/fakts", default-features = false }
+arkitekt-embassy = { path = "../../crates/embassy" }
+embassy-net = { version = "0.9", features = ["tcp", "dns", "proto-ipv4", "medium-ethernet"] }
 
 [target.'cfg(not(target_os = "none"))'.dependencies]
 embassy-time = { version = "0.5", features = ["std"] }
 embassy-executor = { version = "0.10", features = ["platform-std", "executor-thread"] }
+# The host's network for the real-stack run (src/bin/real_stack.rs): TCP
+# through async-io (its own reactor thread), as embedded-nal-async.
+async-io = "2"
+embedded-io-adapters = { version = "0.7", features = ["futures-03"] }
+embedded-nal-async = "0.9"
+critical-section = { version = "1", features = ["std"] }
+rand = "0.8"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

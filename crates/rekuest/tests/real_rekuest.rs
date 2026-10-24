@@ -10,7 +10,8 @@
 //! ```
 //!
 //! The second test runs the same from wasm: `checks/wasm`'s real-stack test
-//! under node (`wasm-pack test --node`, which must be installed).
+//! under node (`wasm-pack test --node`, which must be installed); the third
+//! from embassy: `checks/embassy`'s `real_stack` (no std below the binary).
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -145,5 +146,33 @@ async fn a_wasm_agent_registers_and_the_server_acknowledges_its_journal() {
     assert!(
         output.status.success() && stdout.contains("ARKIRUST_E2E_WASM_ACKED"),
         "the wasm agent did not get its journal acknowledged:\n{stdout}\n{stderr}"
+    );
+}
+
+#[tokio::test]
+#[ignore = "starts the docker test stack and runs checks/embassy's real_stack: run with --ignored"]
+async fn an_embassy_agent_registers_and_the_server_acknowledges_its_journal() {
+    fakts::install_crypto_provider();
+    let stack = Stack::up();
+    stack.wait_healthy("lok", stack.lok).await;
+    stack.wait_healthy("rekuest", stack.rekuest).await;
+
+    let checks = harness::stack_dir().join("../../checks/embassy");
+    let output = tokio::process::Command::new(env!("CARGO"))
+        .args(["run", "--quiet", "--bin", "real_stack"])
+        .env(
+            "ARKIRUST_E2E_LOK",
+            format!("http://localhost:{}", stack.lok),
+        )
+        .env("ARKIRUST_E2E_KEY", MANDATE_KEY)
+        .current_dir(checks)
+        .output()
+        .await
+        .expect("cargo runs");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success() && stdout.contains("ARKIRUST_E2E_EMBASSY_ACKED"),
+        "the embassy agent did not get its journal acknowledged:\n{stdout}\n{stderr}"
     );
 }

@@ -6,6 +6,7 @@ members = [
     "crates/rekuest",
     "crates/rekuest-protocol",
     "crates/rekuest-session",
+    "crates/embassy",
     "crates/rekuest-macros",
     "crates/arkitekt",
     "crates/mikro",

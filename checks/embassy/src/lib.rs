@@ -9,6 +9,7 @@
 extern crate alloc;
 
 pub mod agent;
+pub mod board;
 
 use alloc::string::String;
 use alloc::vec;

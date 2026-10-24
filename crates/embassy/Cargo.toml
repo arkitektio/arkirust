@@ -1,0 +1,36 @@
+[package]
+name = "arkitekt-embassy"
+description = "Arkitekt apps on embassy: the rekuest agent, fakts' login and rath over embedded-nal-async TCP, without std (plain http/ws for now)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "README.md"
+# Not on crates.io yet: a first publish needs the name reserved by hand.
+publish = false
+
+# no_std + alloc. The network is embedded-nal-async's (embassy-net's
+# TcpClient and DnsSocket on a board, any implementation on a host).
+[dependencies]
+rekuest = { workspace = true, features = ["rath"] }
+rekuest-session.workspace = true
+fakts.workspace = true
+async-trait.workspace = true
+base64 = { version = "0.22", default-features = false, features = ["alloc"] }
+embassy-executor = "0.10"
+embassy-futures = "0.1"
+embassy-sync = "0.8"
+embassy-time = "0.5"
+embedded-io-async = "0.7"
+embedded-nal-async = "0.9"
+rand_core = "0.6"
+# No TLS yet: reqwless 0.14's embedded-tls (0.18) does not build against a
+# released `der`. https:// and wss:// are refused until then.
+reqwless = { version = "0.14", default-features = false }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+sha1 = { version = "0.10", default-features = false }
+spin = { version = "0.10", default-features = false, features = ["mutex", "spin_mutex"] }
+tracing = { version = "0.1", default-features = false }

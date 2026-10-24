@@ -419,6 +419,17 @@ that is `fakts::http::Reqwest`), and rath sends through the same host; typed
 An embassy app implements `fakts::Host` and `rekuest::rt::Runtime` on one
 struct.
 
+`arkitekt-embassy` (no_std, not on crates.io yet) is that for embassy:
+`Embassy` (the runtime; the board's RNG and clock come in through it),
+`NetHost` + `serve_http` (fakts' and rath's host: reqwless over
+embedded-nal-async, one network task, so the futures are `Send` although
+embassy-net's sockets are not) and `Agent` (the driver over its own websocket
+client). The e2e job runs it on the host against the real stack
+(`checks/embassy`'s `real_stack`, over async-io TCP); the board wiring over
+embassy-net builds for a Cortex-M4F. Plain `http://` and `ws://` only for now:
+reqwless 0.14's TLS (embedded-tls 0.18) does not build against a released
+`der`, so `https://` and `wss://` are refused.
+
 ## Development
 
 ```sh

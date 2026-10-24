@@ -80,6 +80,7 @@ jobs:
           workspaces: |
             .
             checks/wasm
+            checks/embassy
       # The wasm agent's run (checks/wasm under node, from real_rekuest).
       - uses: actions/setup-node@v4
         with:
@@ -87,8 +88,9 @@ jobs:
       - uses: cargo-bins/cargo-binstall@main
       - run: cargo binstall -y --locked wasm-pack
       - run: cargo test -p fakts --test real_lok -- --ignored --nocapture
-      # A real agent registers with takt and gets its journal acknowledged,
-      # natively and from wasm under node (fakts over fetch, the JS WebSocket).
+      # A real agent registers with takt and gets its journal acknowledged:
+      # natively, from wasm under node (fakts over fetch, the JS WebSocket),
+      # and on embassy (arkitekt-embassy over the host's TCP, no std below).
       - run: cargo test -p rekuest --test real_rekuest -- --ignored --nocapture
 
   # The agent stack on the ESP32-S3 (checks/esp32s3): no ring, no signals,
@@ -145,6 +147,7 @@ jobs:
       - run: cargo clippy -p rekuest --no-default-features --target wasm32-unknown-unknown -- -D warnings
       # ... and without std, for a microcontroller (embassy).
       - run: cargo clippy -p rekuest -p fakts -p arkitekt-rath --no-default-features --features rekuest/rath --target thumbv7em-none-eabihf -- -D warnings
+      - run: cargo clippy -p arkitekt-embassy --target thumbv7em-none-eabihf -- -D warnings
       - run: cargo clippy -p rekuest -p fakts -p arkitekt-rath --no-default-features --features rekuest/web,rekuest/rath,fakts/std,arkitekt-rath/std --target wasm32-unknown-unknown -- -D warnings
       - run: wasm-pack test --node
         working-directory: checks/wasm
@@ -152,7 +155,8 @@ jobs:
         working-directory: checks/wasm
       - run: cargo run
         working-directory: checks/embassy
-      - run: cargo build --lib --target thumbv7em-none-eabihf
+      # The board wiring too (arkitekt-embassy over embassy-net).
+      - run: cargo clippy --lib --target thumbv7em-none-eabihf -- -D warnings
         working-directory: checks/embassy
       - run: cargo clippy --all-targets -- -D warnings
         working-directory: checks/embassy
