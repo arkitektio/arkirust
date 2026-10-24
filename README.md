@@ -358,7 +358,12 @@ features:
   stays in memory.
 
 Each crate names only the tokio features it uses, so a firmware can run the
-SDK on a current-thread runtime.
+SDK on a current-thread runtime. Two traits take what a target does
+differently: `fakts::FaktsStore` keeps the credential (a file by default,
+e.g. NVS on a board), and `rekuest::Connector` opens the connection the
+agent's websocket runs over (plain TCP by default; `HttpProxy` for the mesh
+sidecar; or a stream through a mesh node the app runs itself). TLS runs on
+top of either.
 
 ## Development
 

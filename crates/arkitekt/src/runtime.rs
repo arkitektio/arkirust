@@ -222,7 +222,9 @@ impl Runtime {
             .await
             .context("could not reach rekuest")?;
         let mut options = AgentOptions::new(alias.to_ws_path("agi"));
-        options.proxy = alias.proxy.clone();
+        if let Some(proxy) = &alias.proxy {
+            options.connector = Arc::new(rekuest::HttpProxy::new(proxy));
+        }
         options.name = Some(format!("{}:{}", self.app.identifier, self.app.version));
         options.description = self.app.description.clone();
         options.force = self.options.force;

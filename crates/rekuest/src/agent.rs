@@ -30,6 +30,7 @@ use crate::executor::Executor;
 use crate::journal::Journal;
 use crate::messages::{parse_to_agent, Assign, Envelope, FromAgent, ToAgent};
 use crate::outbox::Outbox;
+use crate::transport::{Connector, Direct};
 
 /// Close codes after which reconnecting is pointless.
 const CLOSE_BLOCKED: u16 = 4003;
@@ -99,8 +100,10 @@ pub struct AgentOptions {
     /// Take over from another connection of the same agent.
     pub force: bool,
     pub policy: ConnectionPolicy,
-    /// HTTP proxy to reach the endpoint through (the mesh sidecar).
-    pub proxy: Option<String>,
+    /// Opens the connection the websocket runs over: plain TCP by default,
+    /// [`HttpProxy`](crate::transport::HttpProxy) for the mesh sidecar's
+    /// proxy, or the app's own (e.g. through a mesh node it runs).
+    pub connector: Arc<dyn Connector>,
     /// The local SQLite journal (write-ahead: what the server has not
     /// acknowledged is re-sent after a restart). `None` keeps it in memory
     /// only. Needs the `wal` feature.
@@ -117,8 +120,9 @@ impl AgentOptions {
             description: None,
             force: false,
             policy: ConnectionPolicy::default(),
-            proxy: None,
-            journal_path: Some("agent_data.db".into()),
+            connector: Arc::new(Direct),
+            // Without the `wal` feature there is no SQLite journal to keep.
+            journal_path: cfg!(feature = "wal").then(|| "agent_data.db".into()),
             journal_retention: Some(Duration::from_secs(7 * 24 * 3600)),
         }
     }
@@ -384,7 +388,7 @@ impl Agent {
 
         let (ws, _) = match crate::transport::connect_ws(
             &self.options.endpoint_url,
-            self.options.proxy.as_deref(),
+            self.options.connector.as_ref(),
         )
         .await
         {

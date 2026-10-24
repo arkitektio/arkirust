@@ -56,6 +56,7 @@ pub use crate::ports::{widgets, Choice, Port, PortKind};
 pub use crate::shelf::{Memory, MemoryStructure, Shelf};
 pub use crate::state::{Mutation, Sink, StateError, StateHub, StateMut, StateRef, StateType};
 pub use crate::task::Task;
+pub use crate::transport::{Connector, Direct, HttpProxy};
 pub use rekuest_macros::{action, State};
 
 /// Everything `#[action]`-generated code refers to. Not a public API.

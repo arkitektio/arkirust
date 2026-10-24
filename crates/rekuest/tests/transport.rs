@@ -1,10 +1,12 @@
-//! `connect_ws` tunnels through an HTTP proxy with `CONNECT`.
+//! `connect_ws` runs over what a connector opens: a tunnel through an HTTP
+//! proxy with `CONNECT`, or a stream of the app's own.
 
+use std::io;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use futures::{SinkExt, StreamExt};
-use rekuest::transport::connect_ws;
+use rekuest::transport::{connect_ws, Connector, HttpProxy, Stream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::tungstenite::Message;
@@ -61,9 +63,12 @@ async fn tunnels_through_the_proxy() {
     let port = start_echo().await;
     let (proxy, count) = start_proxy().await;
 
-    let (mut ws, _) = connect_ws(&format!("ws://meshhub.test:{port}/agi"), Some(&proxy))
-        .await
-        .unwrap();
+    let (mut ws, _) = connect_ws(
+        &format!("ws://meshhub.test:{port}/agi"),
+        &HttpProxy::new(proxy),
+    )
+    .await
+    .unwrap();
     ws.send(Message::text("hello")).await.unwrap();
     let echoed = ws.next().await.unwrap().unwrap();
     assert_eq!(echoed, Message::text("hello"));
@@ -85,8 +90,39 @@ async fn refused_connect_is_an_error() {
             .await
             .unwrap();
     });
-    let err = connect_ws("ws://meshhub.test:80/agi", Some(&proxy))
-        .await
-        .unwrap_err();
+    let Err(err) = connect_ws("ws://meshhub.test:80/agi", &HttpProxy::new(proxy)).await else {
+        panic!("a refused CONNECT connected");
+    };
     assert!(err.to_string().contains("403"), "{err}");
+}
+
+/// Resolves every host itself, as a mesh node's `dial` does: here to the
+/// echo server on 127.0.0.1. Records what it was asked for.
+#[derive(Debug, Default)]
+struct OwnConnector {
+    asked: Mutex<Vec<(String, u16)>>,
+}
+
+#[async_trait::async_trait]
+impl Connector for OwnConnector {
+    async fn connect(&self, host: &str, port: u16) -> io::Result<Box<dyn Stream>> {
+        self.asked.lock().unwrap().push((host.to_owned(), port));
+        Ok(Box::new(TcpStream::connect(("127.0.0.1", port)).await?))
+    }
+}
+
+#[tokio::test]
+async fn runs_over_a_stream_of_the_apps_own() {
+    let port = start_echo().await;
+    let connector = OwnConnector::default();
+
+    let (mut ws, _) = connect_ws(&format!("ws://meshhub.test:{port}/agi"), &connector)
+        .await
+        .unwrap();
+    ws.send(Message::text("hello")).await.unwrap();
+    assert_eq!(ws.next().await.unwrap().unwrap(), Message::text("hello"));
+    assert_eq!(
+        *connector.asked.lock().unwrap(),
+        vec![("meshhub.test".to_owned(), port)]
+    );
 }
