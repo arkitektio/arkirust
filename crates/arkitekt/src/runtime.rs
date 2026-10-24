@@ -21,6 +21,9 @@ pub struct ConnectOptions {
     pub no_cache: bool,
     /// Where to cache fakts instead of the per-user state directory.
     pub cache_path: Option<PathBuf>,
+    /// Keep fakts somewhere other than a file (e.g. a firmware's NVS); wins
+    /// over `cache_path`.
+    pub store: Option<Arc<dyn fakts::FaktsStore>>,
     /// Override how the app is authorized (default: `FAKTS_MANDATE_KEY`, else
     /// `FAKTS_TOKEN`, else device code).
     pub grant: Option<Grant>,
@@ -50,6 +53,11 @@ impl ConnectOptions {
 
     pub fn no_cache(mut self, no_cache: bool) -> Self {
         self.no_cache = no_cache;
+        self
+    }
+
+    pub fn store(mut self, store: Arc<dyn fakts::FaktsStore>) -> Self {
+        self.store = Some(store);
         self
     }
 
@@ -129,6 +137,9 @@ impl Runtime {
             .allow_insecure_transport(options.allow_insecure_transport);
         if let Some(path) = &options.cache_path {
             builder = builder.cache_path(path);
+        }
+        if let Some(store) = &options.store {
+            builder = builder.store(store.clone());
         }
         if let Some(grant) = &options.grant {
             builder = builder.grant(grant.clone());

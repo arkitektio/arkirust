@@ -1,12 +1,67 @@
-//! On-disk cache of the active fakts, so an app authorizes once per machine.
+//! Where the active fakts are kept between runs, so an app authorizes once
+//! per machine: a file by default ([`FileStore`]), or whatever a target has
+//! instead (e.g. a firmware's NVS) through [`FaktsStore`].
 
 use std::path::{Path, PathBuf};
 
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::error::Result;
 use crate::models::{ActiveFakts, Manifest};
+
+/// Keeps the active fakts (credential, instances, mesh key) between runs.
+///
+/// `key` identifies the app and server they were granted for: a store hands
+/// back only what it saved under the same key. The fakts hold a live
+/// credential, so a store keeps them private to the app.
+#[async_trait]
+pub trait FaktsStore: Send + Sync {
+    /// What was saved under `key`; `None` when nothing (readable) was, or it
+    /// was saved under another key.
+    async fn load(&self, key: &str) -> Option<ActiveFakts>;
+    /// Save `fakts` under `key`, replacing what was there.
+    async fn save(&self, key: &str, fakts: &ActiveFakts) -> Result<()>;
+    /// Forget what was saved: the server refused its credential.
+    async fn clear(&self);
+}
+
+/// A JSON file, readable by its owner only.
+#[derive(Debug, Clone)]
+pub struct FileStore {
+    path: PathBuf,
+}
+
+impl FileStore {
+    pub fn new(path: impl Into<PathBuf>) -> Self {
+        Self { path: path.into() }
+    }
+
+    /// The per-user default for this app and server (see [`default_cache_path`]).
+    pub fn default_for(manifest: &Manifest, url: &str) -> Self {
+        Self::new(default_cache_path(manifest, url))
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+#[async_trait]
+impl FaktsStore for FileStore {
+    async fn load(&self, key: &str) -> Option<ActiveFakts> {
+        read(&self.path, key).await.map(|file| file.fakts)
+    }
+
+    async fn save(&self, key: &str, fakts: &ActiveFakts) -> Result<()> {
+        write(&self.path, key, fakts).await
+    }
+
+    async fn clear(&self) {
+        remove(&self.path).await;
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CacheFile {
@@ -41,7 +96,7 @@ pub fn cache_key(manifest: &Manifest, url: &str) -> String {
 }
 
 /// Read the cache, returning `None` when it is missing, unreadable or stale.
-pub async fn read(path: &Path, key: &str) -> Option<CacheFile> {
+async fn read(path: &Path, key: &str) -> Option<CacheFile> {
     let raw = tokio::fs::read(path).await.ok()?;
     let file: CacheFile = match serde_json::from_slice(&raw) {
         Ok(file) => file,
@@ -54,7 +109,7 @@ pub async fn read(path: &Path, key: &str) -> Option<CacheFile> {
 }
 
 /// Write the cache with owner-only permissions (0600 file, 0700 directory).
-pub async fn write(path: &Path, key: &str, fakts: &ActiveFakts) -> Result<()> {
+async fn write(path: &Path, key: &str, fakts: &ActiveFakts) -> Result<()> {
     if let Some(parent) = path.parent() {
         tokio::fs::create_dir_all(parent).await?;
         set_mode(parent, 0o700).await;
@@ -71,7 +126,7 @@ pub async fn write(path: &Path, key: &str, fakts: &ActiveFakts) -> Result<()> {
     Ok(())
 }
 
-pub async fn remove(path: &Path) {
+async fn remove(path: &Path) {
     let _ = tokio::fs::remove_file(path).await;
 }
 

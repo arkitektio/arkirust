@@ -5,8 +5,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use fakts::{
-    ClientRole, DeviceCodeOptions, Fakts, FaktsError, Grant, MandateKeyOptions, Manifest,
-    Requirement, TokenLoader,
+    ActiveFakts, ClientRole, DeviceCodeOptions, Fakts, FaktsError, FaktsStore, Grant,
+    MandateKeyOptions, Manifest, Requirement, TokenLoader,
 };
 use serde_json::json;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -319,6 +319,51 @@ async fn a_mandate_key_logs_in_and_renews_by_logging_in_again() {
     let active = fakts.active().await;
     assert_eq!(active.mesh.unwrap().ionscale_auth_key, "mesh-key");
     assert_eq!(fakts.get_alias("mikro").await.unwrap().id, "lan");
+}
+
+/// A store of the app's own (a firmware would keep it in NVS).
+#[derive(Default)]
+struct MemoryStore(Mutex<Option<(String, ActiveFakts)>>);
+
+#[async_trait::async_trait]
+impl FaktsStore for MemoryStore {
+    async fn load(&self, key: &str) -> Option<ActiveFakts> {
+        let saved = self.0.lock().unwrap();
+        saved
+            .as_ref()
+            .filter(|(k, _)| k == key)
+            .map(|(_, f)| f.clone())
+    }
+
+    async fn save(&self, key: &str, fakts: &ActiveFakts) -> fakts::Result<()> {
+        *self.0.lock().unwrap() = Some((key.to_owned(), fakts.clone()));
+        Ok(())
+    }
+
+    async fn clear(&self) {
+        *self.0.lock().unwrap() = None;
+    }
+}
+
+#[tokio::test]
+async fn an_apps_own_store_keeps_the_login_across_loads() {
+    // Each login is answered once: a second load that logged in again would fail.
+    let server = mount_mandate_server(1).await;
+    let store = Arc::new(MemoryStore::default());
+    let load = || {
+        Fakts::builder(server.uri(), manifest())
+            .grant(mandate_grant("mk-0123456789abcdefghijklmnopqrstuvwxyzABCD"))
+            .store(store.clone())
+            .load()
+    };
+
+    assert_eq!(load().await.unwrap().get_token().await.unwrap(), "access-1");
+    let again = load().await.unwrap();
+    assert_eq!(again.get_token().await.unwrap(), "access-1");
+
+    // A renewal is saved into it too.
+    assert_eq!(again.refresh_token("access-1").await.unwrap(), "access-2");
+    assert_eq!(load().await.unwrap().get_token().await.unwrap(), "access-2");
 }
 
 #[tokio::test]

@@ -12,7 +12,7 @@ use rand::RngCore;
 use reqwest::Client;
 use tokio::sync::Mutex;
 
-use crate::cache;
+use crate::cache::{self, FaktsStore, FileStore};
 use crate::error::{FaktsError, Result};
 use crate::grants::{self, DeviceCodeOptions, MandateKeyOptions};
 use crate::models::{ActiveFakts, Alias, Instance, Manifest, WellKnown};
@@ -48,7 +48,7 @@ pub struct FaktsBuilder {
     url: String,
     manifest: Manifest,
     grant: Grant,
-    cache_path: Option<PathBuf>,
+    store: Option<Arc<dyn FaktsStore>>,
     use_cache: bool,
     allow_insecure_transport: bool,
     http: Option<Client>,
@@ -77,7 +77,7 @@ impl FaktsBuilder {
             url: url.into(),
             manifest,
             grant,
-            cache_path: None,
+            store: None,
             use_cache: true,
             allow_insecure_transport: false,
             http: None,
@@ -94,11 +94,17 @@ impl FaktsBuilder {
 
     /// Use a specific cache file instead of the per-user state directory.
     pub fn cache_path(mut self, path: impl Into<PathBuf>) -> Self {
-        self.cache_path = Some(path.into());
+        self.store = Some(Arc::new(FileStore::new(path)));
         self
     }
 
-    /// Ignore (and do not write) the on-disk cache.
+    /// Keep the fakts somewhere other than a file, e.g. a firmware's NVS.
+    pub fn store(mut self, store: Arc<dyn FaktsStore>) -> Self {
+        self.store = Some(store);
+        self
+    }
+
+    /// Ignore (and do not write) the store.
     pub fn no_cache(mut self, no_cache: bool) -> Self {
         self.use_cache = !no_cache;
         self
@@ -171,14 +177,14 @@ impl FaktsBuilder {
         grants::check_transport(&well_known.token_endpoint, self.allow_insecure_transport)?;
 
         let cache_key = cache::cache_key(&self.manifest, &base_url);
-        let cache_path = self.use_cache.then(|| {
-            self.cache_path
-                .clone()
-                .unwrap_or_else(|| cache::default_cache_path(&self.manifest, &base_url))
+        let store = self.use_cache.then(|| {
+            self.store.clone().unwrap_or_else(|| {
+                Arc::new(FileStore::default_for(&self.manifest, &base_url)) as Arc<dyn FaktsStore>
+            })
         });
 
-        let cached = match &cache_path {
-            Some(path) => cache::read(path, &cache_key).await.map(|file| file.fakts),
+        let cached = match &store {
+            Some(store) => store.load(&cache_key).await,
             None => None,
         };
 
@@ -189,8 +195,8 @@ impl FaktsBuilder {
             }
             None => {
                 let active = run_grant(&http, &well_known, &self.manifest, &grant).await?;
-                if let Some(path) = &cache_path {
-                    cache::write(path, &cache_key, &active).await?;
+                if let Some(store) = &store {
+                    store.save(&cache_key, &active).await?;
                 }
                 active
             }
@@ -220,7 +226,7 @@ impl FaktsBuilder {
                     Grant::MandateKey(options) => Some(options),
                     _ => None,
                 },
-                cache_path,
+                store,
                 cache_key,
                 active: Mutex::new(active),
                 refresh_lock: Mutex::new(()),
@@ -380,7 +386,7 @@ struct Inner {
     manifest: Manifest,
     /// Set when the app logs in with a mandate key: renewing logs in again.
     mandate_key: Option<Arc<MandateKeyOptions>>,
-    cache_path: Option<PathBuf>,
+    store: Option<Arc<dyn FaktsStore>>,
     cache_key: String,
     active: Mutex<ActiveFakts>,
     refresh_lock: Mutex<()>,
@@ -605,17 +611,17 @@ impl Fakts {
     }
 
     async fn persist(&self, active: &ActiveFakts) -> Result<()> {
-        if let Some(path) = &self.inner.cache_path {
-            cache::write(path, &self.inner.cache_key, active).await?;
+        if let Some(store) = &self.inner.store {
+            store.save(&self.inner.cache_key, active).await?;
         }
         Ok(())
     }
 
-    /// Adopt a credential another process rotated into the shared cache.
+    /// Adopt a credential another process rotated into the shared store.
     async fn adopt_from_cache(&self, current_refresh: &str) -> Option<ActiveFakts> {
-        let path = self.inner.cache_path.as_ref()?;
-        let file = cache::read(path, &self.inner.cache_key).await?;
-        (file.fakts.auth.refresh_token.as_deref() != Some(current_refresh)).then_some(file.fakts)
+        let store = self.inner.store.as_ref()?;
+        let fakts = store.load(&self.inner.cache_key).await?;
+        (fakts.auth.refresh_token.as_deref() != Some(current_refresh)).then_some(fakts)
     }
 
     /// Log in with the mandate key again, for a fresh access token and
@@ -696,8 +702,8 @@ impl Fakts {
                             }
                         }
                         None => {
-                            if let Some(path) = &self.inner.cache_path {
-                                cache::remove(path).await;
+                            if let Some(store) = &self.inner.store {
+                                store.clear().await;
                             }
                             return Err(FaktsError::InvalidGrant(reason));
                         }

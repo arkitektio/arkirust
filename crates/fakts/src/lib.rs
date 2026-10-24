@@ -29,6 +29,7 @@ pub mod grants;
 pub mod mesh;
 mod models;
 
+pub use crate::cache::{FaktsStore, FileStore};
 pub use crate::error::{FaktsError, Result};
 pub use crate::fakts::{Fakts, FaktsBuilder, Grant, TokenLoader};
 pub use crate::grants::{
