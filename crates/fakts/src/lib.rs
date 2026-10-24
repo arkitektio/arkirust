@@ -27,6 +27,7 @@ mod fakts;
 pub mod grants;
 #[cfg(feature = "mesh")]
 pub mod mesh;
+pub mod mesh_join;
 mod models;
 
 pub use crate::cache::{FaktsStore, FileStore};
@@ -37,6 +38,7 @@ pub use crate::grants::{
 };
 #[cfg(feature = "mesh")]
 pub use crate::mesh::{MeshBackend, MeshOptions};
+pub use crate::mesh_join::{MeshJoin, MeshJoiner};
 pub use crate::models::*;
 
 /// Select the process-wide TLS provider (ring), once.

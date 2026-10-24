@@ -15,6 +15,7 @@ use tokio::sync::Mutex;
 use crate::cache::{self, FaktsStore, FileStore};
 use crate::error::{FaktsError, Result};
 use crate::grants::{self, DeviceCodeOptions, MandateKeyOptions};
+use crate::mesh_join::{MeshJoin, MeshJoiner};
 use crate::models::{ActiveFakts, Alias, Instance, Manifest, WellKnown};
 
 /// Anything that can hand out a bearer token and renew a stale one.
@@ -53,6 +54,7 @@ pub struct FaktsBuilder {
     allow_insecure_transport: bool,
     http: Option<Client>,
     mesh_proxy: Option<String>,
+    mesh_joiner: Option<Arc<dyn MeshJoiner>>,
     #[cfg(feature = "mesh")]
     mesh: Option<crate::mesh::MeshOptions>,
 }
@@ -82,6 +84,7 @@ impl FaktsBuilder {
             allow_insecure_transport: false,
             http: None,
             mesh_proxy: None,
+            mesh_joiner: None,
             #[cfg(feature = "mesh")]
             mesh: None,
         }
@@ -128,6 +131,15 @@ impl FaktsBuilder {
         self
     }
 
+    /// Join the deployment's mesh with a node the app runs itself: ask for a
+    /// mesh key when authorizing, hand it to `joiner`, and reach mesh aliases
+    /// through the proxy it returns. Ignored when
+    /// [`mesh_proxy`](Self::mesh_proxy) is set; wins over [`mesh`](Self::mesh).
+    pub fn mesh_joiner(mut self, joiner: Arc<dyn MeshJoiner>) -> Self {
+        self.mesh_joiner = Some(joiner);
+        self
+    }
+
     /// Join the deployment's mesh: ask for a mesh key when authorizing, then
     /// run a mesh node (the `arkitekt-meshd` sidecar, or our own client with
     /// [`MeshBackend::Native`](crate::mesh::MeshBackend)) and reach mesh
@@ -142,7 +154,10 @@ impl FaktsBuilder {
     /// The grant to run: with the mesh on, the first login also asks for a mesh key.
     fn effective_grant(&self) -> Grant {
         #[cfg(feature = "mesh")]
-        if self.mesh.is_some() && self.mesh_proxy.is_none() {
+        let joins = self.mesh_joiner.is_some() || self.mesh.is_some();
+        #[cfg(not(feature = "mesh"))]
+        let joins = self.mesh_joiner.is_some();
+        if joins && self.mesh_proxy.is_none() {
             match &self.grant {
                 Grant::DeviceCode(options) => {
                     return Grant::DeviceCode(Arc::new(DeviceCodeOptions {
@@ -204,9 +219,17 @@ impl FaktsBuilder {
             }
         };
 
+        let joined = match (&self.mesh_joiner, &self.mesh_proxy) {
+            (Some(joiner), None) => {
+                joiner
+                    .join(mesh_join(&active, &well_known, &self.manifest))
+                    .await?
+            }
+            _ => None,
+        };
         #[cfg(feature = "mesh")]
-        let mesh_node = match (&self.mesh, &self.mesh_proxy) {
-            (Some(options), None) => {
+        let mesh_node = match (&self.mesh, &self.mesh_proxy, &joined) {
+            (Some(options), None, None) if self.mesh_joiner.is_none() => {
                 start_mesh(options, &active, &well_known, &self.manifest, &cache_key).await?
             }
             _ => None,
@@ -214,9 +237,10 @@ impl FaktsBuilder {
         #[cfg(feature = "mesh")]
         let mesh_proxy = self
             .mesh_proxy
+            .or(joined)
             .or_else(|| mesh_node.as_ref().map(|n| n.proxy_url().to_owned()));
         #[cfg(not(feature = "mesh"))]
-        let mesh_proxy = self.mesh_proxy;
+        let mesh_proxy = self.mesh_proxy.or(joined);
 
         Ok(Fakts {
             inner: Arc::new(Inner {
@@ -238,6 +262,23 @@ impl FaktsBuilder {
                 mesh_node: mesh_node.map(Mutex::new),
             }),
         })
+    }
+}
+
+/// What a [`MeshJoiner`] gets: the key from this login (or the cached one),
+/// its coordination server, and the node's hostname.
+fn mesh_join(active: &ActiveFakts, well_known: &WellKnown, manifest: &Manifest) -> MeshJoin {
+    MeshJoin {
+        coord_url: active
+            .mesh
+            .as_ref()
+            .and_then(|claim| claim.ionscale_coord_url.clone())
+            .or_else(|| well_known.mesh_coord_url.clone()),
+        auth_key: active
+            .mesh
+            .as_ref()
+            .map(|claim| claim.ionscale_auth_key.clone()),
+        hostname: crate::mesh_join::default_hostname(manifest),
     }
 }
 
@@ -301,15 +342,10 @@ async fn start_mesh(
         }
     };
 
-    let hostname = options.hostname.clone().unwrap_or_else(|| {
-        let device = manifest.device_id.as_deref().unwrap_or_default();
-        let device: String = device
-            .chars()
-            .filter(char::is_ascii_alphanumeric)
-            .take(8)
-            .collect();
-        hostname_label(&format!("{}-{device}", manifest.identifier))
-    });
+    let hostname = options
+        .hostname
+        .clone()
+        .unwrap_or_else(|| crate::mesh_join::default_hostname(manifest));
     MeshNode::start(options, statedir, &hostname, join)
         .await
         .map(Some)

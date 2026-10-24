@@ -38,6 +38,9 @@ pub struct ConnectOptions {
     /// Reach mesh aliases through this running HTTP proxy (e.g. `arkitekt
     /// mesh proxy`); defaults to `$ARKITEKT_MESH_PROXY`.
     pub mesh_proxy: Option<String>,
+    /// Join the deployment's mesh with a node the app runs itself (e.g. a
+    /// firmware's); see [`fakts::MeshJoiner`]. Wins over `mesh`.
+    pub mesh_joiner: Option<Arc<dyn fakts::MeshJoiner>>,
     /// Join the deployment's mesh; `ARKITEKT_MESH=1` turns it on with the defaults
     /// (the `arkitekt-meshd` sidecar), `ARKITEKT_MESH=native` runs the node
     /// in-process instead (feature `mesh-native`).
@@ -68,6 +71,11 @@ impl ConnectOptions {
 
     pub fn mesh_proxy(mut self, proxy: impl Into<String>) -> Self {
         self.mesh_proxy = Some(proxy.into());
+        self
+    }
+
+    pub fn mesh_joiner(mut self, joiner: Arc<dyn fakts::MeshJoiner>) -> Self {
+        self.mesh_joiner = Some(joiner);
         self
     }
 
@@ -150,6 +158,9 @@ impl Runtime {
                 .filter(|p| !p.is_empty())
         }) {
             builder = builder.mesh_proxy(proxy);
+        }
+        if let Some(joiner) = &options.mesh_joiner {
+            builder = builder.mesh_joiner(joiner.clone());
         }
         #[cfg(feature = "mesh")]
         if let Some(mesh) = options.mesh.clone().or_else(|| {

@@ -28,6 +28,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::error::{FaktsError, Result};
+pub(crate) use crate::mesh_join::hostname_label;
 
 #[cfg(feature = "mesh-native")]
 mod native;
@@ -111,27 +112,6 @@ impl MeshOptions {
             MeshBackend::Native => "-native",
         };
         self.state_root().join(format!("{name}{suffix}"))
-    }
-}
-
-/// A DNS label: lowercase alphanumerics and dashes, at most 63 characters.
-pub(crate) fn hostname_label(raw: &str) -> String {
-    let mut label: String = raw
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() {
-                c.to_ascii_lowercase()
-            } else {
-                '-'
-            }
-        })
-        .collect();
-    label.truncate(63);
-    let label = label.trim_matches('-').to_owned();
-    if label.is_empty() {
-        "arkitekt-app".into()
-    } else {
-        label
     }
 }
 
@@ -261,14 +241,6 @@ impl MeshNode {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn hostnames_are_dns_labels() {
-        assert_eq!(hostname_label("My App_v2"), "my-app-v2");
-        assert_eq!(hostname_label("--x--"), "x");
-        assert_eq!(hostname_label("!!!"), "arkitekt-app");
-        assert_eq!(hostname_label(&"a".repeat(80)).len(), 63);
-    }
 
     #[test]
     fn backends_keep_separate_state() {

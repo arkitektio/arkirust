@@ -12,10 +12,13 @@
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use fakts::{Fakts, FaktsError, Grant, MandateKeyOptions, Manifest, Requirement, TokenLoader};
+use fakts::{
+    Fakts, FaktsError, Grant, MandateKeyOptions, Manifest, MeshJoin, MeshJoiner, Requirement,
+    TokenLoader,
+};
 
 /// The key lok's config seeds (`mandate_keys`), for the user `demo` in `demo`.
 const MANDATE_KEY: &str = "Y22joLbkjm4vtXMj_T4FD3U99Mb71pTFnUe-8KToAQI";
@@ -155,6 +158,18 @@ async fn login(stack: &Stack, key: &str) -> fakts::Result<Fakts> {
         .await
 }
 
+/// Remembers what fakts handed it, and stays off the mesh.
+#[derive(Default)]
+struct Recorder(Mutex<Vec<MeshJoin>>);
+
+#[async_trait::async_trait]
+impl MeshJoiner for Recorder {
+    async fn join(&self, join: MeshJoin) -> fakts::Result<Option<String>> {
+        self.0.lock().unwrap().push(join);
+        Ok(None)
+    }
+}
+
 #[tokio::test]
 #[ignore = "starts the docker test stack (testing/stack): run with --ignored"]
 async fn a_mandate_key_logs_in_at_lok_and_renews_as_the_same_client() {
@@ -186,6 +201,27 @@ async fn a_mandate_key_logs_in_at_lok_and_renews_as_the_same_client() {
     let first = fakts.get_token().await.unwrap();
     assert!(!fakts.refresh_token(&first).await.unwrap().is_empty());
     assert_eq!(fakts.active().await.auth.client_id, active.auth.client_id);
+
+    // An app with its own mesh node asks for a mesh key; this deployment has
+    // no mesh, so lok grants none, and the app stays direct.
+    let joiner = Arc::new(Recorder::default());
+    let fakts = Fakts::builder(format!("http://localhost:{}", stack.lok), manifest())
+        .grant(Grant::MandateKey(Arc::new(MandateKeyOptions::new(
+            MANDATE_KEY,
+        ))))
+        .no_cache(true)
+        .mesh_joiner(joiner.clone())
+        .load()
+        .await
+        .expect("lok logs the key in with a mesh key requested");
+    {
+        let joins = joiner.0.lock().unwrap();
+        assert_eq!(joins.len(), 1);
+        assert_eq!(joins[0].auth_key, None);
+        assert_eq!(joins[0].hostname, "test-manifest");
+    }
+    assert_eq!(fakts.mesh_proxy(), None);
+    assert_eq!(fakts.get_alias("rekuest").await.unwrap().proxy, None);
 
     // A key lok does not know is refused, as an invalid grant.
     let err = login(&stack, "an-unknown-key-of-the-right-length-0123456789")
