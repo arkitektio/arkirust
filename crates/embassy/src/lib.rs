@@ -10,9 +10,10 @@
 //!
 //! `checks/embassy` runs it on the host against the real stack.
 //!
-//! Plain `http://` and `ws://` only for now: TLS (every hub behind https)
-//! waits for an embedded TLS client that builds (reqwless 0.14's
-//! embedded-tls 0.18 does not, against a released `der`).
+//! Plain `http://` and `ws://` only for now, so no hub behind https is
+//! reachable yet: reqwless 0.14 brings embedded-tls 0.18, which does not
+//! build against a released `der`; embedded-tls 0.19 does, so TLS needs an
+//! HTTP/1.1 client of our own over it.
 
 #![no_std]
 

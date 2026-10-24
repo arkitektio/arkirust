@@ -29,9 +29,10 @@ use fakts::host::{Host, HostError, Method, Reply, Request};
 use reqwless::client::HttpClient;
 use reqwless::request::RequestBuilder;
 
-/// Headers and body of a response together must fit (token responses with
-/// many instances are a few KiB).
-pub const RESPONSE_BUFFER: usize = 32 * 1024;
+/// A response's headers must fit; its body is read into memory as it comes.
+pub const HEADER_BUFFER: usize = 8 * 1024;
+/// Refuse bodies larger than this.
+pub const MAX_BODY: usize = 16 * 1024 * 1024;
 /// When a request names no timeout.
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -95,9 +96,9 @@ impl Host for &'static NetHost {
 /// Make `host`'s exchanges over `tcp` and `dns`, forever. Run it as a task.
 ///
 /// Plain `http://` only for now: `https://` is answered with an error (the
-/// TLS client reqwless brings does not build yet).
+/// TLS reqwless 0.14 brings, embedded-tls 0.18, does not build).
 pub async fn serve_http<T: TcpConnect, D: Dns>(host: &'static NetHost, tcp: &T, dns: &D) -> ! {
-    let mut rx = vec![0u8; RESPONSE_BUFFER];
+    let mut rx = vec![0u8; HEADER_BUFFER];
     loop {
         let (id, request) = host.requests.receive().await;
         if request.url.starts_with("https://") {
@@ -143,6 +144,9 @@ async fn exchange<T: TcpConnect, D: Dns>(
     if let Some((content_type, _)) = &body {
         headers.push(("content-type", content_type));
     }
+    // One connection per exchange: a body without a length then ends where
+    // the connection does.
+    headers.push(("connection", "close"));
     let handle = client.request(method, &url).await.map_err(failed)?;
     let mut handle = handle.headers(&headers);
     // Redirects are never followed here: alias challenges need that, and
@@ -152,24 +156,32 @@ async fn exchange<T: TcpConnect, D: Dns>(
             let mut with_body = handle.body(bytes.as_slice());
             let response = with_body.send(rx).await.map_err(failed)?;
             let status = response.status.0;
-            let body = response
-                .body()
-                .read_to_end()
-                .await
-                .map_err(failed)?
-                .to_vec();
+            let body = read_body(response.body().reader()).await.map_err(failed)?;
             Ok(Reply { status, body })
         }
         None => {
             let response = handle.send(rx).await.map_err(failed)?;
             let status = response.status.0;
-            let body = response
-                .body()
-                .read_to_end()
-                .await
-                .map_err(failed)?
-                .to_vec();
+            let body = read_body(response.body().reader()).await.map_err(failed)?;
             Ok(Reply { status, body })
+        }
+    }
+}
+
+/// The whole body, however large (GraphQL answers can be many KiB).
+async fn read_body<R: embedded_io_async::Read<Error = reqwless::Error>>(
+    mut reader: R,
+) -> Result<Vec<u8>, reqwless::Error> {
+    let mut body = Vec::new();
+    let mut chunk = [0u8; 2048];
+    loop {
+        let n = reader.read(&mut chunk).await?;
+        if n == 0 {
+            return Ok(body);
+        }
+        body.extend_from_slice(&chunk[..n]);
+        if body.len() > MAX_BODY {
+            return Err(reqwless::Error::BufferTooSmall);
         }
     }
 }

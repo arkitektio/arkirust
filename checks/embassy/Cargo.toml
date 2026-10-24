@@ -26,6 +26,8 @@ embassy-executor = "0.10"
 spin = { version = "0.10", default-features = false, features = ["spin_mutex", "mutex"] }
 rekuest = { path = "../../crates/rekuest", default-features = false, features = ["rath"] }
 fakts = { path = "../../crates/fakts", default-features = false }
+rath = { path = "../../crates/rath", package = "arkitekt-rath", default-features = false }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
 arkitekt-embassy = { path = "../../crates/embassy" }
 embassy-net = { version = "0.9", features = ["tcp", "dns", "proto-ipv4", "medium-ethernet"] }
 

@@ -11,8 +11,10 @@ agent, fakts' login and rath's GraphQL over embedded-nal-async TCP
   channels, so their futures are `Send` although the sockets are not.
 - `Agent`: rekuest's driver over a websocket client of its own.
 
-Plain `http://` and `ws://` for now; `https://` and `wss://` are refused until
-an embedded TLS client builds (reqwless 0.14's embedded-tls 0.18 does not).
+Plain `http://` and `ws://` for now; `https://` and `wss://` are refused, so
+no hub behind TLS is reachable yet. reqwless 0.14 brings embedded-tls 0.18,
+which does not build against a released `der`; embedded-tls 0.19 does, so TLS
+needs a small HTTP/1.1 client of our own over it.
 
 `checks/embassy` runs it on the host against the real stack (`real_stack`)
 and builds the board wiring for a Cortex-M4F (`board.rs`).

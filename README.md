@@ -426,9 +426,12 @@ embedded-nal-async, one network task, so the futures are `Send` although
 embassy-net's sockets are not) and `Agent` (the driver over its own websocket
 client). The e2e job runs it on the host against the real stack
 (`checks/embassy`'s `real_stack`, over async-io TCP); the board wiring over
-embassy-net builds for a Cortex-M4F. Plain `http://` and `ws://` only for now:
-reqwless 0.14's TLS (embedded-tls 0.18) does not build against a released
-`der`, so `https://` and `wss://` are refused.
+embassy-net builds for a Cortex-M4F. Plain `http://` and `ws://` only for now,
+so an embassy agent reaches no hub behind https yet: reqwless 0.14 brings
+embedded-tls 0.18, which does not build against a released `der`.
+embedded-tls 0.19 does (for a Cortex-M too), so TLS needs a small HTTP/1.1
+client of our own over it (the websocket handshake is most of one); how to
+verify the server's certificate there is the open question.
 
 ## Development
 

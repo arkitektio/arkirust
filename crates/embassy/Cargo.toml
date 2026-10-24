@@ -28,7 +28,8 @@ embedded-io-async = "0.7"
 embedded-nal-async = "0.9"
 rand_core = "0.6"
 # No TLS yet: reqwless 0.14's embedded-tls (0.18) does not build against a
-# released `der`. https:// and wss:// are refused until then.
+# released `der` (0.19 does: TLS needs an HTTP client of our own over it).
+# https:// and wss:// are refused until then.
 reqwless = { version = "0.14", default-features = false }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 sha1 = { version = "0.10", default-features = false }

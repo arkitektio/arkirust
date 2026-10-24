@@ -172,7 +172,9 @@ async fn an_embassy_agent_registers_and_the_server_acknowledges_its_journal() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        output.status.success() && stdout.contains("ARKIRUST_E2E_EMBASSY_ACKED"),
+        output.status.success()
+            && stdout.contains("ARKIRUST_E2E_EMBASSY_RATH")
+            && stdout.contains("ARKIRUST_E2E_EMBASSY_ACKED"),
         "the embassy agent did not get its journal acknowledged:\n{stdout}\n{stderr}"
     );
 }

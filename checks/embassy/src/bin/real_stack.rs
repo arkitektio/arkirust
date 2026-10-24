@@ -133,6 +133,27 @@ async fn main(spawner: Spawner) {
         std::process::exit(1)
     });
 
+    // rath through the same host, with the agent's token: an answer far
+    // larger than the header buffer (the body streams into memory).
+    let graphql = rath::Rath::with_host(
+        Arc::new(&HOST),
+        alias.to_http_path("graphql"),
+        Arc::new(fakts.clone()),
+    );
+    let schema = graphql
+        .execute_raw(&serde_json::json!({"query": "{ __schema { types { name description } } }"}))
+        .await
+        .unwrap_or_else(|e| {
+            eprintln!("embassy agent: rath failed: {e}");
+            std::process::exit(1)
+        });
+    let size = serde_json::to_string(&schema).map(|s| s.len()).unwrap_or(0);
+    if size <= arkitekt_embassy::http::HEADER_BUFFER {
+        eprintln!("embassy agent: the schema answer was only {size} bytes");
+        std::process::exit(1);
+    }
+    println!("ARKIRUST_E2E_EMBASSY_RATH {size}");
+
     let mut options = AgentOptions::new(alias.to_ws_path("agi"));
     options.name = Some("arkirust-e2e-embassy".into());
     options.policy.initial = Duration::from_millis(200);
