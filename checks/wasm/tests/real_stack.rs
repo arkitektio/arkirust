@@ -62,6 +62,14 @@ async fn a_wasm_agent_registers_and_the_server_acknowledges_its_journal() {
         .await
         .expect("rekuest is reachable");
 
+    // rath over fetch, with the agent's token.
+    let graphql = rath::Rath::new(alias.to_http_path("graphql"), Arc::new(fakts.clone()));
+    let typename = graphql
+        .execute_raw(&serde_json::json!({"query": "{ __typename }"}))
+        .await
+        .expect("rath reaches rekuest's GraphQL");
+    assert_eq!(typename["__typename"], "Query");
+
     let mut options = AgentOptions::new(alias.to_ws_path("agi"));
     options.name = Some("arkirust-e2e-wasm".into());
     options.policy.initial = Duration::from_millis(200);
