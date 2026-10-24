@@ -26,7 +26,8 @@ categories = ["science", "api-bindings"]
 # (arkitekt's `ring` feature, or one the app installs).
 fakts = { path = "crates/fakts", version = "0.9.0", default-features = false }
 rath = { path = "crates/rath", version = "0.9.0", package = "arkitekt-rath" }
-rekuest = { path = "crates/rekuest", version = "0.9.0" }
+# Without its `wal` default (the SQLite journal, C): arkitekt's `wal` turns it on.
+rekuest = { path = "crates/rekuest", version = "0.9.0", default-features = false }
 rekuest-protocol = { path = "crates/rekuest-protocol", version = "0.9.0" }
 rekuest-macros = { path = "crates/rekuest-macros", version = "0.9.0" }
 arkitekt = { path = "crates/arkitekt", version = "0.9.0" }

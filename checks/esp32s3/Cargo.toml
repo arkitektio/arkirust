@@ -1,4 +1,4 @@
-# The SDK's agent stack (fakts, rath, rekuest) still compiles for the
+# The SDK's agent stack (fakts, rath, rekuest, arkitekt) still compiles for the
 # ESP32-S3 (ESP-IDF std, Xtensa): `cargo check` with Espressif's toolchain.
 # Never linked or flashed. Not a workspace member.
 [package]
@@ -15,3 +15,4 @@ publish = false
 fakts = { path = "../../crates/fakts", default-features = false }
 rath = { path = "../../crates/rath", package = "arkitekt-rath", default-features = false }
 rekuest = { path = "../../crates/rekuest", default-features = false }
+arkitekt = { path = "../../crates/arkitekt", default-features = false }

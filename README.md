@@ -354,8 +354,8 @@ features:
   `rustls_rustcrypto::provider().install_default()` on ESP-IDF, where ring's C
   does not build.
 * `signal` (`arkitekt`, on by default): stop on Ctrl-C.
-* `wal` (`rekuest`, on by default): the SQLite journal. Without it the journal
-  stays in memory.
+* `wal` (`arkitekt` and `rekuest`, on by default): the SQLite journal. Without
+  it the journal stays in memory.
 
 Each crate names only the tokio features it uses, so a firmware can run the
 SDK on a current-thread runtime. Two traits take what a target does

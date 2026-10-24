@@ -2,3 +2,4 @@
 pub use fakts::Fakts;
 pub use rath::Rath;
 pub use rekuest::Agent;
+pub use arkitekt::App;

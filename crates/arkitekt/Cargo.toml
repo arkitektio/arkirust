@@ -26,7 +26,10 @@ dirs.workspace = true
 axum = { workspace = true, optional = true }
 
 [features]
-default = ["signal", "ring"]
+default = ["signal", "ring", "wal"]
+# The agent's write-ahead journal in SQLite (`rekuest/wal`): unsent reports
+# survive a restart. Off on targets SQLite's C does not build for.
+wal = ["rekuest/wal"]
 # ring as the TLS crypto provider (see `fakts::install_crypto_provider`).
 ring = ["fakts/ring"]
 # Stop on Ctrl-C (`Runtime::run`, `serve`). Off on targets without signals.
