@@ -1,6 +1,83 @@
 # CHANGELOG
 
 
+## v0.8.0 (2026-10-24)
+
+### Chores
+
+- Move the mesh to arkitektio/arkitekt-mesh
+  ([`d496d15`](https://github.com/arkitektio/arkirust/commit/d496d1590cc374f43d4c3a07607e470b23efa130))
+
+arkitekt-mesh, arkitekt-meshd and the Python bindings now live (with their history) in their own
+  repository and are released from there. The workspace depends on the published arkitekt-mesh 0.7;
+  fakts, arkitekt and lovekit keep their mesh features unchanged.
+
+fakts' native mesh test runs the mesh's Go harness from a checkout of that repository
+  (ARKITEKT_MESH_HARNESS, or a sibling checkout); CI checks it out. The PyPI and meshd release
+  workflows, the mesh-only CI jobs, the RFCs and the mesh lab moved along.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+### Documentation
+
+- Arkitekt-meshd is not on PyPI; point to the releases and cargo install
+  ([`367e832`](https://github.com/arkitektio/arkirust/commit/367e832a86cfcf48ecfd814b49cf483d5237ba32))
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+### Features
+
+- Build the agent stack for the ESP32-S3
+  ([`6e601f7`](https://github.com/arkitektio/arkirust/commit/6e601f726a902c347cfba2c760da87d266b1273c))
+
+Each crate names only the tokio features it uses (the workspace sets none), the TLS crypto provider
+  is a feature instead of hard-wired ring, and Ctrl-C handling is behind arkitekt's `signal`
+  feature. fakts, rath and rekuest with default features off now compile for xtensa-esp32s3-espidf;
+  checks/esp32s3 and a CI job keep it that way, and the platform job checks the whole workspace on
+  every desktop OS.
+
+BREAKING CHANGE: fakts no longer installs ring unless its `ring` feature is on (arkitekt turns it on
+  by default; rath and rekuest leave the choice to the application). Code that builds a reqwest
+  client of its own must install a provider first (fakts::install_crypto_provider).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+- **fakts**: Log in with a mandate key
+  ([`6f4431e`](https://github.com/arkitektio/arkirust/commit/6f4431ee094e7474558e503a17786f47d74ce1cd))
+
+Grant::MandateKey (or FAKTS_MANDATE_KEY) logs the app in headless, as whoever granted the mandate,
+  with lok's urn:fakts:grant-type:mandate-key grant. There is no refresh token: renewing logs in
+  again. With the mesh on, the first login asks for a mesh key and renewals never do, so the node
+  keeps the one it joined with. A refused key is an InvalidGrant, and the key itself is never cached
+  or logged.
+
+BREAKING CHANGE: AuthFakt.refresh_token is an Option (None after a mandate-key login), and
+  ClientKind gains Mobile.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+### Testing
+
+- **fakts**: Log in with a mandate key at a real lok
+  ([`5d4d5a1`](https://github.com/arkitektio/arkirust/commit/5d4d5a16a6677e87c293374aa0279a1096cf2187))
+
+testing/stack is the Python fakts package's integration stack (lok, rekuest, takt, their database,
+  redis and RustFS); the test renders lok's config with free host ports, starts the stack under its
+  own compose project and tears it down with its volumes. The key lok's config seeds logs in, the
+  hub's rekuest answers its challenge for real, renewing is the same client, and an unknown key is
+  refused. Opt-in (--ignored) locally; its own CI job, which gates the release.
+
+The esp32s3 job installs its toolchain from the repository root: the check's rust-toolchain.toml
+  names the toolchain that step installs.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+### Breaking Changes
+
+- **fakts**: Authfakt.refresh_token is an Option (None after a mandate-key login), and ClientKind
+  gains Mobile.
+
+
 ## v0.7.0 (2026-10-23)
 
 ### Features
