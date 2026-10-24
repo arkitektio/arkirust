@@ -44,6 +44,11 @@ pub enum Grant {
     MandateKey(Arc<MandateKeyOptions>),
 }
 
+/// How long an alias may take to answer its challenge.
+const CHALLENGE_TIMEOUT: Duration = Duration::from_secs(3);
+/// The same through the mesh proxy.
+const MESH_CHALLENGE_TIMEOUT: Duration = Duration::from_secs(20);
+
 /// Configures and loads a [`Fakts`] handle.
 pub struct FaktsBuilder {
     url: String,
@@ -578,10 +583,17 @@ impl Fakts {
     }
 
     async fn resolve_alias(&self, key: &str, instance: &Instance) -> Result<Alias> {
+        // The first request to a mesh peer sets up its tunnel (a WireGuard
+        // handshake, through a DERP relay at first): seconds, on a board.
         let challenge_client = |proxy: Option<&str>| -> Result<Client> {
+            let timeout = if proxy.is_some() {
+                MESH_CHALLENGE_TIMEOUT
+            } else {
+                CHALLENGE_TIMEOUT
+            };
             let builder = Client::builder()
                 .redirect(reqwest::redirect::Policy::none())
-                .timeout(Duration::from_secs(3));
+                .timeout(timeout);
             Ok(match proxy {
                 Some(proxy) => builder.proxy(reqwest::Proxy::all(proxy)?),
                 None => builder,
