@@ -1,5 +1,8 @@
-//! Starts the Go harness (tests/harness): tailscale's test control server,
-//! DERP/STUN and a tsnet peer. Tests are skipped when `go` is missing.
+//! Starts the mesh's Go harness: tailscale's test control server, DERP/STUN
+//! and a tsnet peer. The harness lives in the arkitekt-mesh repository
+//! (`crates/mesh/tests/harness`, not shipped in the published crate): set
+//! `ARKITEKT_MESH_HARNESS` to it, or check that repository out next to this
+//! one. Tests are skipped without it or without `go`.
 
 #![allow(dead_code)]
 
@@ -30,16 +33,15 @@ pub struct Harness {
 fn binary() -> Option<PathBuf> {
     static BIN: OnceLock<Option<PathBuf>> = OnceLock::new();
     BIN.get_or_init(|| {
-        // Also used from other crates' tests (fakts), next to this one.
-        let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let Some(dir) = [
-            manifest.join("tests/harness"),
-            manifest.join("../mesh/tests/harness"),
-        ]
-        .into_iter()
-        .find(|d| d.join("harness_test.go").is_file()) else {
-            // Not shipped in the published crate.
-            eprintln!("skipping: the Go harness is not here");
+        let sibling = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../arkitekt-mesh/crates/mesh/tests/harness");
+        let Some(dir) = std::env::var_os("ARKITEKT_MESH_HARNESS")
+            .map(PathBuf::from)
+            .into_iter()
+            .chain([sibling])
+            .find(|d| d.join("harness_test.go").is_file())
+        else {
+            eprintln!("skipping: the mesh's Go harness is not here (set ARKITEKT_MESH_HARNESS)");
             return None;
         };
         let out = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("mesh-harness");

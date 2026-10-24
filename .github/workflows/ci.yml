@@ -15,11 +15,19 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-      # The mesh's end-to-end tests run tailscale's Go test servers and a tsnet peer.
+      # fakts' native mesh test runs the mesh's Go harness (tailscale's test
+      # control server and a tsnet peer), from the arkitekt-mesh repository.
+      - uses: actions/checkout@v4
+        with:
+          repository: arkitektio/arkitekt-mesh
+          # The tag of the arkitekt-mesh version in Cargo.lock.
+          ref: v0.7.0
+          path: arkitekt-mesh
+          sparse-checkout: crates/mesh/tests/harness
       - uses: actions/setup-go@v5
         with:
-          go-version-file: crates/mesh/tests/harness/go.mod
-          cache-dependency-path: crates/mesh/tests/harness/go.sum
+          go-version-file: arkitekt-mesh/crates/mesh/tests/harness/go.mod
+          cache-dependency-path: arkitekt-mesh/crates/mesh/tests/harness/go.sum
       # webrtc-sys (lovekit's `livekit` feature, in --all-features) needs
       # clang++ 21 or later (its prebuilt libwebrtc uses Chromium's libc++);
       # Ubuntu's is older, so take it from apt.llvm.org.
@@ -38,7 +46,9 @@ jobs:
       - run: cargo test --workspace
       # The mesh is feature-gated, so the plain run above skips it.
       - run: cargo test -p fakts --features mesh
-      - run: cargo test -p fakts --features mesh-native
+      - run: cargo test -p fakts --features mesh-relay
+        env:
+          ARKITEKT_MESH_HARNESS: ${{ github.workspace }}/arkitekt-mesh/crates/mesh/tests/harness
 
   # The native mesh on every platform meshd ships for.
   mesh-native:
@@ -51,19 +61,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo check -p arkitekt --features mesh-native
-      - run: cargo test -p arkitekt-mesh --lib
-
-  # What the ESP32 firmware (arkitektio/arkitekt-mesh-esp32) builds: the mesh
-  # without its default features (no ring, no udp, no tka-disable, no portmap).
-  mesh-embedded:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo check -p arkitekt-mesh --no-default-features
-      - run: cargo check -p arkitekt-mesh --no-default-features --features tokio
+      - run: cargo check -p arkitekt --features mesh-relay
 
   # Squash-merged PR titles become the commits semantic-release reads, so enforce Conventional Commits.
   pr-title:
@@ -79,10 +77,11 @@ jobs:
   # Every push to main that carries a `feat`, `fix` or `perf` (or a breaking
   # change) is a release, once the jobs above are green: semantic-release
   # (releaserc.toml) bumps the version every crate shares, commits, tags
-  # `vX.Y.Z` and creates the GitHub release; then the crates go to crates.io,
-  # the Python bindings to PyPI and the meshd binaries onto the release.
+  # `vX.Y.Z` and creates the GitHub release; then the crates go to crates.io.
+  # The mesh (and its Python bindings and meshd) is released from
+  # arkitektio/arkitekt-mesh.
   release:
-    needs: [test, mesh-native, mesh-embedded]
+    needs: [test, mesh-native]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository_owner == 'arkitektio'
     runs-on: ubuntu-latest
     concurrency:
@@ -91,7 +90,6 @@ jobs:
     permissions:
       contents: write
       id-token: write # crates.io trusted publishing
-      actions: write # starts release.yaml and meshd.yml
     steps:
       - uses: actions/checkout@v4
         with:
@@ -114,14 +112,3 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Only needed until trusted publishing is configured on crates.io.
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-      # `arkitekt-mesh` on PyPI (release.yaml) and the meshd binaries
-      # (meshd.yml), built on the release's tag. The tag was pushed with
-      # GITHUB_TOKEN, which starts no workflow; a dispatch does.
-      - name: Publish arkitekt-mesh to PyPI and the meshd binaries
-        if: steps.version.outputs.released == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.version.outputs.tag }}
-        run: |
-          gh workflow run release.yaml --repo "$GITHUB_REPOSITORY" --ref "$TAG"
-          gh workflow run meshd.yml --repo "$GITHUB_REPOSITORY" --ref "$TAG"

@@ -1,4 +1,4 @@
-//! The `arkitekt-meshd` sidecar: our mesh node (`crates/meshd`) in a child
+//! The `arkitekt-meshd` sidecar: our mesh node (arkitekt-mesh's `crates/meshd`) in a child
 //! process.
 //!
 //! The protocol: the auth key goes in `$ARKITEKT_MESH_AUTHKEY`, and meshd
@@ -46,7 +46,7 @@ fn find_meshd(configured: Option<&Path>) -> Result<PathBuf> {
         .ok_or_else(|| {
             FaktsError::Mesh(
                 "`arkitekt-meshd` was not found; download it from \
-                 https://github.com/arkitektio/arkirust/releases (or `pip install arkitekt-meshd`) \
+                 https://github.com/arkitektio/arkitekt-mesh/releases (or `pip install arkitekt-meshd`) \
                  and put it on PATH, or set ARKITEKT_MESHD / MeshOptions::meshd"
                     .into(),
             )

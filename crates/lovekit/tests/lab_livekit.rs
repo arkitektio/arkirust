@@ -3,11 +3,12 @@
 //! local forward (signaling) and their TURN relay (media, relay-only ICE);
 //! the subscriber must decode the publisher's frames.
 //!
-//! Needs the mesh lab with its LiveKit server:
+//! Needs the mesh lab (`testing/mesh-lab` in the arkitekt-mesh repository,
+//! checked out next to this one) with its LiveKit server:
 //!
 //! ```sh
-//! testing/mesh-lab/lab.sh up && testing/mesh-lab/lab.sh livekit
-//! eval "$(testing/mesh-lab/lab.sh env)"
+//! ../arkitekt-mesh/testing/mesh-lab/lab.sh up && ../arkitekt-mesh/testing/mesh-lab/lab.sh livekit
+//! eval "$(../arkitekt-mesh/testing/mesh-lab/lab.sh env)"
 //! cargo test -p arkitekt-lovekit --features livekit --test lab_livekit
 //! ```
 
@@ -93,7 +94,7 @@ async fn join(
 #[tokio::test(flavor = "multi_thread")]
 async fn video_streams_to_livekit_over_the_mesh_udp_tunnel() {
     let Some(env) = env() else {
-        eprintln!("skipping: the mesh lab's LiveKit is not up (testing/mesh-lab/lab.sh livekit)");
+        eprintln!("skipping: the mesh lab's LiveKit is not up (arkitekt-mesh's testing/mesh-lab/lab.sh livekit)");
         return;
     };
     let dir = tempfile::tempdir().unwrap();

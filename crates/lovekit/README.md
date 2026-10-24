@@ -33,8 +33,9 @@ mesh, `connect_room` joins it through the mesh node, the same way Python's
 
 This needs the native mesh backend (`ARKITEKT_MESH=native`), and no root or
 TUN device. The server must advertise its mesh address on its UDP port (see
-`testing/mesh-lab/livekit/livekit.yaml`).
+`testing/mesh-lab/livekit/livekit.yaml` in
+[arkitekt-mesh](https://github.com/arkitektio/arkitekt-mesh)).
 
-`testing/mesh-lab` has a LiveKit server that is only on the mesh
+arkitekt-mesh's `testing/mesh-lab` has a LiveKit server that is only on the mesh
 (`lab.sh livekit`). `tests/lab_livekit.rs` streams video through it and
 checks the subscriber decodes the frames.

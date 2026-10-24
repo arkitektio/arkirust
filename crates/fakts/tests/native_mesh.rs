@@ -3,7 +3,6 @@
 //! reaches a Go tsnet peer through the mesh alias.
 #![cfg(feature = "mesh-native")]
 
-#[path = "../../mesh/tests/common/mod.rs"]
 mod common;
 
 use std::sync::Arc;

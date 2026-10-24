@@ -65,8 +65,10 @@ mikro = { package = "arkitekt-mikro", version = "0.1" }
 
 All crates are released in lockstep from Conventional Commits: every push to
 main with a `feat`, `fix` or `perf` is a release (semantic-release, see
-`releaserc.toml`), which also publishes `arkitekt-mesh` to PyPI and attaches
-the `arkitekt-meshd` binaries to the GitHub release.
+`releaserc.toml`). The mesh client (`arkitekt-mesh`, `arkitekt-meshd` and its
+Python bindings) lives in its own repository,
+[arkitektio/arkitekt-mesh](https://github.com/arkitektio/arkitekt-mesh), and is
+released from there.
 
 ## Concepts
 
@@ -174,15 +176,16 @@ tailnet). Build with the `mesh` feature and run with `ARKITEKT_MESH=1` (or
 `ConnectOptions::mesh(..)`):
 
 * When authorizing, the app asks for a mesh key. The approver can allow it.
-* The app then runs [`arkitekt-meshd`](crates/meshd/) as a sidecar: a userspace
+* The app then runs [`arkitekt-meshd`](https://github.com/arkitektio/arkitekt-mesh/tree/main/crates/meshd) as a sidecar: a userspace
   tailnet node (our own client, below) that needs no root and runs next to a
   system tailscale. It joins
   the mesh once and keeps its node under `~/.local/state/arkitekt/mesh/`. It
   stops when the app exits.
 * Aliases the server marks as mesh-only are challenged and used through the
   sidecar's local HTTP proxy. This covers GraphQL, the agent websocket and S3.
-* `arkitekt-meshd` must be installed. Download it from the GitHub
-  releases or run `pip install arkitekt-meshd`. The app finds it through
+* `arkitekt-meshd` must be installed. Download it from the
+  [arkitekt-mesh releases](https://github.com/arkitektio/arkitekt-mesh/releases)
+  or run `pip install arkitekt-meshd`. The app finds it through
   `ARKITEKT_MESHD`, next to its own executable, in `~/.local/share/arkitekt/bin`,
   or on `PATH`. The Python client runs the same binary, or the same node
   in-process (`pip install arkitekt-mesh`).
@@ -191,24 +194,15 @@ tailnet). Build with the `mesh` feature and run with `ARKITEKT_MESH=1` (or
 
 With the `mesh-native` feature, `ARKITEKT_MESH=native` (or
 `MeshOptions { backend: MeshBackend::Native, .. }`) runs the node inside the
-app with [`arkitekt-mesh`](crates/mesh/). This is our own Tailscale-compatible
-client, written from the protocol up. It speaks:
-
-* ts2021 control (Noise, then HTTP/2), the protocol ionscale, headscale and
-  Tailscale serve. It is tested against tailscale's own test control server,
-  and against our ionskale fork in the local mesh lab (`testing/mesh-lab`),
-* WireGuard,
-* DERP relays,
-* disco path discovery with STUN, so peers get direct UDP paths when the
-  network allows and relay through DERP when it doesn't.
-
-You don't need a separate binary or a Go toolchain, and the app gets the same
-local proxy.
+app with [`arkitekt-mesh`](https://github.com/arkitektio/arkitekt-mesh), our
+own Tailscale-compatible client (ts2021 control, WireGuard, DERP and disco
+path discovery). You don't need a separate binary or a Go toolchain, and the
+app gets the same local proxy.
 
 The same limits apply to any new implementation:
 
 * It has not been audited. The protocols are tested against tailscale's own Go
-  implementation (see below), and the cryptographic primitives come from the
+  implementation, and the cryptographic primitives come from the
   RustCrypto crates.
 * It has no MagicDNS. Mesh hostnames are looked up in the node's netmap by
   hostname or FQDN.
@@ -228,36 +222,13 @@ ARKITEKT_TEST_MESH_PEER=http://<peer>/ \
   cargo test -p fakts --features mesh-native -- --ignored native
 ```
 
-The crate's end-to-end tests (`cargo test -p arkitekt-mesh`) run it against
-tailscale's test control server, a DERP/STUN server and a `tsnet` peer. They
-build these from `crates/mesh/tests/harness` and need Go; without Go they are
-skipped.
-
-For running the same stack on an ESP32, see
-[arkitektio/arkitekt-mesh-esp32](https://github.com/arkitektio/arkitekt-mesh-esp32).
-
-Go appears only in the tests, as the reference tailscale the client is
-checked against. The client used to run as a Go tsnet sidecar; that build is
-gone (see [RFC-1](docs/rfc1-rust-only-mesh.md)). What the Rust node lacked compared with tsnet
-is tracked as RFCs, each listing what is done and what is not:
-
-| RFC | What | Status |
-|---|---|---|
-| [RFC-2](docs/rfc2-ipv6-underlay.md) | Direct paths over IPv6 | Implemented |
-| [RFC-3](docs/rfc3-nat-port-mapping.md) | NAT port mapping | PCP and NAT-PMP; no UPnP |
-| [RFC-4](docs/rfc4-derp-home-by-latency.md) | Home DERP region by measured latency | Implemented |
-| [RFC-5](docs/rfc5-tailnet-lock.md) | Tailnet lock | Verifying node; no signing or fork resolution |
-| [RFC-6](docs/rfc6-cross-platform.md) | macOS and Windows | Tests green on all three; release signing open |
-| [RFC-7](docs/rfc7-production-and-throughput.md) | Production and throughput | Proposed |
-| [RFC-8](docs/rfc8-packet-filter.md) | Enforcing the tailnet's ACLs | Implemented |
-
-The same node runs:
-
-* **as the sidecar:** [`crates/meshd`](crates/meshd/) is `arkitekt-meshd`
-  (`--turn` and `--forward` also expose the relay and forwards).
-* **in Python:** [`crates/mesh-py`](crates/mesh-py/) is the `arkitekt-mesh`
-  package on PyPI. With it installed, Python fakts runs the node in-process
-  (`MeshOptions.backend`, `ARKITEKT_MESH=native`).
+How the client works, what it lacks compared with tailscale (the RFCs), its
+tests and the local mesh lab are documented in
+[arkitekt-mesh](https://github.com/arkitektio/arkitekt-mesh). fakts' own
+end-to-end test (`tests/native_mesh.rs`) runs the node against that
+repository's Go harness: check it out next to this one, or set
+`ARKITEKT_MESH_HARNESS` to its `crates/mesh/tests/harness`; without it (or
+without Go) the test is skipped.
 
 ### WebRTC media over the mesh (LiveKit)
 
