@@ -1,8 +1,9 @@
 //! The rekuest agent: registers the app over the `/agi` websocket and runs
 //! assignments as they arrive.
 //!
-//! The protocol is a [`rekuest_session::Session`], a sans-IO state machine;
-//! this is its tokio driver. Connection lifecycle:
+//! The protocol is a [`rekuest_session::Session`], a sans-IO state machine,
+//! and [`Driver`] wires it to the executor; this adds the tokio websocket.
+//! Connection lifecycle:
 //! 1. connect, send `REGISTER` (token + declaration), wait for `INIT`
 //! 2. re-send every numbered frame not covered by a `JOURNAL_ACK` (earlier
 //!    sessions' first), answer inquiries
@@ -15,23 +16,22 @@
 //!    going and report once the next connection is up. Reconnecting never
 //!    re-runs startup hooks.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use fakts::TokenLoader;
 use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
-use rekuest_session::{to_text, Event, Session, SessionConfig, SessionError};
+use rekuest_session::{Event, SessionConfig, SessionError};
 use tokio::time::Instant;
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::action::Registry;
 use crate::context::Context;
 use crate::definition::AgentDeclaration;
-use crate::emit::Emitter;
+use crate::driver::Driver;
 use crate::executor::Executor;
 use crate::journal::{Journal, JournalEntry};
-use crate::messages::{FromAgent, ToAgent};
 use crate::transport::{Connector, Direct, Ws};
 
 pub use rekuest_session::ConnectionPolicy;
@@ -102,50 +102,11 @@ impl AgentOptions {
     }
 }
 
-/// The session, shared by the driver and every task that reports into it.
-///
-/// Reports lock it from inside the journal's lock, so the driver never calls
-/// into the executor or the journal while holding it.
-struct Shared {
-    session: Mutex<Session>,
-    /// A report was queued: the driver sends it. A stored permit, so a
-    /// report made while the driver is busy is not missed.
-    wake: tokio::sync::Notify,
-}
-
-impl Shared {
-    fn new(session: Session) -> Self {
-        Self {
-            session: Mutex::new(session),
-            wake: tokio::sync::Notify::new(),
-        }
-    }
-
-    fn lock(&self) -> std::sync::MutexGuard<'_, Session> {
-        self.session.lock().expect("session lock")
-    }
-}
-
-impl Emitter for Shared {
-    fn emit(&self, message: FromAgent, _action_key: Option<&str>) {
-        self.lock().send(message);
-        self.wake.notify_one();
-    }
-
-    fn emit_entry(&self, message: FromAgent, _action_key: Option<&str>, entry: &JournalEntry) {
-        self.lock().send_entry(message, entry);
-        self.wake.notify_one();
-    }
-}
-
 /// Serves an app's actions to a rekuest server.
 pub struct Agent {
     options: AgentOptions,
-    executor: Executor,
+    driver: Driver,
     tokens: Arc<dyn TokenLoader>,
-    shared: Arc<Shared>,
-    /// Numbers every report of the session in front of the session's outbox.
-    journal: Arc<Journal>,
     #[cfg(feature = "wal")]
     store: Option<crate::store::HistoryStore>,
     /// Earlier sessions' unacknowledged entries are loaded once.
@@ -180,34 +141,21 @@ impl Agent {
             rekuest_session::Outbox::with_limit(rekuest_session::RETAIN_LIMIT, store.is_some());
         #[cfg(not(feature = "wal"))]
         let outbox = rekuest_session::Outbox::new();
-        let session = Session::with_outbox(
-            SessionConfig {
-                force: options.force,
-                policy: options.policy.clone(),
-                ..SessionConfig::new(session_id.clone(), rand::random())
-            },
-            outbox,
-        );
-        let shared = Arc::new(Shared::new(session));
         #[cfg(feature = "wal")]
         let sink = store
             .clone()
             .map(|s| Arc::new(s) as Arc<dyn crate::journal::JournalSink>);
         #[cfg(not(feature = "wal"))]
         let sink = None;
-        let journal = Arc::new(Journal::new(shared.clone(), sink, Some(session_id.clone())));
+        let config = SessionConfig {
+            force: options.force,
+            policy: options.policy.clone(),
+            ..SessionConfig::new(session_id, rand::random())
+        };
         Self {
             options,
-            executor: Executor::with_session(
-                registry,
-                ctx,
-                journal.clone(),
-                None,
-                Some(session_id),
-            ),
+            driver: Driver::new(registry, ctx, config, outbox, sink),
             tokens,
-            shared,
-            journal,
             #[cfg(feature = "wal")]
             store,
             backlog_loaded: Default::default(),
@@ -215,17 +163,16 @@ impl Agent {
     }
 
     pub fn executor(&self) -> &Executor {
-        &self.executor
+        self.driver.executor()
     }
 
     pub fn journal(&self) -> &Journal {
-        &self.journal
+        self.driver.journal()
     }
 
     /// What this agent registers.
     pub fn declaration(&self) -> AgentDeclaration {
-        self.executor
-            .registry()
+        self.driver
             .declaration(self.options.name.clone(), self.options.description.clone())
     }
 
@@ -237,35 +184,29 @@ impl Agent {
         let start = Instant::now();
         let now = || start.elapsed();
         // A run after an earlier one ended (or stopped while connecting) starts over.
-        self.shared.lock().restart(now());
+        self.driver.with_session(|session| session.restart(now()));
         let mut sink: Option<SplitSink<Ws, Message>> = None;
         let mut stream: Option<SplitStream<Ws>> = None;
-        let (activated_tx, mut activated) = tokio::sync::mpsc::unbounded_channel();
 
         loop {
-            let (events, frames, deadline) = {
-                let mut session = self.shared.lock();
-                session.handle_timeout(now());
-                let events: Vec<Event> = std::iter::from_fn(|| session.poll_event()).collect();
-                let frames: Vec<String> = std::iter::from_fn(|| session.poll_transmit())
-                    .map(|envelope| to_text(&envelope))
-                    .collect();
-                (events, frames, session.poll_timeout())
-            };
-            let busy = !events.is_empty() || !frames.is_empty();
+            let polled = self.driver.poll(now());
+            let busy = !polled.events.is_empty() || !polled.frames.is_empty();
 
             if let Some(open) = sink.as_mut() {
-                for frame in frames {
+                for frame in polled.frames {
                     if let Err(e) = open.send(Message::Text(frame)).await {
-                        self.shared
-                            .lock()
-                            .handle_disconnect(now(), &format!("send: {e}"));
+                        self.driver.with_session(|session| {
+                            session.handle_disconnect(now(), &format!("send: {e}"))
+                        });
                         break;
                     }
                 }
             }
 
-            for event in events {
+            for event in polled.events {
+                let Some(event) = self.driver.act(event) else {
+                    continue;
+                };
                 match event {
                     Event::Connect => {
                         let token = self.tokens.get_token().await?;
@@ -280,12 +221,16 @@ impl Agent {
                                 sink = Some(open);
                                 stream = Some(incoming);
                                 let declaration = self.declaration();
-                                self.shared.lock().connected(now(), token, declaration);
+                                self.driver.with_session(|session| {
+                                    session.connected(now(), token, declaration)
+                                });
                             }
-                            Err(e) => self.shared.lock().connect_failed(
-                                now(),
-                                &format!("connect to {}: {e}", self.options.endpoint_url),
-                            ),
+                            Err(e) => self.driver.with_session(|session| {
+                                session.connect_failed(
+                                    now(),
+                                    &format!("connect to {}: {e}", self.options.endpoint_url),
+                                )
+                            }),
                         }
                     }
                     Event::Close => {
@@ -294,40 +239,14 @@ impl Agent {
                             let _ = open.close().await;
                         }
                     }
-                    Event::Registered { agent, diagnostics } => {
-                        tracing::info!(
-                            "registered as agent {agent} with {} actions",
-                            self.executor.registry().len()
-                        );
-                        for d in diagnostics {
-                            tracing::warn!(
-                                "registration {}: {} ({}){}",
-                                d.level.as_deref().unwrap_or("WARNING"),
-                                d.message,
-                                d.code,
-                                d.path.map(|p| format!(" at {p}")).unwrap_or_default()
-                            );
-                        }
-                    }
                     Event::ReloadJournal => {
                         let entries = self.read_unacked().await;
-                        self.shared.lock().reloaded(entries);
+                        self.driver
+                            .with_session(|session| session.reloaded(entries));
                     }
-                    Event::Inquiries(tasks) => self.answer_inquiries(tasks),
-                    Event::Activate => {
-                        let executor = self.executor.clone();
-                        let done = activated_tx.clone();
-                        tokio::spawn(async move {
-                            let result = executor.activate().await.map_err(|e| format!("{e:#}"));
-                            let _ = done.send(result);
-                        });
-                    }
-                    Event::Message(message) => self.dispatch(message),
                     Event::Acked { session, pos } => self.record_ack(session, pos),
-                    Event::MalformedAssign { task, error } => {
-                        self.journal.emit(FromAgent::Critical { task, error }, None)
-                    }
                     Event::Ended(error) => return Err(error.into()),
+                    _ => {}
                 }
             }
             if busy {
@@ -342,29 +261,25 @@ impl Agent {
                 }
             };
             let sleep = async {
-                match deadline {
+                match polled.deadline {
                     Some(at) => tokio::time::sleep_until(start + at).await,
                     None => std::future::pending().await,
                 }
             };
             tokio::select! {
-                frame = incoming => {
-                    let mut session = self.shared.lock();
-                    match frame {
-                        None => session.handle_disconnect(now(), "stream ended"),
-                        Some(Err(e)) => session.handle_disconnect(now(), &format!("read: {e}")),
-                        Some(Ok(Message::Text(text))) => session.handle_text(now(), &text),
-                        Some(Ok(Message::Close(frame))) => {
-                            let (code, reason) = frame
-                                .map(|f| (u16::from(f.code), f.reason.to_string()))
-                                .unwrap_or((1005, String::new()));
-                            session.handle_close(now(), code, &reason);
-                        }
-                        Some(Ok(_)) => {}
+                frame = incoming => self.driver.with_session(|session| match frame {
+                    None => session.handle_disconnect(now(), "stream ended"),
+                    Some(Err(e)) => session.handle_disconnect(now(), &format!("read: {e}")),
+                    Some(Ok(Message::Text(text))) => session.handle_text(now(), &text),
+                    Some(Ok(Message::Close(frame))) => {
+                        let (code, reason) = frame
+                            .map(|f| (u16::from(f.code), f.reason.to_string()))
+                            .unwrap_or((1005, String::new()));
+                        session.handle_close(now(), code, &reason);
                     }
-                }
-                _ = self.shared.wake.notified() => {}
-                Some(result) = activated.recv() => self.shared.lock().activated(result),
+                    Some(Ok(_)) => {}
+                }),
+                _ = self.driver.woken() => {}
                 _ = sleep => {}
             }
         }
@@ -372,8 +287,8 @@ impl Agent {
 
     /// Run shutdown hooks and flush state changes and the journal.
     pub async fn shutdown(&self) {
-        self.executor.teardown().await;
-        self.journal.flush(crate::executor::FLUSH_TIMEOUT).await;
+        self.executor().teardown().await;
+        self.journal().flush(crate::executor::FLUSH_TIMEOUT).await;
     }
 
     /// Once: queue what earlier sessions of this agent never got acknowledged
@@ -387,14 +302,17 @@ impl Agent {
         }
         #[cfg(feature = "wal")]
         if let Some(store) = &self.store {
-            let session_id = self.shared.lock().session_id().to_owned();
+            let session_id = self
+                .driver
+                .with_session(|session| session.session_id().to_owned());
             match store.unacked_entries(Some(&session_id)).await {
                 Ok(entries) if !entries.is_empty() => {
                     tracing::info!(
                         "re-sending {} journal entries of earlier sessions",
                         entries.len()
                     );
-                    self.shared.lock().reloaded(Some(entries));
+                    self.driver
+                        .with_session(|session| session.reloaded(Some(entries)));
                 }
                 Ok(_) => {}
                 Err(e) => tracing::warn!("could not read the journal backlog: {e:#}"),
@@ -421,7 +339,7 @@ impl Agent {
     async fn read_unacked(&self) -> Option<Vec<JournalEntry>> {
         #[cfg(feature = "wal")]
         if let Some(store) = &self.store {
-            self.journal.flush(crate::executor::FLUSH_TIMEOUT).await;
+            self.journal().flush(crate::executor::FLUSH_TIMEOUT).await;
             return match store.unacked_entries(None).await {
                 Ok(entries) => Some(entries),
                 Err(e) => {
@@ -444,157 +362,5 @@ impl Agent {
         }
         #[cfg(not(feature = "wal"))]
         let _ = (session, pos);
-    }
-
-    fn dispatch(&self, message: ToAgent) {
-        match message {
-            ToAgent::Assign(assign) => self.executor.assign(*assign),
-            ToAgent::Cancel { task } => self.executor.cancel(&task),
-            ToAgent::Interrupt { task } => self.executor.interrupt(&task),
-            ToAgent::Pause { task } => self.executor.pause(&task),
-            ToAgent::Resume { task, step } => self.executor.resume(&task, step),
-            ToAgent::Collect { drawers } => {
-                for drawer in drawers {
-                    self.executor.shelf().remove(&drawer);
-                }
-            }
-            ToAgent::Shelved { error: Some(e), .. } | ToAgent::Unshelved { error: Some(e), .. } => {
-                tracing::warn!("the server could not record a drawer: {e}")
-            }
-            other => tracing::debug!("ignoring {other:?}"),
-        }
-    }
-
-    fn answer_inquiries(&self, tasks: Vec<String>) {
-        for task in tasks {
-            if self.executor.is_running(&task) {
-                self.journal.emit(
-                    FromAgent::Progress {
-                        task,
-                        progress: None,
-                        message: Some("still running".into()),
-                    },
-                    None,
-                );
-            } else if !self.executor.has_finished(&task) {
-                // A predecessor's task: numbered, but with no task step.
-                self.journal.emit_unowned(
-                    FromAgent::Critical {
-                        task,
-                        error: "the agent restarted and lost this task".into(),
-                    },
-                    None,
-                );
-            }
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::messages::Envelope;
-
-    fn shared() -> (Arc<Shared>, Journal) {
-        let shared = Arc::new(Shared::new(Session::new(SessionConfig::new("s", 1))));
-        let journal = Journal::new(shared.clone(), None, Some("s".into()));
-        (shared, journal)
-    }
-
-    /// Connected and past INIT: reports go out.
-    fn live(shared: &Shared) {
-        let mut session = shared.lock();
-        session.handle_timeout(Duration::ZERO);
-        session.connected(
-            Duration::ZERO,
-            "t".into(),
-            serde_json::from_value(serde_json::json!({})).unwrap(),
-        );
-        session.handle_text(
-            Duration::ZERO,
-            r#"{"type":"INIT","id":"i","agent":"a","inquiries":[],"diagnostics":[]}"#,
-        );
-        session.poll_transmit();
-    }
-
-    fn drain(shared: &Shared) -> Vec<Envelope> {
-        let mut session = shared.lock();
-        std::iter::from_fn(|| session.poll_transmit()).collect()
-    }
-
-    fn log(task: &str) -> FromAgent {
-        FromAgent::Log {
-            task: task.into(),
-            message: "m".into(),
-            level: Default::default(),
-        }
-    }
-
-    #[test]
-    fn effects_are_numbered_and_sent_at_once() {
-        let (shared, journal) = shared();
-        live(&shared);
-        journal.emit(log("t"), None);
-        journal.emit(
-            FromAgent::Effect {
-                task: "t".into(),
-                effect: crate::messages::EffectKind::Now,
-                value: 1.5.into(),
-                key: None,
-            },
-            None,
-        );
-        let sent = drain(&shared);
-        assert_eq!((sent[1].pos, sent[1].task_step), (Some(2), Some(2)));
-        let json = serde_json::to_value(&sent[1]).unwrap();
-        assert_eq!(
-            (
-                json["type"].as_str(),
-                json["effect"].as_str(),
-                json["value"].as_f64()
-            ),
-            (Some("EFFECT"), Some("NOW"), Some(1.5))
-        );
-    }
-
-    #[test]
-    fn probes_and_requests_are_never_numbered_or_retained() {
-        let (shared, journal) = shared();
-        live(&shared);
-        journal.emit(log("p-1"), None);
-        journal.emit(FromAgent::Completed { task: "p-1".into() }, None);
-        journal.emit(
-            FromAgent::AssignRequest {
-                reference: None,
-                parent_step: Some(3),
-                call_key: None,
-                args: Default::default(),
-                action: Some("a".into()),
-                action_hash: None,
-                implementation: None,
-                agent: None,
-                interface: None,
-                parent: Some("t".into()),
-                dependency: None,
-                method: None,
-                resolution: None,
-                hooks: None,
-                capture: None,
-                step: None,
-                prompt: None,
-                state_requires: vec![],
-            },
-            None,
-        );
-        journal.emit(log("t"), None);
-        let sent = drain(&shared);
-        assert_eq!(
-            sent.iter()
-                .map(|e| (e.pos, e.task_step))
-                .collect::<Vec<_>>(),
-            [(None, None), (None, None), (None, None), (Some(1), Some(1))]
-        );
-        assert_eq!(sent[2].seq, None, "a request has no seq");
-        assert_eq!(shared.lock().outbox().retained_len(), 1);
     }
 }

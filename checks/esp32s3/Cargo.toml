@@ -14,5 +14,5 @@ publish = false
 # SQLite journal. A firmware installs a pure-Rust rustls provider instead.
 fakts = { path = "../../crates/fakts", default-features = false }
 rath = { path = "../../crates/rath", package = "arkitekt-rath", default-features = false }
-rekuest = { path = "../../crates/rekuest", default-features = false }
+rekuest = { path = "../../crates/rekuest", default-features = false, features = ["tokio", "rath"] }
 arkitekt = { path = "../../crates/arkitekt", default-features = false }

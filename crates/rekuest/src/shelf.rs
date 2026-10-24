@@ -23,10 +23,14 @@ use crate::ports::{Port, PortKind};
 
 type Stored = Arc<dyn Any + Send + Sync>;
 
-tokio::task_local! {
-    /// The task whose action is running (set by the executor around it).
-    static SHELVING: (String, TaskGate);
+std::thread_local! {
+    static SHELVING_SLOT: std::cell::RefCell<Option<(String, TaskGate)>> =
+        const { std::cell::RefCell::new(None) };
 }
+
+/// The task whose action is running (set by the executor around it).
+static SHELVING: crate::rt::TaskLocal<(String, TaskGate)> =
+    crate::rt::TaskLocal::new(&SHELVING_SLOT);
 
 /// Run `fut` (an action of `task`) so that what it shelves is attributed to
 /// `task`, and nothing is shelved once the task's gate is closed.
@@ -78,7 +82,7 @@ impl Shelf {
         label: Option<String>,
     ) -> String {
         let id = uuid::Uuid::new_v4().simple().to_string();
-        let owner = SHELVING.try_with(|owner| owner.clone()).ok();
+        let owner = SHELVING.get();
         let _pass = match &owner {
             Some((task, gate)) => match gate.enter() {
                 Some(pass) => Some(pass),

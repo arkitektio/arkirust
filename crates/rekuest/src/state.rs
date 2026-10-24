@@ -18,7 +18,6 @@ use indexmap::IndexMap;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::{Map, Value};
-use tokio::sync::mpsc;
 
 use crate::emit::Emitter;
 use crate::journal::TaskGate;
@@ -334,7 +333,7 @@ struct HubState {
     shrunk: IndexMap<String, Value>,
     /// Set when the session starts; changes before that are not published.
     emitter: Option<Arc<dyn Emitter>>,
-    sink: Option<mpsc::UnboundedSender<SinkWrite>>,
+    sink: Option<async_channel::Sender<SinkWrite>>,
 }
 
 /// Numbers and publishes changes. Publishing is synchronous, so a change is
@@ -344,8 +343,8 @@ pub(crate) struct HubInner {
     state: Mutex<HubState>,
     /// Sink writes queued but not yet done.
     pending: std::sync::atomic::AtomicUsize,
-    /// Woken whenever `pending` drops to zero.
-    drained: tokio::sync::Notify,
+    /// Set whenever `pending` drops to zero.
+    drained: crate::rt::Watch<()>,
 }
 
 impl HubInner {
@@ -415,7 +414,7 @@ impl HubInner {
         if let Some(tx) = &state.sink {
             self.pending
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            if tx.send(write).is_err() {
+            if tx.try_send(write).is_err() {
                 self.done();
             }
         }
@@ -427,7 +426,7 @@ impl HubInner {
             .fetch_sub(1, std::sync::atomic::Ordering::SeqCst)
             == 1
         {
-            self.drained.notify_waiters();
+            self.drained.set(());
         }
     }
 }
@@ -472,7 +471,7 @@ impl StateHub {
                     sink: None,
                 }),
                 pending: Default::default(),
-                drained: tokio::sync::Notify::new(),
+                drained: crate::rt::Watch::new(()),
             }),
         }
     }
@@ -588,10 +587,10 @@ impl StateHub {
         }
 
         let sink_tx = sink.map(|sink| {
-            let (tx, mut rx) = mpsc::unbounded_channel::<SinkWrite>();
+            let (tx, rx) = async_channel::unbounded::<SinkWrite>();
             let inner = self.inner.clone();
-            tokio::spawn(async move {
-                while let Some(write) = rx.recv().await {
+            crate::rt::spawn(async move {
+                while let Ok(write) = rx.recv().await {
                     let result = match &write {
                         SinkWrite::Snapshot {
                             session_id,
@@ -625,16 +624,11 @@ impl StateHub {
 
     /// Wait (bounded) until every change has been persisted.
     pub async fn flush(&self, timeout: std::time::Duration) {
-        let wait = async {
-            loop {
-                let drained = self.inner.drained.notified();
-                if self.inner.pending.load(std::sync::atomic::Ordering::SeqCst) == 0 {
-                    return;
-                }
-                drained.await;
-            }
-        };
-        if tokio::time::timeout(timeout, wait).await.is_err() {
+        let wait = self
+            .inner
+            .drained
+            .wait_for(|()| self.inner.pending.load(std::sync::atomic::Ordering::SeqCst) == 0);
+        if crate::rt::timeout(timeout, wait).await.is_err() {
             tracing::warn!("state history was still being persisted after {timeout:?}");
         }
     }

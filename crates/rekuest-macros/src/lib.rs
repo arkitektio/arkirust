@@ -637,7 +637,7 @@ fn expand_action(options: ActionOptions, mut function: ItemFn) -> syn::Result<To
         quote!(#fn_ident::call(#(#call_args),*).await)
     } else {
         quote! {
-            #p::tokio::task::spawn_blocking(move || #fn_ident::call(#(#call_args),*))
+            #p::rt::spawn_blocking(move || #fn_ident::call(#(#call_args),*))
                 .await
                 .map_err(|e| #p::ActionError::Critical(format!("the action panicked: {e}")))?
         }

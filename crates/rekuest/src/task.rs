@@ -3,17 +3,17 @@
 use std::sync::{Arc, Mutex};
 
 use serde_json::{Map, Value};
-use tokio::sync::Notify;
 
 use crate::emit::Emitter;
 use crate::journal::TaskGate;
 use crate::messages::{Assign, EffectKind, FromAgent, LogLevel};
+use crate::rt::Latch;
 use crate::state::{Mutation, StateError, StateHub, StateMut, StateRef, StateType};
 
 /// A pause armed on a task: the next pausepoint waits until it is released.
 #[derive(Default)]
 pub(crate) struct Break {
-    armed: Mutex<Option<Arc<Notify>>>,
+    armed: Mutex<Option<Arc<Latch>>>,
 }
 
 impl Break {
@@ -23,7 +23,7 @@ impl Break {
         if armed.is_some() {
             return false;
         }
-        *armed = Some(Arc::new(Notify::new()));
+        *armed = Some(Arc::new(Latch::new()));
         true
     }
 
@@ -34,14 +34,14 @@ impl Break {
         let Some(current) = armed.take() else {
             return false;
         };
-        current.notify_one();
+        current.open();
         if step {
-            *armed = Some(Arc::new(Notify::new()));
+            *armed = Some(Arc::new(Latch::new()));
         }
         true
     }
 
-    fn current(&self) -> Option<Arc<Notify>> {
+    fn current(&self) -> Option<Arc<Latch>> {
         self.armed.lock().expect("break lock").clone()
     }
 }
@@ -187,7 +187,7 @@ impl Task {
             message: None,
             details: None,
         });
-        armed.notified().await;
+        armed.wait().await;
         self.emit(FromAgent::Resumed {
             task: self.id.clone(),
         });
@@ -243,7 +243,7 @@ impl Task {
         let left = from_epoch_seconds(&value)
             .and_then(|until| (until - chrono::Utc::now()).to_std().ok())
             .unwrap_or_default();
-        tokio::time::sleep(left).await;
+        crate::rt::sleep(left).await;
     }
 
     /// A handle to change a state, holding this task's locks. Used by `#[action]`.

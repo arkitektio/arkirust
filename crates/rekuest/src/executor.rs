@@ -10,11 +10,11 @@ use std::panic::AssertUnwindSafe;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
+use crate::rt::{self, FifoMutex, TaskHandle};
 use futures::FutureExt;
 use indexmap::IndexMap;
 use serde::Serialize;
 use serde_json::Value;
-use tokio::task::AbortHandle;
 
 use crate::action::{ActionError, Concurrency, Registry};
 use crate::context::Context;
@@ -62,7 +62,7 @@ struct Managed {
     action_key: String,
     actor_id: String,
     brk: Arc<Break>,
-    abort: Option<AbortHandle>,
+    abort: Option<TaskHandle>,
     gate: TaskGate,
     /// Released by whoever reports the end, after reporting it.
     held: HeldLocks,
@@ -108,11 +108,13 @@ struct Inner {
     hub: Arc<StateHub>,
     locks: LockTable,
     shelf: Shelf,
-    serial: HashMap<String, Arc<tokio::sync::Mutex<()>>>,
+    serial: HashMap<String, Arc<FifoMutex>>,
     actor_ids: HashMap<String, String>,
     tasks: Mutex<Tasks>,
-    background: Mutex<Vec<AbortHandle>>,
-    activated: tokio::sync::OnceCell<()>,
+    background: Mutex<Vec<TaskHandle>>,
+    /// Activation runs once: whoever comes second waits for the first.
+    activating: Arc<FifoMutex>,
+    activated: std::sync::atomic::AtomicBool,
     /// The session to open when there is no sink to create one.
     session_id: Option<String>,
 }
@@ -156,7 +158,7 @@ impl Executor {
         let serial = registry
             .iter()
             .filter(|a| a.concurrency() == Concurrency::Serial)
-            .map(|a| (a.interface(), Arc::new(tokio::sync::Mutex::new(()))))
+            .map(|a| (a.interface(), Arc::new(FifoMutex::new())))
             .collect();
         let actor_ids = registry
             .iter()
@@ -182,7 +184,8 @@ impl Executor {
                 actor_ids,
                 tasks: Mutex::default(),
                 background: Mutex::default(),
-                activated: tokio::sync::OnceCell::new(),
+                activating: Arc::default(),
+                activated: Default::default(),
                 session_id,
             }),
         }
@@ -210,17 +213,26 @@ impl Executor {
     }
 
     pub fn is_activated(&self) -> bool {
-        self.inner.activated.initialized()
+        self.inner
+            .activated
+            .load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// Start the agent's session, once: run startup hooks, open the session
     /// (SESSION_INIT), then start background hooks. Later calls do nothing.
     pub async fn activate(&self) -> anyhow::Result<()> {
+        if self.is_activated() {
+            return Ok(());
+        }
+        let _once = self.inner.activating.clone().lock_owned().await;
+        if self.is_activated() {
+            return Ok(());
+        }
+        self.do_activate().await?;
         self.inner
             .activated
-            .get_or_try_init(|| self.do_activate())
-            .await
-            .map(|_| ())
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        Ok(())
     }
 
     async fn do_activate(&self) -> anyhow::Result<()> {
@@ -240,7 +252,7 @@ impl Executor {
             contexts: Arc::default(),
         };
         for hook in &inner.registry.hooks().startup {
-            tokio::time::timeout(HOOK_TIMEOUT, hook(startup.clone()))
+            rt::timeout(HOOK_TIMEOUT, hook(startup.clone()))
                 .await
                 .map_err(|_| {
                     anyhow::anyhow!("a startup hook took longer than {HOOK_TIMEOUT:?}")
@@ -267,14 +279,11 @@ impl Executor {
         let mut handles = inner.background.lock().expect("background lock");
         for hook in &inner.registry.hooks().background {
             let run = hook(background.clone());
-            handles.push(
-                tokio::spawn(async move {
-                    if let Err(e) = run.await {
-                        tracing::error!("a background hook failed: {e:#}");
-                    }
-                })
-                .abort_handle(),
-            );
+            handles.push(rt::spawn(async move {
+                if let Err(e) = run.await {
+                    tracing::error!("a background hook failed: {e:#}");
+                }
+            }));
         }
         Ok(())
     }
@@ -297,7 +306,7 @@ impl Executor {
                 hub: self.inner.hub.clone(),
             };
             for hook in self.inner.registry.hooks().shutdown.iter().rev() {
-                match tokio::time::timeout(HOOK_TIMEOUT, hook(shutdown.clone())).await {
+                match rt::timeout(HOOK_TIMEOUT, hook(shutdown.clone())).await {
                     Ok(Ok(())) => {}
                     Ok(Err(e)) => tracing::error!("a shutdown hook failed: {e:#}"),
                     Err(_) => tracing::error!("a shutdown hook took longer than {HOOK_TIMEOUT:?}"),
@@ -311,7 +320,7 @@ impl Executor {
                 loop {
                     match sink.is_caught_up_to(rev).await {
                         Ok(true) => return,
-                        Ok(false) => tokio::time::sleep(Duration::from_millis(50)).await,
+                        Ok(false) => rt::sleep(Duration::from_millis(50)).await,
                         Err(e) => {
                             tracing::warn!("could not check the sink: {e:#}");
                             return;
@@ -319,10 +328,7 @@ impl Executor {
                     }
                 }
             };
-            if tokio::time::timeout(FLUSH_TIMEOUT, caught_up)
-                .await
-                .is_err()
-            {
+            if rt::timeout(FLUSH_TIMEOUT, caught_up).await.is_err() {
                 tracing::warn!("the state sink did not catch up within {FLUSH_TIMEOUT:?}");
             }
         }
@@ -447,14 +453,13 @@ impl Executor {
                     code: Some(STATE_PRECONDITION.into()),
                 }
             } else {
-                let body = rath::with_task_token(
-                    assign.token.clone(),
-                    crate::shelf::shelving_for(
-                        id.clone(),
-                        gate.clone(),
-                        action.run(assign.args.clone(), this.context(), task),
-                    ),
+                let body = crate::shelf::shelving_for(
+                    id.clone(),
+                    gate.clone(),
+                    action.run(assign.args.clone(), this.context(), task),
                 );
+                #[cfg(feature = "rath")]
+                let body = rath::with_task_token(assign.token.clone(), body);
                 match AssertUnwindSafe(body).catch_unwind().await {
                     Ok(Ok(())) => FromAgent::Completed { task: id.clone() },
                     Ok(Err(ActionError::Failed(error))) => FromAgent::Failed {
@@ -486,9 +491,9 @@ impl Executor {
 
         // The lock is held across the spawn so the task cannot finish before
         // its abort handle is stored.
-        let handle = tokio::spawn(run);
+        let handle = rt::spawn(run);
         if let Some(managed) = tasks.managed.get_mut(&task_id) {
-            managed.abort = Some(handle.abort_handle());
+            managed.abort = Some(handle);
         }
     }
 

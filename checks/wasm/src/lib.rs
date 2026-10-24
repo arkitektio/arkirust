@@ -113,3 +113,106 @@ pub async fn run() -> Result<Rc<RefCell<FakeServer>>, SessionError> {
         }
     }
 }
+
+// ------------------------------------------------------- the real agent --
+
+use rekuest::driver::Driver;
+use rekuest::rt::{BoxFuture, Runtime};
+use rekuest::{action, Context, Registry};
+use rekuest_session::Outbox;
+
+/// rekuest's runtime on the JS event loop. Its futures are not `Send`; wasm
+/// has one thread, so wrapping them is sound.
+struct JsRuntime;
+
+impl Runtime for JsRuntime {
+    fn spawn(&self, future: BoxFuture) {
+        wasm_bindgen_futures::spawn_local(future);
+    }
+
+    fn sleep(&self, duration: Duration) -> BoxFuture {
+        let millis = duration.as_millis().min(u32::MAX as u128) as u32;
+        Box::pin(send_wrapper::SendWrapper::new(TimeoutFuture::new(millis)))
+    }
+}
+
+/// Hand `x` back
+#[action]
+async fn echo(x: i64) -> i64 {
+    x
+}
+
+/// The scripted scenario with the real agent: executor, journal, `#[action]`.
+pub async fn run_agent() -> Result<Rc<RefCell<FakeServer>>, SessionError> {
+    let _ = rekuest::rt::install(std::sync::Arc::new(JsRuntime));
+    let start = js_sys::Date::now();
+    let server = Rc::new(RefCell::new(FakeServer::scripted()));
+    let seed = (js_sys::Math::random() * u64::MAX as f64) as u64;
+    let mut registry = Registry::new();
+    registry.register(echo);
+    let driver = Driver::new(
+        registry,
+        Context::default(),
+        SessionConfig {
+            policy: ConnectionPolicy {
+                initial: Duration::from_millis(10),
+                ..Default::default()
+            },
+            ..SessionConfig::new("s", seed)
+        },
+        Outbox::new(),
+        None,
+    );
+    let mut socket: Option<Socket> = None;
+
+    loop {
+        let polled = driver.poll(now(start));
+        let busy = !polled.events.is_empty() || !polled.frames.is_empty();
+        if let Some(socket) = &socket {
+            for frame in polled.frames {
+                let _ = socket.to_server.unbounded_send(frame);
+            }
+        }
+        for event in polled.events {
+            match driver.act(event) {
+                Some(Event::Connect) => {
+                    socket = Some(connect(&server));
+                    let declaration = driver.declaration(Some("wasm-control".into()), None);
+                    driver.with_session(|s| s.connected(now(start), "token".into(), declaration));
+                }
+                Some(Event::Close) => socket = None,
+                Some(Event::ReloadJournal) => driver.with_session(|s| s.reloaded(None)),
+                Some(Event::Ended(error)) => return Err(error),
+                _ => {}
+            }
+        }
+        if server.borrow().done() {
+            return Ok(server);
+        }
+        if busy {
+            continue;
+        }
+
+        let wait = polled
+            .deadline
+            .map(|at| at.saturating_sub(now(start)))
+            .unwrap_or(Duration::from_secs(3600));
+        let timer = TimeoutFuture::new(wait.as_millis().min(u32::MAX as u128) as u32);
+        let woken = std::pin::pin!(driver.woken());
+        let quiet = select(timer, woken);
+        let Some(open) = socket.as_mut() else {
+            quiet.await;
+            continue;
+        };
+        match select(open.from_server.next(), quiet).await {
+            Either::Left((Some(text), _)) => {
+                driver.with_session(|s| s.handle_text(now(start), &text))
+            }
+            Either::Left((None, _)) => {
+                socket = None;
+                driver.with_session(|s| s.handle_disconnect(now(start), "dropped"));
+            }
+            Either::Right(_) => {}
+        }
+    }
+}

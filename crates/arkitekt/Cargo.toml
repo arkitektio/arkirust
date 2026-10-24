@@ -13,7 +13,8 @@ readme = "../../README.md"
 [dependencies]
 fakts.workspace = true
 rath.workspace = true
-rekuest.workspace = true
+# The tokio Agent, and task tokens on the GraphQL clients (rath).
+rekuest = { workspace = true, features = ["tokio", "rath"] }
 rekuest-macros.workspace = true
 anyhow.workspace = true
 async-trait.workspace = true

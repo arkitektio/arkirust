@@ -20,14 +20,17 @@
 extern crate self as rekuest;
 
 mod action;
+#[cfg(feature = "tokio")]
 pub mod agent;
 mod context;
+pub mod driver;
 mod emit;
 pub mod executor;
 mod hooks;
 pub mod journal;
 mod locks;
 mod port_type;
+pub mod rt;
 #[cfg(feature = "serve")]
 pub mod serve;
 pub mod shelf;
@@ -35,15 +38,18 @@ pub mod state;
 #[cfg(feature = "wal")]
 pub mod store;
 mod task;
+#[cfg(feature = "tokio")]
 pub mod transport;
 
 // The wire types live in `rekuest-protocol` (shared with servers); these paths stay.
 pub use rekuest_protocol::{definition, messages, ports};
 
 pub use crate::action::{Action, ActionError, Concurrency, Registry};
-pub use crate::agent::{Agent, AgentError, AgentOptions, ConnectionPolicy};
+#[cfg(feature = "tokio")]
+pub use crate::agent::{Agent, AgentError, AgentOptions};
 pub use crate::context::{Context, ContextBuilder, MissingClient};
 pub use crate::definition::{ActionKind, AgentDeclaration, Definition, Implementation};
+pub use crate::driver::Driver;
 pub use crate::emit::{Emitter, NullEmitter};
 pub use crate::executor::{Executor, StateView, TaskView};
 pub use crate::hooks::{Background, Shutdown, Startup};
@@ -55,15 +61,20 @@ pub use crate::ports::{widgets, Choice, Port, PortKind};
 pub use crate::shelf::{Memory, MemoryStructure, Shelf};
 pub use crate::state::{Mutation, Sink, StateError, StateHub, StateMut, StateRef, StateType};
 pub use crate::task::Task;
+#[cfg(feature = "tokio")]
 pub use crate::transport::{Connector, Direct, HttpProxy};
 pub use rekuest_macros::{action, State};
+pub use rekuest_session::ConnectionPolicy;
 
 /// Everything `#[action]`-generated code refers to. Not a public API.
 #[doc(hidden)]
 pub mod __private {
     pub use futures;
     pub use serde_json;
+    #[cfg(feature = "tokio")]
     pub use tokio;
+
+    pub use crate::rt;
 
     pub use crate::action::{Action, ActionError, Concurrency};
     pub use crate::context::Context;

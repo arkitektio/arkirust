@@ -11,8 +11,8 @@ categories.workspace = true
 readme = "../../README.md"
 
 [dependencies]
-fakts.workspace = true
-rath.workspace = true
+fakts = { workspace = true, optional = true }
+rath = { workspace = true, optional = true }
 rekuest-macros.workspace = true
 rekuest-protocol = { workspace = true, features = ["std"] }
 rekuest-session.workspace = true
@@ -28,18 +28,32 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["rt", "macros", "sync", "time", "net", "io-util"] }
-tokio-tungstenite.workspace = true
+# Runtime-agnostic waiting and channels; the runtime itself is `rt::Runtime`.
+async-channel = "2"
+tokio = { workspace = true, features = ["rt", "macros", "sync", "time", "net", "io-util"], optional = true }
+tokio-tungstenite = { workspace = true, optional = true }
 tracing.workspace = true
 uuid.workspace = true
 axum = { workspace = true, optional = true }
 rusqlite = { workspace = true, optional = true }
 reqwest = { workspace = true, optional = true }
 
+# wasm32-unknown-unknown: the clock, uuids and random bytes come from JS.
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }
+uuid = { workspace = true, features = ["js"] }
+chrono = { workspace = true, features = ["wasmbind"] }
+
 [features]
-default = ["wal"]
+default = ["wal", "tokio", "rath"]
+# tokio as the runtime (`rt::Tokio`) and the websocket `Agent` on it (with
+# fakts for its tokens). Without it, install a `rt::Runtime` and drive the
+# session yourself (`checks/wasm`).
+tokio = ["dep:tokio", "dep:tokio-tungstenite", "dep:fakts"]
+# Actions' GraphQL calls (rath) carry their task's token.
+rath = ["dep:rath"]
 # Keep the journal in a local SQLite file (write-ahead: unsent reports survive restarts).
-wal = ["dep:rusqlite"]
+wal = ["dep:rusqlite", "tokio"]
 # Serve an app over HTTP + websocket without a rekuest server (port of rekuest.contrib.fastapi).
 serve = ["wal", "dep:axum"]
 # AgentTestClient for testing served apps.

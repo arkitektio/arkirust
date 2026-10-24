@@ -8,14 +8,14 @@ use std::sync::{Arc, Mutex};
 
 use indexmap::IndexMap;
 use serde::Serialize;
-use tokio::sync::OwnedMutexGuard;
 
 use crate::emit::Emitter;
 use crate::journal::TaskGate;
 use crate::messages::FromAgent;
+use crate::rt::{FifoGuard, FifoMutex};
 
 struct Slot {
-    mutex: Arc<tokio::sync::Mutex<()>>,
+    mutex: Arc<FifoMutex>,
     holder: Mutex<Option<String>>,
 }
 
@@ -47,7 +47,7 @@ impl LockTable {
                     (
                         key,
                         Arc::new(Slot {
-                            mutex: Arc::new(tokio::sync::Mutex::new(())),
+                            mutex: Arc::new(FifoMutex::new()),
                             holder: Mutex::new(None),
                         }),
                     )
@@ -127,7 +127,7 @@ impl LockTable {
     }
 }
 
-type Held = Vec<(String, Arc<Slot>, OwnedMutexGuard<()>)>;
+type Held = Vec<(String, Arc<Slot>, FifoGuard)>;
 
 struct HeldInner(Held);
 

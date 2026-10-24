@@ -383,6 +383,20 @@ tokio; `checks/wasm` (wasm32, on node) and `checks/embassy` (on the host
 and built for a Cortex-M4F) drive it with a minimal driver each, and CI runs
 the same scripted scenario on all of them.
 
+Above the session, rekuest names no runtime either: the executor, journal,
+states and `#[action]` code spawn, sleep and wait through `rekuest::rt`
+(`Runtime`: spawn, sleep, blocking work), which is tokio with the `tokio`
+feature and whatever the app installs (`rt::install`) without it.
+`rekuest::Driver` is an agent without its socket (session + executor +
+journal); `Agent` is it with a tokio websocket, and `checks/wasm` runs a real
+`#[action]` through it on wasm32. Features of `rekuest`: `tokio` (the
+`Agent`, `transport`, fakts tokens) and `rath` (task tokens on GraphQL calls),
+both on by default and turned on by `arkitekt`; `wal` and `serve` need tokio.
+Action futures must be `Send` everywhere, so a browser action that holds a JS
+value across an `.await` wraps it (e.g. `send_wrapper`); wasm has one thread.
+Not yet without std (embassy): the executor still uses std's mutexes, maps
+and thread locals.
+
 ## Development
 
 ```sh

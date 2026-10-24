@@ -27,11 +27,11 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
+use crate::rt::{self, Watch};
 use async_trait::async_trait;
 use indexmap::IndexMap;
 use serde::Serialize;
 use serde_json::Value;
-use tokio::sync::{mpsc, watch};
 
 use crate::emit::Emitter;
 use crate::messages::FromAgent;
@@ -361,7 +361,7 @@ struct JournalState {
     finished: VecDeque<String>,
     /// The last step of each task.
     steps: std::collections::HashMap<String, u64>,
-    writer: Option<mpsc::UnboundedSender<Arc<JournalEntry>>>,
+    writer: Option<async_channel::Sender<Arc<JournalEntry>>>,
 }
 
 /// Numbers, records and hands on every message. See the module docs.
@@ -370,7 +370,7 @@ pub struct Journal {
     state: Mutex<JournalState>,
     sink: Option<Arc<dyn JournalSink>>,
     /// `(session, pos)` persisted so far.
-    durable: watch::Sender<(String, u64)>,
+    durable: Arc<Watch<(String, u64)>>,
 }
 
 impl std::fmt::Debug for Journal {
@@ -398,7 +398,7 @@ impl Journal {
                 ..Default::default()
             }),
             sink,
-            durable: watch::channel((String::new(), 0)).0,
+            durable: Arc::new(Watch::new((String::new(), 0))),
         }
     }
 
@@ -423,15 +423,9 @@ impl Journal {
         if self.sink.is_none() || pos == 0 {
             return true;
         }
-        let mut durable = self.durable.subscribe();
-        let reached = async move {
-            durable
-                .wait_for(|(s, p)| *s == session && *p >= pos)
-                .await
-                .is_ok()
-        };
-        match tokio::time::timeout(timeout, reached).await {
-            Ok(true) => true,
+        let reached = self.durable.wait_for(|(s, p)| *s == session && *p >= pos);
+        match rt::timeout(timeout, reached).await {
+            Ok(()) => true,
             _ => {
                 tracing::warn!("the journal was not persisted up to {pos} within {timeout:?}");
                 false
@@ -514,32 +508,32 @@ impl Journal {
     fn persist(&self, state: &mut JournalState, entry: Arc<JournalEntry>) {
         let Some(sink) = &self.sink else { return };
         if state.writer.is_none() {
-            let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            if !rt::available() {
                 tracing::warn!("no async runtime; the journal is not persisted");
                 return;
-            };
-            let (tx, rx) = mpsc::unbounded_channel();
-            runtime.spawn(write_loop(sink.clone(), rx, self.durable.clone()));
+            }
+            let (tx, rx) = async_channel::unbounded();
+            rt::spawn(write_loop(sink.clone(), rx, self.durable.clone()));
             state.writer = Some(tx);
         }
         if let Some(writer) = &state.writer {
-            let _ = writer.send(entry);
+            let _ = writer.try_send(entry);
         }
     }
 }
 
 async fn write_loop(
     sink: Arc<dyn JournalSink>,
-    mut rx: mpsc::UnboundedReceiver<Arc<JournalEntry>>,
-    durable: watch::Sender<(String, u64)>,
+    rx: async_channel::Receiver<Arc<JournalEntry>>,
+    durable: Arc<Watch<(String, u64)>>,
 ) {
     let mut carry: Option<Arc<JournalEntry>> = None;
     loop {
         let first = match carry.take() {
             Some(entry) => entry,
             None => match rx.recv().await {
-                Some(entry) => entry,
-                None => return,
+                Ok(entry) => entry,
+                Err(_) => return,
             },
         };
         let mut batch = vec![first];
@@ -565,10 +559,10 @@ async fn write_loop(
             }
             attempt = attempt.saturating_add(1);
             let backoff = Duration::from_millis(50u64 << attempt.min(6));
-            tokio::time::sleep(backoff).await;
+            rt::sleep(backoff).await;
         }
         let last = batch.last().expect("a batch is never empty");
-        durable.send_replace((last.session_id.clone(), last.pos));
+        durable.set((last.session_id.clone(), last.pos));
     }
 }
 
