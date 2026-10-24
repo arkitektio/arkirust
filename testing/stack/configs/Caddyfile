@@ -1,0 +1,11 @@
+# rekuest's address as a hub's gateway serves it: the agent protocol is
+# takt's (the agent socket at /agi, also /agent), everything else the server's.
+:80 {
+	@takt path /agent /agent/* /agi /agi/*
+	handle @takt {
+		reverse_proxy takt:8080
+	}
+	handle {
+		reverse_proxy rekuest:80
+	}
+}

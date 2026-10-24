@@ -14,6 +14,12 @@ authentikate:
   # honest, not permissive.
   audience: rekuest
   issuers:
+    # The tokens lok mints for logged-in apps: `iss` is lok's `oidc_issuer`,
+    # which carries the run's host port (rendered by the test harness).
+    - kind: rsa
+      iss: http://localhost:__LOK_HOST_PORT__
+      kid: lok-key-1
+      public_key: ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCsPZdNXnWMbEs1FrNwx5H9sye5ptMN8IoFCmDk3cB70TXh+JP+kyFLNCxJrofYb+Ydgr6NLtaWSCqUBX2qLzUB1aKz5megYszRBZVq4jvsAHnNE+yfwFbQlOQCMLHYhQZ5TBhUDBMkwxWyS6UA+Ox7NXjxC4GrEGbJxxm6cGMOZ6+z36j260VHKYo9Dgaaac1Q0bcOzpS8Em8wmqyyUP5YTDZSujzHwp+7sLronV7OmYa7YktHcRAVnKn0YFwn081iV9fYsfwoecYE4uLAT+JdI3V1fkC0clC0JRzt/EYz664Vw+kBTG94vzTi+NTLAkeR+AkYWpYPwoy42mZF7Ho/
     - kind: rsa
       iss: lok
       kid: lok-key-1
