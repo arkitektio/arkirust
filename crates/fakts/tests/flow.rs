@@ -1,10 +1,13 @@
 //! The fakts v2 flow against a mock server: discovery, device code, alias
-//! challenge, refresh rotation and cache reuse.
+//! challenge, refresh rotation and cache reuse, and the mandate-key login.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use fakts::{DeviceCodeOptions, Fakts, Grant, Manifest, Requirement, TokenLoader};
+use fakts::{
+    ClientRole, DeviceCodeOptions, Fakts, FaktsError, Grant, MandateKeyOptions, Manifest,
+    Requirement, TokenLoader,
+};
 use serde_json::json;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -226,6 +229,113 @@ async fn device_code_refresh_and_cache() {
         .unwrap();
     assert_eq!(again.get_token().await.unwrap(), "access-2");
     assert_eq!(prompts.lock().unwrap().len(), 1);
+}
+
+/// The token endpoint answering mandate-key logins: the first (asking for a
+/// mesh key) and one renewal (never asking), each `logins` times.
+async fn mount_mandate_server(logins: u64) -> MockServer {
+    let server = MockServer::start().await;
+    let uri = server.uri();
+    Mock::given(method("GET"))
+        .and(path("/.well-known/fakts"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "name": "test", "protocol_version": "2", "base_url": format!("{uri}/f/"),
+            "token_endpoint": format!("{uri}/token/"),
+        })))
+        .mount(&server)
+        .await;
+    let login = |access: &str| {
+        let mut response = token_response(&server, access, "unused");
+        response.as_object_mut().unwrap().remove("refresh_token");
+        response
+    };
+    let mut first = login("access-1");
+    first["mesh"] =
+        json!({"ionscale_auth_key": "mesh-key", "ionscale_coord_url": "https://mesh.test"});
+    for (request_auth_key, response) in [("true", first), ("false", login("access-2"))] {
+        Mock::given(method("POST"))
+            .and(path("/token/"))
+            .and(body_string_contains(
+                "grant_type=urn%3Afakts%3Agrant-type%3Amandate-key",
+            ))
+            .and(body_string_contains(
+                "key=mk-0123456789abcdefghijklmnopqrstuvwxyzABCD",
+            ))
+            .and(body_string_contains("requested_client_role=agent"))
+            .and(body_string_contains("requested_client_kind=development"))
+            .and(body_string_contains(format!(
+                "request_auth_key={request_auth_key}"
+            )))
+            .respond_with(ResponseTemplate::new(200).set_body_json(response))
+            .expect(logins)
+            .mount(&server)
+            .await;
+    }
+    Mock::given(method("GET"))
+        .and(path("/mikro/ht"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/token/"))
+        .and(body_string_contains(
+            "key=mk-revoked-0123456789abcdefghijklmnopqrstuv",
+        ))
+        .respond_with(ResponseTemplate::new(400).set_body_json(
+            json!({"error": "invalid_grant", "error_description": "Unknown or revoked key."}),
+        ))
+        .mount(&server)
+        .await;
+    server
+}
+
+fn mandate_grant(key: &str) -> Grant {
+    Grant::MandateKey(Arc::new(MandateKeyOptions {
+        client_role: ClientRole::Agent,
+        request_auth_key: true,
+        ..MandateKeyOptions::new(key)
+    }))
+}
+
+#[tokio::test]
+async fn a_mandate_key_logs_in_and_renews_by_logging_in_again() {
+    let server = mount_mandate_server(1).await;
+
+    let fakts = Fakts::builder(server.uri(), manifest())
+        .grant(mandate_grant("mk-0123456789abcdefghijklmnopqrstuvwxyzABCD"))
+        .no_cache(true)
+        .load()
+        .await
+        .unwrap();
+
+    assert_eq!(fakts.get_token().await.unwrap(), "access-1");
+    let active = fakts.active().await;
+    assert_eq!(active.auth.client_id, "client-1");
+    assert_eq!(active.auth.refresh_token, None);
+
+    // Renewing logs in again with the key, without asking for another mesh key;
+    // the one from the first login is kept.
+    assert_eq!(fakts.refresh_token("access-1").await.unwrap(), "access-2");
+    let active = fakts.active().await;
+    assert_eq!(active.mesh.unwrap().ionscale_auth_key, "mesh-key");
+    assert_eq!(fakts.get_alias("mikro").await.unwrap().id, "lan");
+}
+
+#[tokio::test]
+async fn a_refused_mandate_key_is_an_invalid_grant() {
+    let server = mount_mandate_server(0).await;
+
+    let err = Fakts::builder(server.uri(), manifest())
+        .grant(mandate_grant("mk-revoked-0123456789abcdefghijklmnopqrstuv"))
+        .no_cache(true)
+        .load()
+        .await
+        .unwrap_err();
+
+    assert!(
+        matches!(&err, FaktsError::InvalidGrant(reason) if reason.contains("Unknown or revoked key")),
+        "{err}"
+    );
 }
 
 #[tokio::test]

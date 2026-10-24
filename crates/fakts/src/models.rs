@@ -341,7 +341,9 @@ pub struct AuthFakt {
     pub report_endpoint: Option<String>,
     #[serde(default)]
     pub scopes: Vec<String>,
-    pub refresh_token: String,
+    /// None for a mandate-key login, which renews by logging in again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refresh_token: Option<String>,
     pub access_token: String,
     /// Unix timestamp (seconds) after which the access token is considered stale.
     #[serde(default)]
@@ -385,10 +387,7 @@ impl ActiveFakts {
     ) -> Result<Self, crate::FaktsError> {
         let refresh_token = response
             .refresh_token
-            .or_else(|| fallback_refresh.map(str::to_owned))
-            .ok_or_else(|| {
-                crate::FaktsError::Protocol("token response carried no refresh_token".into())
-            })?;
+            .or_else(|| fallback_refresh.map(str::to_owned));
         let expires_at = response
             .expires_in
             .map(|exp| now + exp - std::cmp::min(30, exp / 2));

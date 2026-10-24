@@ -14,7 +14,7 @@ use tokio::sync::Mutex;
 
 use crate::cache;
 use crate::error::{FaktsError, Result};
-use crate::grants::{self, DeviceCodeOptions};
+use crate::grants::{self, DeviceCodeOptions, MandateKeyOptions};
 use crate::models::{ActiveFakts, Alias, Instance, Manifest, WellKnown};
 
 /// Anything that can hand out a bearer token and renew a stale one.
@@ -38,6 +38,9 @@ pub enum Grant {
         client_id: String,
         refresh_token: String,
     },
+    /// A standing mandate key, e.g. from `FAKTS_MANDATE_KEY`: headless, and
+    /// renewed by logging in again (there is no refresh token).
+    MandateKey(Arc<MandateKeyOptions>),
 }
 
 /// Configures and loads a [`Fakts`] handle.
@@ -56,15 +59,19 @@ pub struct FaktsBuilder {
 
 impl FaktsBuilder {
     pub fn new(url: impl Into<String>, manifest: Manifest) -> Self {
-        let grant = match std::env::var("FAKTS_TOKEN") {
-            Ok(token) if token.contains(':') => {
+        let mandate_key = std::env::var("FAKTS_MANDATE_KEY")
+            .ok()
+            .filter(|k| !k.is_empty());
+        let grant = match (mandate_key, std::env::var("FAKTS_TOKEN")) {
+            (Some(key), _) => Grant::MandateKey(Arc::new(MandateKeyOptions::new(key))),
+            (None, Ok(token)) if token.contains(':') => {
                 let (client_id, refresh_token) = token.split_once(':').expect("checked");
                 Grant::RefreshToken {
                     client_id: client_id.to_owned(),
                     refresh_token: refresh_token.to_owned(),
                 }
             }
-            _ => Grant::DeviceCode(Arc::new(DeviceCodeOptions::default())),
+            (None, _) => Grant::DeviceCode(Arc::new(DeviceCodeOptions::default())),
         };
         Self {
             url: url.into(),
@@ -126,15 +133,24 @@ impl FaktsBuilder {
         self
     }
 
-    /// The grant to run: with the mesh on, the device code also asks for a mesh key.
+    /// The grant to run: with the mesh on, the first login also asks for a mesh key.
     fn effective_grant(&self) -> Grant {
         #[cfg(feature = "mesh")]
         if self.mesh.is_some() && self.mesh_proxy.is_none() {
-            if let Grant::DeviceCode(options) = &self.grant {
-                return Grant::DeviceCode(Arc::new(DeviceCodeOptions {
-                    request_auth_key: true,
-                    ..(**options).clone()
-                }));
+            match &self.grant {
+                Grant::DeviceCode(options) => {
+                    return Grant::DeviceCode(Arc::new(DeviceCodeOptions {
+                        request_auth_key: true,
+                        ..(**options).clone()
+                    }));
+                }
+                Grant::MandateKey(options) => {
+                    return Grant::MandateKey(Arc::new(MandateKeyOptions {
+                        request_auth_key: true,
+                        ..(**options).clone()
+                    }));
+                }
+                Grant::RefreshToken { .. } => {}
             }
         }
         self.grant.clone()
@@ -200,6 +216,10 @@ impl FaktsBuilder {
                 base_url,
                 well_known,
                 manifest: self.manifest,
+                mandate_key: match grant {
+                    Grant::MandateKey(options) => Some(options),
+                    _ => None,
+                },
                 cache_path,
                 cache_key,
                 active: Mutex::new(active),
@@ -329,6 +349,27 @@ async fn run_grant(
                 now,
             )
         }
+        Grant::MandateKey(options) => {
+            let response = grants::mandate_key_grant(
+                http,
+                &well_known.token_endpoint,
+                manifest,
+                options,
+                options.request_auth_key,
+            )
+            .await?;
+            let client_id = response.client_id.clone().ok_or_else(|| {
+                FaktsError::Protocol("the mandate-key login named no client_id".into())
+            })?;
+            ActiveFakts::from_token_response(
+                response,
+                &client_id,
+                &well_known.token_endpoint,
+                report_endpoint(well_known),
+                None,
+                now,
+            )
+        }
     }
 }
 
@@ -337,6 +378,8 @@ struct Inner {
     base_url: String,
     well_known: WellKnown,
     manifest: Manifest,
+    /// Set when the app logs in with a mandate key: renewing logs in again.
+    mandate_key: Option<Arc<MandateKeyOptions>>,
     cache_path: Option<PathBuf>,
     cache_key: String,
     active: Mutex<ActiveFakts>,
@@ -572,17 +615,53 @@ impl Fakts {
     async fn adopt_from_cache(&self, current_refresh: &str) -> Option<ActiveFakts> {
         let path = self.inner.cache_path.as_ref()?;
         let file = cache::read(path, &self.inner.cache_key).await?;
-        (file.fakts.auth.refresh_token != current_refresh).then_some(file.fakts)
+        (file.fakts.auth.refresh_token.as_deref() != Some(current_refresh)).then_some(file.fakts)
+    }
+
+    /// Log in with the mandate key again, for a fresh access token and
+    /// envelope. Never asks for a mesh key: the node keeps the one it joined with.
+    async fn renew_with_mandate_key(&self, options: &MandateKeyOptions) -> Result<String> {
+        let auth = self.inner.active.lock().await.auth.clone();
+        let response = grants::mandate_key_grant(
+            &self.inner.http,
+            &auth.token_endpoint,
+            &self.inner.manifest,
+            options,
+            false,
+        )
+        .await?;
+        let mut active = ActiveFakts::from_token_response(
+            response,
+            &auth.client_id,
+            &auth.token_endpoint,
+            auth.report_endpoint.clone(),
+            None,
+            chrono::Utc::now().timestamp(),
+        )?;
+        active.mesh = self.inner.active.lock().await.mesh.clone();
+        self.persist(&active).await?;
+        let token = active.auth.access_token.clone();
+        *self.inner.active.lock().await = active;
+        self.inner.aliases.lock().await.clear();
+        Ok(token)
     }
 
     async fn do_refresh(&self) -> Result<String> {
+        if let Some(options) = &self.inner.mandate_key {
+            return self.renew_with_mandate_key(options).await;
+        }
         for _ in 0..=MAX_ADOPTIONS {
             let auth = self.inner.active.lock().await.auth.clone();
+            let Some(refresh_token) = auth.refresh_token.clone() else {
+                return Err(FaktsError::InvalidGrant(
+                    "the credential has no refresh token and the app holds no mandate key".into(),
+                ));
+            };
             match grants::refresh_grant(
                 &self.inner.http,
                 &auth.token_endpoint,
                 &auth.client_id,
-                &auth.refresh_token,
+                &refresh_token,
             )
             .await
             {
@@ -592,7 +671,7 @@ impl Fakts {
                         &auth.client_id,
                         &auth.token_endpoint,
                         auth.report_endpoint.clone(),
-                        Some(&auth.refresh_token),
+                        Some(&refresh_token),
                         chrono::Utc::now().timestamp(),
                     )?;
                     if active.mesh.is_none() {
@@ -606,7 +685,7 @@ impl Fakts {
                     return Ok(token);
                 }
                 Err(FaktsError::InvalidGrant(reason)) => {
-                    match self.adopt_from_cache(&auth.refresh_token).await {
+                    match self.adopt_from_cache(&refresh_token).await {
                         Some(newer) => {
                             tracing::debug!("adopting a credential rotated by another process");
                             let expired = newer.auth.is_expired(chrono::Utc::now().timestamp());

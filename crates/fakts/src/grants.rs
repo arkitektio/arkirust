@@ -1,4 +1,5 @@
-//! The HTTP legs of fakts v2: discovery, device-code demand + polling, refresh.
+//! The HTTP legs of fakts v2: discovery, device-code demand + polling,
+//! refresh, and the headless mandate-key login.
 
 use std::time::{Duration, Instant};
 
@@ -9,6 +10,7 @@ use crate::error::{FaktsError, Result};
 use crate::models::{DeviceCodeResponse, Manifest, OAuthError, TokenResponse, WellKnown};
 
 pub const DEVICE_CODE_GRANT: &str = "urn:ietf:params:oauth:grant-type:device_code";
+pub const MANDATE_KEY_GRANT: &str = "urn:fakts:grant-type:mandate-key";
 
 /// The kind of OAuth client the server should mint for this app.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Default)]
@@ -18,6 +20,18 @@ pub enum ClientKind {
     Development,
     Website,
     Desktop,
+    Mobile,
+}
+
+impl ClientKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Development => "development",
+            Self::Website => "website",
+            Self::Desktop => "desktop",
+            Self::Mobile => "mobile",
+        }
+    }
 }
 
 /// The role the minted client plays.
@@ -27,6 +41,15 @@ pub enum ClientRole {
     #[default]
     Interface,
     Agent,
+}
+
+impl ClientRole {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Interface => "interface",
+            Self::Agent => "agent",
+        }
+    }
 }
 
 fn allow_insecure() -> bool {
@@ -254,6 +277,88 @@ pub async fn device_code_grant(
                 }
             },
         }
+    }
+}
+
+/// How to log in with a mandate key: headless, as whoever granted the
+/// mandate. There is no refresh token; the app logs in again whenever its
+/// access token runs out, so a revoked key stops working within one
+/// access-token lifetime.
+#[derive(Clone)]
+pub struct MandateKeyOptions {
+    /// The mandate key (`FAKTS_MANDATE_KEY`).
+    pub key: String,
+    /// What the client is: development, desktop or mobile (lok mints no
+    /// other kind for a key).
+    pub client_kind: ClientKind,
+    pub client_role: ClientRole,
+    /// Ask for a mesh key on the first login; the mandate must allow it.
+    /// Logging in again never asks.
+    pub request_auth_key: bool,
+}
+
+impl MandateKeyOptions {
+    pub fn new(key: impl Into<String>) -> Self {
+        Self {
+            key: key.into(),
+            client_kind: ClientKind::default(),
+            client_role: ClientRole::default(),
+            request_auth_key: false,
+        }
+    }
+}
+
+impl std::fmt::Debug for MandateKeyOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Only the key's prefix: the key logs in as its grantor.
+        f.debug_struct("MandateKeyOptions")
+            .field(
+                "key",
+                &format!("{}…", self.key.get(..6).unwrap_or_default()),
+            )
+            .field("client_kind", &self.client_kind)
+            .field("client_role", &self.client_role)
+            .field("request_auth_key", &self.request_auth_key)
+            .finish()
+    }
+}
+
+/// `grant_type=urn:fakts:grant-type:mandate-key`. The manifest goes as a JSON
+/// string in a form field (unlike the device-code demand, which nests it).
+pub async fn mandate_key_grant(
+    http: &Client,
+    token_endpoint: &str,
+    manifest: &Manifest,
+    options: &MandateKeyOptions,
+    request_auth_key: bool,
+) -> Result<TokenResponse> {
+    let manifest = serde_json::to_string(manifest)?;
+    let resp = http
+        .post(token_endpoint)
+        .form(&[
+            ("grant_type", MANDATE_KEY_GRANT),
+            ("key", options.key.as_str()),
+            ("manifest", manifest.as_str()),
+            ("requested_client_kind", options.client_kind.as_str()),
+            ("requested_client_role", options.client_role.as_str()),
+            (
+                "request_auth_key",
+                if request_auth_key { "true" } else { "false" },
+            ),
+        ])
+        .send()
+        .await?;
+    match parse_token_response(resp).await? {
+        Ok(response) => Ok(response),
+        Err(err) if err.error == "invalid_grant" => Err(FaktsError::InvalidGrant(format!(
+            "the server refused the mandate key ({}): it was revoked, has expired or does not \
+             cover this app",
+            err.error_description.as_deref().unwrap_or(&err.error)
+        ))),
+        Err(err) => Err(FaktsError::OAuth {
+            error: err.error,
+            description: err.error_description,
+        }),
     }
 }
 

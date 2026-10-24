@@ -309,14 +309,19 @@ FAKTS_URL=https://your.arkitekt.server cargo run -p arkitekt-examples --bin hell
 
 On the first run the app prints a URL where you approve it. After that, the
 credentials are cached (mode 0600) under your user state directory, for
-example `~/.local/state/arkitekt/cache/*_fakts_cache.rs.json`. Set `FAKTS_TOKEN=client_id:refresh_token`
-to skip the interactive step, for instance in CI.
+example `~/.local/state/arkitekt/cache/*_fakts_cache.rs.json`. To skip the
+interactive step, for instance in CI, a container or on a device, set
+`FAKTS_MANDATE_KEY` to a mandate key (issued in kontrol, by a hub or by the app
+that provisions the device): the app logs in as whoever granted it, and logs in
+again whenever its access token runs out. `FAKTS_TOKEN=client_id:refresh_token`
+still works too.
 
 ## Status
 
 Implemented:
 
 - [x] Fakts v2: discovery, device code, rotating refresh tokens, cache, and alias challenges (including Ed25519)
+- [x] The headless mandate-key login (`FAKTS_MANDATE_KEY`, `Grant::MandateKey`), with a mesh key on the first login
 - [x] GraphQL client with token refresh and task attribution
 - [x] `#[action]` with typed ports, defaults, docs, structures, tuples, `Result` and generators
 - [x] Rekuest agent: register, heartbeat, assign, cancel, interrupt, progress, log, reports acked by seq, reconnect with backoff
@@ -334,7 +339,6 @@ Not implemented yet:
 - [ ] GraphQL subscriptions over websocket
 - [ ] Workflows (`WORKFLOW` actions that call other actions and are resumed from their journal), and an `effects` claim per action
 - [ ] Structure-typed fields inside states
-- [ ] The redeem grant for headless deployment
 - [ ] Other mikro data types (tables, files, meshes, …) and multiscale pyramids
 - [ ] Other services (unlok, fluss, kabinet, …)
 

@@ -21,7 +21,8 @@ pub struct ConnectOptions {
     pub no_cache: bool,
     /// Where to cache fakts instead of the per-user state directory.
     pub cache_path: Option<PathBuf>,
-    /// Override how the app is authorized (default: `FAKTS_TOKEN`, else device code).
+    /// Override how the app is authorized (default: `FAKTS_MANDATE_KEY`, else
+    /// `FAKTS_TOKEN`, else device code).
     pub grant: Option<Grant>,
     /// Stable id of this installation; defaults to [`device_id`].
     pub device_id: Option<String>,

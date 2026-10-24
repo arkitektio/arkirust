@@ -31,7 +31,9 @@ mod models;
 
 pub use crate::error::{FaktsError, Result};
 pub use crate::fakts::{Fakts, FaktsBuilder, Grant, TokenLoader};
-pub use crate::grants::{ClientKind, ClientRole, DeviceCodeHook, DeviceCodeOptions};
+pub use crate::grants::{
+    ClientKind, ClientRole, DeviceCodeHook, DeviceCodeOptions, MandateKeyOptions,
+};
 #[cfg(feature = "mesh")]
 pub use crate::mesh::{MeshBackend, MeshOptions};
 pub use crate::models::*;
