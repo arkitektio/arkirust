@@ -1,6 +1,69 @@
 # CHANGELOG
 
 
+## v0.13.0 (2026-10-24)
+
+### Bug Fixes
+
+- **rekuest**: Wake outside the primitives' locks; sync actions covered on wasm and tokio
+  ([`a53afb2`](https://github.com/arkitektio/arkirust/commit/a53afb27449fa9c3ef2efc6c46dd78a1a5607715))
+
+FifoMutex, Latch, Watch and Signal wake their waiters after releasing their lock (an executor may
+  poll inside wake), and remember a re-polled task's waker once. A sync #[action] runs on wasm
+  (checks/wasm's echo, inline) and its panic becomes the task's critical error (tests/actions.rs).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+### Features
+
+- **rekuest**: The agent in a browser or node: web::Agent over the JS WebSocket
+  ([`af45fd3`](https://github.com/arkitektio/arkirust/commit/af45fd325220c488fca734aa9e3478ad8aae8d63))
+
+rekuest's new web feature (wasm32): web::Agent is the Driver over the JS WebSocket on the JS event
+  loop (rt::Js, the default runtime there), with its tokens from fakts. fakts and arkitekt-rath
+  build for wasm32: reqwest over fetch (no rustls, no proxy, no redirect policy there), every
+  exchange made whole in fakts::http (send + body, its future wrapped on wasm, where fetch futures
+  are not Send), timers and Instant from JS (web-time), no cache file. rath's task token is a
+  poll-scoped local on any runtime.
+
+checks/wasm/tests/real_stack.rs: a wasm agent under node logs in at the real lok and registers with
+  the real takt, and the server acknowledges its journal; real_rekuest starts the stack and runs it
+  (the e2e job installs node and wasm-pack). The stack harness names each stack's compose project
+  apart, so tests in one binary run side by side.
+
+Also: async-trait 0.1.92 (the async-trait expansion tripped clippy 1.99's double_must_use, which
+  failed the controls job and held back 0.13.0).
+
+BREAKING CHANGE: rath::CURRENT_TASK_TOKEN is private; use with_task_token.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+- **rekuest**: The agent runs on any async runtime; a real #[action] on wasm
+  ([`743a9f4`](https://github.com/arkitektio/arkirust/commit/743a9f459bde09547c8ba3c8f4fc42ae2ebdea41))
+
+The executor, journal, state hub, locks, pausepoints, shelf and the #[action] expansion no longer
+  name tokio: they spawn, sleep and wait through rekuest::rt (Runtime: spawn, sleep, blocking work),
+  tokio with the new tokio feature, else whatever the app installs (rt::install). tokio's primitives
+  give way to runtime-free ones: FifoMutex (strictly first come, first served, as the named locks
+  promise), Latch, Signal (a stored wake-up, as Notify::notify_one), Watch, TaskLocal (scoped per
+  poll, so blocking work does not see it, as before), async-channel.
+
+rekuest::Driver is an agent without its socket (session, executor, journal, activation, inquiries);
+  Agent is it with a tokio websocket, and checks/wasm runs the scripted scenario with a real
+  #[action] through it on wasm32 (node), on a JS-event-loop runtime. CI clippy-builds rekuest for
+  wasm32 without default features.
+
+BREAKING CHANGE: rekuest's new features tokio (Agent, transport, fakts) and rath (task tokens on
+  GraphQL calls) are on by default; a dependency with default features off turns them on (arkitekt
+  and checks/esp32s3 do). wal and serve imply tokio.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+### Breaking Changes
+
+- **rekuest**: Rath::current_task_token is private; use with_task_token.
+
+
 ## v0.12.0 (2026-10-24)
 
 ### Features
