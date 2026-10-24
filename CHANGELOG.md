@@ -1,6 +1,33 @@
 # CHANGELOG
 
 
+## v0.10.0 (2026-10-24)
+
+### Features
+
+- **arkitekt**: Build without SQLite (wal feature)
+  ([`bb1b0a9`](https://github.com/arkitektio/arkirust/commit/bb1b0a91c866e8133a4628052a769fedfa7ee5be))
+
+The workspace takes rekuest without its wal default, and arkitekt turns it on with a wal feature of
+  its own (on by default), so an app on a target SQLite's C does not build for uses arkitekt with
+  default features off. checks/esp32s3 now checks arkitekt too.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+- **fakts,arkitekt**: User-dirs feature for default paths
+  ([`40d8276`](https://github.com/arkitektio/arkirust/commit/40d82761d09b0efafc35f78c470da719c74f0035))
+
+The fakts cache file, the mesh node's state and the persisted device id live in the user's
+  directories (dirs). dirs compiles for ESP-IDF but does not link there (no getuid/getpwuid_r), so
+  it is the user-dirs feature now, on by default in fakts and arkitekt and implied by the mesh
+  features. Without it an app passes its own store and device id; fakts without a store logs in on
+  every start.
+
+Found linking an ESP32-S3 firmware: checks/esp32s3 only type-checks.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+
 ## v0.9.0 (2026-10-24)
 
 ### Features
