@@ -52,6 +52,8 @@ fakts = { workspace = true, features = ["ring"] }
 reqwest.workspace = true
 tempfile = "3"
 tracing-subscriber.workspace = true
+# The scripted server every driver of the session is tested against.
+rekuest-session = { workspace = true, features = ["testing"] }
 axum.workspace = true
 
 [[example]]

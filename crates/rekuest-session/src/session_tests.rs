@@ -218,6 +218,32 @@ fn an_activation_failure_ends_the_session_even_while_disconnected() {
 }
 
 #[test]
+fn a_restarted_session_connects_again_and_keeps_its_frames() {
+    let mut session = Session::new(config());
+    let mut journal = Numberer::new("s");
+    live(&mut session, secs(0));
+    session.activated(Ok(()));
+    let message = log("t");
+    let entry = journal.entry(&message);
+    session.send_entry(message, &entry);
+    session.handle_text(secs(1), r#"{"type":"KICK","id":"k"}"#);
+    assert!(session.is_ended());
+
+    session.restart(secs(0));
+    registering(&mut session, secs(0));
+    init(&mut session, secs(0));
+    assert!(
+        !events(&mut session).contains(&Event::Activate),
+        "activated once"
+    );
+    assert_eq!(
+        types(&sent(&mut session)),
+        ["LOG"],
+        "the unacknowledged frame again"
+    );
+}
+
+#[test]
 fn unacknowledged_frames_are_resent_in_order_after_a_reconnect() {
     let mut session = Session::new(config());
     let mut journal = Numberer::new("s");

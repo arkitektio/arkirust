@@ -236,6 +236,8 @@ impl Agent {
         self.load_backlog().await;
         let start = Instant::now();
         let now = || start.elapsed();
+        // A run after an earlier one ended (or stopped while connecting) starts over.
+        self.shared.lock().restart(now());
         let mut sink: Option<SplitSink<Ws, Message>> = None;
         let mut stream: Option<SplitStream<Ws>> = None;
         let (activated_tx, mut activated) = tokio::sync::mpsc::unbounded_channel();

@@ -192,42 +192,60 @@ impl FakeServer {
     }
 
     /// Panics unless the agent behaved: registered twice with the same
-    /// session, answered the heartbeat, and sent `t1`'s reports once per
-    /// connection, in journal order, with `seq` restarting.
+    /// session, answered the heartbeat, reported `t1` up to `YIELD` and
+    /// `COMPLETED`, re-sent every numbered frame of the first connection on
+    /// the second (none was acknowledged), in order, and numbered `seq` from
+    /// 1 on each connection. Exact frames are the app's business: `Echo`
+    /// sends only `YIELD` and `COMPLETED`, a real executor more.
     pub fn check(&self) {
         assert!(self.done(), "the scenario did not finish: {:?}", self.stage);
-        let of = |connection: usize, kind: &str| -> Vec<&Value> {
+        let on = |connection: usize| {
             self.received
                 .iter()
-                .filter(|(c, f)| *c == connection && f["type"] == kind)
+                .filter(move |(c, _)| *c == connection)
                 .map(|(_, f)| f)
-                .collect()
         };
-        let registers = [of(1, "REGISTER"), of(2, "REGISTER")];
-        assert_eq!(registers[0].len(), 1);
-        assert_eq!(registers[1].len(), 1);
+        let registers: Vec<Vec<&Value>> = [1, 2]
+            .map(|c| on(c).filter(|f| f["type"] == "REGISTER").collect())
+            .into();
+        assert_eq!((registers[0].len(), registers[1].len()), (1, 1));
         assert_eq!(
             registers[0][0]["session_id"], registers[1][0]["session_id"],
             "one session across reconnects"
         );
-        assert_eq!(of(1, "HEARTBEAT_ANSWER").len(), 1);
+        assert_eq!(on(1).filter(|f| f["type"] == "HEARTBEAT_ANSWER").count(), 1);
+
+        let numbered = |connection: usize| -> Vec<(Value, Value, Value)> {
+            on(connection)
+                .filter(|f| f.get("pos").is_some())
+                .map(|f| {
+                    (
+                        f["journal_session"].clone(),
+                        f["pos"].clone(),
+                        f["type"].clone(),
+                    )
+                })
+                .collect()
+        };
+        let first = numbered(1);
+        let t1: Vec<&Value> = on(1)
+            .filter(|f| f["task"] == "t1")
+            .map(|f| &f["type"])
+            .collect();
+        assert!(
+            t1.ends_with(&[&json!("YIELD"), &json!("COMPLETED")]),
+            "t1 ends with YIELD, COMPLETED: {t1:?}"
+        );
+        assert!(
+            numbered(2).starts_with(&first),
+            "the second connection re-sends the first's numbered frames in order:\n{first:?}\n{:?}",
+            numbered(2)
+        );
         for connection in [1, 2] {
-            let reports: Vec<(Value, Value, Value)> = self
-                .received
-                .iter()
-                .filter(|(c, f)| *c == connection && f["task"] == "t1")
-                .map(|(_, f)| (f["type"].clone(), f["pos"].clone(), f["seq"].clone()))
-                .collect();
-            assert_eq!(
-                reports,
-                vec![
-                    (json!("YIELD"), json!(1), json!(1)),
-                    (json!("COMPLETED"), json!(2), json!(2)),
-                ],
-                "connection {connection}"
-            );
+            let seqs: Vec<u64> = on(connection).filter_map(|f| f["seq"].as_u64()).collect();
+            let expected: Vec<u64> = (1..=seqs.len() as u64).collect();
+            assert_eq!(seqs, expected, "seq on connection {connection}");
         }
-        assert_eq!(of(1, "YIELD")[0]["returns"], json!({"echo": {"x": 1}}));
     }
 
     fn init(&mut self) {

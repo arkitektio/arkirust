@@ -212,6 +212,17 @@ impl Session {
         &self.outbox
     }
 
+    /// Start over at `now` (a driver that runs again after the session ended,
+    /// or after it stopped mid-connect): connect at once with a fresh retry
+    /// budget. What the outbox holds and the activation are kept.
+    pub fn restart(&mut self, now: Duration) {
+        self.outbox.detach();
+        self.control.clear();
+        self.events.clear();
+        self.attempt = 0;
+        self.phase = Phase::Waiting { at: now };
+    }
+
     /// Whether the session ended for good.
     pub fn is_ended(&self) -> bool {
         matches!(self.phase, Phase::Ended)
