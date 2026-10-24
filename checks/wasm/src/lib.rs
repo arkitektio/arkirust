@@ -136,9 +136,9 @@ impl Runtime for JsRuntime {
     }
 }
 
-/// Hand `x` back
+/// Hand `x` back (a sync action: the runtime runs it inline, wasm has one thread)
 #[action]
-async fn echo(x: i64) -> i64 {
+fn echo(x: i64) -> i64 {
     x
 }
 

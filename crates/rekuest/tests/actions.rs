@@ -66,6 +66,12 @@ fn no_doc(flag: bool, lookup: HashMap<String, i64>) {
     let _ = (flag, lookup);
 }
 
+/// Panics on purpose
+#[action]
+fn explodes() -> i64 {
+    panic!("boom")
+}
+
 /// Fails on purpose
 #[action]
 async fn fails(reason: String) -> anyhow::Result<i64> {
@@ -149,6 +155,13 @@ async fn runs_actions() {
     run(count, json!({"to": 3})).await.unwrap();
 
     // A bad input is a FAILED (the caller's fault)...
+    // A sync action runs as blocking work; its panic is the task's critical error.
+    let err = run(explodes, json!({})).await.unwrap_err();
+    assert!(
+        matches!(&err, ActionError::Critical(e) if e == "the action panicked: boom"),
+        "{err:?}"
+    );
+
     let err = run(greet, json!({"times": 2})).await.unwrap_err();
     assert!(
         matches!(err, ActionError::Failed(ref m) if m.contains("port 'name'")),

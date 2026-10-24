@@ -244,10 +244,14 @@ impl FifoMutex {
     }
 
     fn unlock(&self) {
-        let mut state = self.state.lock().expect("fifo lock");
-        state.locked = false;
-        if let Some((_, Some(waker))) = state.queue.front() {
-            waker.wake_by_ref();
+        let next = {
+            let mut state = self.state.lock().expect("fifo lock");
+            state.locked = false;
+            state.queue.front().and_then(|(_, waker)| waker.clone())
+        };
+        // Woken outside the lock: an executor may poll right inside `wake`.
+        if let Some(waker) = next {
+            waker.wake();
         }
     }
 }
@@ -284,14 +288,17 @@ impl Drop for Waiting {
         if self.done {
             return;
         }
-        let mut state = self.mutex.state.lock().expect("fifo lock");
-        let was_first = state.queue.front().map(|(t, _)| *t) == Some(self.ticket);
-        state.queue.retain(|(t, _)| *t != self.ticket);
-        // The next in line may be free to go now.
-        if was_first && !state.locked {
-            if let Some((_, Some(waker))) = state.queue.front() {
-                waker.wake_by_ref();
-            }
+        let next = {
+            let mut state = self.mutex.state.lock().expect("fifo lock");
+            let was_first = state.queue.front().map(|(t, _)| *t) == Some(self.ticket);
+            state.queue.retain(|(t, _)| *t != self.ticket);
+            // The next in line may be free to go now.
+            (was_first && !state.locked)
+                .then(|| state.queue.front().and_then(|(_, waker)| waker.clone()))
+                .flatten()
+        };
+        if let Some(waker) = next {
+            waker.wake();
         }
     }
 }
@@ -316,7 +323,8 @@ impl Latch {
 
     pub fn open(&self) {
         self.open.store(true, Ordering::SeqCst);
-        for waker in self.wakers.lock().expect("latch lock").drain(..) {
+        let wakers = std::mem::take(&mut *self.wakers.lock().expect("latch lock"));
+        for waker in wakers {
             waker.wake();
         }
     }
@@ -330,10 +338,7 @@ impl Latch {
             if self.is_open() {
                 return Poll::Ready(());
             }
-            self.wakers
-                .lock()
-                .expect("latch lock")
-                .push(cx.waker().clone());
+            register(&self.wakers, cx.waker());
             // Opened between the check and registering: do not miss it.
             if self.is_open() {
                 Poll::Ready(())
@@ -360,7 +365,8 @@ impl Signal {
 
     pub fn raise(&self) {
         self.raised.store(true, Ordering::SeqCst);
-        if let Some(waker) = self.waker.lock().expect("signal lock").take() {
+        let waker = self.waker.lock().expect("signal lock").take();
+        if let Some(waker) = waker {
             waker.wake();
         }
     }
@@ -398,7 +404,8 @@ impl<T> Watch<T> {
 
     pub fn set(&self, value: T) {
         *self.value.lock().expect("watch lock") = value;
-        for waker in self.wakers.lock().expect("watch lock").drain(..) {
+        let wakers = std::mem::take(&mut *self.wakers.lock().expect("watch lock"));
+        for waker in wakers {
             waker.wake();
         }
     }
@@ -409,10 +416,7 @@ impl<T> Watch<T> {
             if ready(&self.value.lock().expect("watch lock")) {
                 return Poll::Ready(());
             }
-            self.wakers
-                .lock()
-                .expect("watch lock")
-                .push(cx.waker().clone());
+            register(&self.wakers, cx.waker());
             if ready(&self.value.lock().expect("watch lock")) {
                 Poll::Ready(())
             } else {
@@ -420,6 +424,14 @@ impl<T> Watch<T> {
             }
         })
         .await
+    }
+}
+
+/// Remember `waker` once (a task polled again keeps one entry).
+fn register(wakers: &Mutex<Vec<Waker>>, waker: &Waker) {
+    let mut wakers = wakers.lock().expect("wakers lock");
+    if !wakers.iter().any(|w| w.will_wake(waker)) {
+        wakers.push(waker.clone());
     }
 }
 
