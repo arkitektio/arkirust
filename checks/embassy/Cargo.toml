@@ -1,0 +1,22 @@
+# The rekuest session on embassy: a minimal driver (lib, no_std) running the
+# shared scripted scenario against a fake socket. `cargo run` runs it on the
+# host (platform-std executor, std time driver); `cargo build --lib --target
+# thumbv7em-none-eabihf` proves the driver builds for a microcontroller.
+# Not a workspace member.
+[package]
+name = "embassy-control"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+rekuest-session = { path = "../../crates/rekuest-session", features = ["testing"] }
+embassy-time = "0.5"
+embassy-sync = "0.8"
+embassy-futures = "0.1"
+
+[target.'cfg(not(target_os = "none"))'.dependencies]
+embassy-time = { version = "0.5", features = ["std"] }
+embassy-executor = { version = "0.10", features = ["platform-std", "executor-thread"] }

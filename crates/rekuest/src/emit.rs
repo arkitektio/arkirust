@@ -2,7 +2,6 @@
 
 use crate::journal::JournalEntry;
 use crate::messages::FromAgent;
-use crate::outbox::Outbox;
 
 /// A transport's outgoing side.
 ///
@@ -25,16 +24,6 @@ pub trait Emitter: Send + Sync + 'static {
     fn emit_entry(&self, message: FromAgent, action_key: Option<&str>, entry: &JournalEntry) {
         let _ = entry;
         self.emit(message, action_key)
-    }
-}
-
-impl Emitter for Outbox {
-    fn emit(&self, message: FromAgent, _action_key: Option<&str>) {
-        self.send(message)
-    }
-
-    fn emit_entry(&self, message: FromAgent, _action_key: Option<&str>, entry: &JournalEntry) {
-        self.send_entry(message, entry)
     }
 }
 

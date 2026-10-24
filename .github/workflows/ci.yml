@@ -75,6 +75,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test -p fakts --test real_lok -- --ignored --nocapture
+      # A real agent registers with takt and gets its journal acknowledged.
+      - run: cargo test -p rekuest --test real_rekuest -- --ignored --nocapture
 
   # The agent stack on the ESP32-S3 (checks/esp32s3): no ring, no signals,
   # no SQLite.
@@ -99,6 +101,42 @@ jobs:
           workspaces: checks/esp32s3
       - run: . "$HOME/export-esp.sh" && cargo check
 
+  # The sans-IO session core on its three runtimes: std is the tokio Agent
+  # (the test job); here a minimal driver each for wasm (node) and embassy
+  # (on the host, and built for a Cortex-M4F), both running the shared
+  # scripted scenario (rekuest_session::testing).
+  controls:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown, thumbv7em-none-eabihf
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            checks/wasm
+            checks/embassy
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: cargo-bins/cargo-binstall@main
+      - run: cargo binstall -y --locked wasm-pack
+      # The core itself, without std.
+      - run: cargo build -p rekuest-session -p rekuest-protocol --no-default-features --target thumbv7em-none-eabihf
+      - run: cargo build -p rekuest-session -p rekuest-protocol --no-default-features --target wasm32-unknown-unknown
+      - run: wasm-pack test --node
+        working-directory: checks/wasm
+      - run: cargo clippy --target wasm32-unknown-unknown --all-targets -- -D warnings
+        working-directory: checks/wasm
+      - run: cargo run
+        working-directory: checks/embassy
+      - run: cargo build --lib --target thumbv7em-none-eabihf
+        working-directory: checks/embassy
+      - run: cargo clippy --all-targets -- -D warnings
+        working-directory: checks/embassy
+
   # Squash-merged PR titles become the commits semantic-release reads, so enforce Conventional Commits.
   pr-title:
     if: github.event_name == 'pull_request'
@@ -117,7 +155,7 @@ jobs:
   # The mesh (and its Python bindings and meshd) is released from
   # arkitektio/arkitekt-mesh.
   release:
-    needs: [test, platforms, esp32s3, e2e]
+    needs: [test, platforms, esp32s3, controls, e2e]
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && github.repository_owner == 'arkitektio'
     runs-on: ubuntu-latest
     concurrency:

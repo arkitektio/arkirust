@@ -3,6 +3,7 @@
 //! These are serialized in snake_case, which is what the agent socket expects
 //! (the camelCase spelling belongs to the GraphQL API only).
 
+use crate::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};

@@ -4,6 +4,7 @@
 //! Agent events that take part in the ack stream also carry a per-connection
 //! monotonic `seq`.
 
+use crate::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -785,9 +786,16 @@ pub struct Envelope<D = AgentDeclaration> {
 }
 
 impl<D> Envelope<D> {
+    /// With a fresh random id.
+    #[cfg(feature = "std")]
     pub fn new(message: FromAgent<D>) -> Self {
+        Self::with_id(uuid::Uuid::new_v4().to_string(), message)
+    }
+
+    /// With `id` (where there is no OS randomness, the caller mints it).
+    pub fn with_id(id: String, message: FromAgent<D>) -> Self {
         Self {
-            id: uuid::Uuid::new_v4().to_string(),
+            id,
             seq: None,
             pos: None,
             journal_session: None,

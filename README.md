@@ -375,6 +375,14 @@ differently:
   (plain TCP by default; `HttpProxy` through a mesh proxy). TLS runs on top
   of either.
 
+The agent protocol itself does no I/O: `rekuest-session` is the `/agi`
+session as a `no_std` state machine (handshake, heartbeats, backoff,
+activation gating, the outbox that re-sends until `JOURNAL_ACK`), and
+`rekuest-protocol` its frames, also `no_std`. `rekuest::Agent` drives it on
+tokio; `checks/wasm` (wasm32, on node) and `checks/embassy` (on the host
+and built for a Cortex-M4F) drive it with a minimal driver each, and CI runs
+the same scripted scenario on all of them.
+
 ## Development
 
 ```sh

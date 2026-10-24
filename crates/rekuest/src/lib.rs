@@ -27,7 +27,6 @@ pub mod executor;
 mod hooks;
 pub mod journal;
 mod locks;
-mod outbox;
 mod port_type;
 #[cfg(feature = "serve")]
 pub mod serve;

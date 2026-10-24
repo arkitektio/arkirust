@@ -24,6 +24,10 @@ name = "rekuest-protocol"
 version_group = "arkitekt"
 
 [[package]]
+name = "rekuest-session"
+version_group = "arkitekt"
+
+[[package]]
 name = "rekuest"
 version_group = "arkitekt"
 

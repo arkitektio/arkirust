@@ -14,7 +14,8 @@ readme = "../../README.md"
 fakts.workspace = true
 rath.workspace = true
 rekuest-macros.workspace = true
-rekuest-protocol.workspace = true
+rekuest-protocol = { workspace = true, features = ["std"] }
+rekuest-session.workspace = true
 anyhow.workspace = true
 async-trait.workspace = true
 chrono.workspace = true
@@ -50,6 +51,7 @@ tokio = { workspace = true, features = ["rt-multi-thread", "signal"] }
 fakts = { workspace = true, features = ["ring"] }
 reqwest.workspace = true
 tempfile = "3"
+tracing-subscriber.workspace = true
 axum.workspace = true
 
 [[example]]

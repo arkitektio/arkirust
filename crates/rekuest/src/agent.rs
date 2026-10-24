@@ -1,13 +1,14 @@
 //! The rekuest agent: registers the app over the `/agi` websocket and runs
 //! assignments as they arrive.
 //!
-//! Connection lifecycle:
+//! The protocol is a [`rekuest_session::Session`], a sans-IO state machine;
+//! this is its tokio driver. Connection lifecycle:
 //! 1. connect, send `REGISTER` (token + declaration), wait for `INIT`
 //! 2. re-send every numbered frame not covered by a `JOURNAL_ACK` (earlier
 //!    sessions' first), answer inquiries
 //! 3. after the *first* `INIT` only: activate (startup hooks, `SESSION_INIT`,
 //!    background hooks). Activation runs beside the read loop so heartbeats
-//!    keep being answered; assignments wait until it is done.
+//!    keep being answered; task messages wait until it is done.
 //! 4. serve: answer `HEARTBEAT`s, hand `ASSIGN`/`CANCEL`/`PAUSE`/… to the
 //!    [`Executor`]
 //! 5. on disconnect, reconnect with exponential backoff; running tasks keep
@@ -15,11 +16,13 @@
 //!    re-runs startup hooks.
 
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use fakts::TokenLoader;
+use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
-use rand::Rng;
+use rekuest_session::{to_text, Event, Session, SessionConfig, SessionError};
+use tokio::time::Instant;
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::action::Registry;
@@ -27,18 +30,11 @@ use crate::context::Context;
 use crate::definition::AgentDeclaration;
 use crate::emit::Emitter;
 use crate::executor::Executor;
-use crate::journal::Journal;
-use crate::messages::{parse_to_agent, Assign, Envelope, FromAgent, ToAgent};
-use crate::outbox::Outbox;
-use crate::transport::{Connector, Direct};
+use crate::journal::{Journal, JournalEntry};
+use crate::messages::{FromAgent, ToAgent};
+use crate::transport::{Connector, Direct, Ws};
 
-/// Close codes after which reconnecting is pointless.
-const CLOSE_BLOCKED: u16 = 4003;
-const CLOSE_BUSY: u16 = 4004;
-const CLOSE_KICKED: u16 = 4005;
-
-/// No frame for this long means the connection is dead (the server heartbeats).
-const IDLE_TIMEOUT: Duration = Duration::from_secs(120);
+pub use rekuest_session::ConnectionPolicy;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AgentError {
@@ -56,37 +52,15 @@ pub enum AgentError {
     Activation(String),
 }
 
-/// Exponential backoff between reconnect attempts.
-#[derive(Debug, Clone)]
-pub struct ConnectionPolicy {
-    pub max_retries: usize,
-    pub initial: Duration,
-    pub factor: f64,
-    pub max: Duration,
-    pub jitter: f64,
-    /// A connection that stayed up this long resets the retry budget.
-    pub reset_after: Duration,
-}
-
-impl Default for ConnectionPolicy {
-    fn default() -> Self {
-        Self {
-            max_retries: 5,
-            initial: Duration::from_secs(1),
-            factor: 2.0,
-            max: Duration::from_secs(60),
-            jitter: 0.1,
-            reset_after: Duration::from_secs(30),
+impl From<SessionError> for AgentError {
+    fn from(error: SessionError) -> Self {
+        match error {
+            SessionError::Refused(e) => Self::Refused(e),
+            SessionError::Kicked(reason) => Self::Kicked(reason),
+            SessionError::Closed { code, reason } => Self::Closed { code, reason },
+            SessionError::Exhausted(n) => Self::Exhausted(n),
+            SessionError::Activation(e) => Self::Activation(e),
         }
-    }
-}
-
-impl ConnectionPolicy {
-    fn delay_for(&self, attempt: usize) -> Duration {
-        let base = self.initial.as_secs_f64() * self.factor.powi(attempt.saturating_sub(1) as i32);
-        let base = base.min(self.max.as_secs_f64());
-        let jitter = base * self.jitter * rand::thread_rng().gen_range(-1.0..=1.0);
-        Duration::from_secs_f64((base + jitter).max(0.0))
     }
 }
 
@@ -128,21 +102,40 @@ impl AgentOptions {
     }
 }
 
-enum SessionEnd {
-    /// The connection dropped; reconnect.
-    Dropped(String),
-    /// The server asked us to reconnect later.
-    Bounce(Option<Duration>),
+/// The session, shared by the driver and every task that reports into it.
+///
+/// Reports lock it from inside the journal's lock, so the driver never calls
+/// into the executor or the journal while holding it.
+struct Shared {
+    session: Mutex<Session>,
+    /// A report was queued: the driver sends it. A stored permit, so a
+    /// report made while the driver is busy is not missed.
+    wake: tokio::sync::Notify,
 }
 
-/// Activation happens once per agent; until it is done, assignments wait.
-#[derive(Default)]
-enum Activation {
-    #[default]
-    NotStarted,
-    Running(Vec<Assign>),
-    Done,
-    Failed(String),
+impl Shared {
+    fn new(session: Session) -> Self {
+        Self {
+            session: Mutex::new(session),
+            wake: tokio::sync::Notify::new(),
+        }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, Session> {
+        self.session.lock().expect("session lock")
+    }
+}
+
+impl Emitter for Shared {
+    fn emit(&self, message: FromAgent, _action_key: Option<&str>) {
+        self.lock().send(message);
+        self.wake.notify_one();
+    }
+
+    fn emit_entry(&self, message: FromAgent, _action_key: Option<&str>, entry: &JournalEntry) {
+        self.lock().send_entry(message, entry);
+        self.wake.notify_one();
+    }
 }
 
 /// Serves an app's actions to a rekuest server.
@@ -150,12 +143,9 @@ pub struct Agent {
     options: AgentOptions,
     executor: Executor,
     tokens: Arc<dyn TokenLoader>,
-    outbox: Arc<Outbox>,
-    /// Numbers every report of the session in front of the outbox.
+    shared: Arc<Shared>,
+    /// Numbers every report of the session in front of the session's outbox.
     journal: Arc<Journal>,
-    activation: Arc<Mutex<Activation>>,
-    activation_changed: Arc<tokio::sync::Notify>,
-    session_id: String,
     #[cfg(feature = "wal")]
     store: Option<crate::store::HistoryStore>,
     /// Earlier sessions' unacknowledged entries are loaded once.
@@ -186,19 +176,26 @@ impl Agent {
             }
         });
         #[cfg(feature = "wal")]
-        let outbox = Arc::new(Outbox::with_limit(
-            crate::outbox::RETAIN_LIMIT,
-            store.is_some(),
-        ));
+        let outbox =
+            rekuest_session::Outbox::with_limit(rekuest_session::RETAIN_LIMIT, store.is_some());
         #[cfg(not(feature = "wal"))]
-        let outbox = Arc::new(Outbox::new());
+        let outbox = rekuest_session::Outbox::new();
+        let session = Session::with_outbox(
+            SessionConfig {
+                force: options.force,
+                policy: options.policy.clone(),
+                ..SessionConfig::new(session_id.clone(), rand::random())
+            },
+            outbox,
+        );
+        let shared = Arc::new(Shared::new(session));
         #[cfg(feature = "wal")]
         let sink = store
             .clone()
             .map(|s| Arc::new(s) as Arc<dyn crate::journal::JournalSink>);
         #[cfg(not(feature = "wal"))]
         let sink = None;
-        let journal = Arc::new(Journal::new(outbox.clone(), sink, Some(session_id.clone())));
+        let journal = Arc::new(Journal::new(shared.clone(), sink, Some(session_id.clone())));
         Self {
             options,
             executor: Executor::with_session(
@@ -206,14 +203,11 @@ impl Agent {
                 ctx,
                 journal.clone(),
                 None,
-                Some(session_id.clone()),
+                Some(session_id),
             ),
             tokens,
-            outbox,
+            shared,
             journal,
-            activation: Arc::default(),
-            activation_changed: Arc::default(),
-            session_id,
             #[cfg(feature = "wal")]
             store,
             backlog_loaded: Default::default(),
@@ -240,32 +234,137 @@ impl Agent {
     pub async fn run(&self) -> Result<(), AgentError> {
         fakts::install_crypto_provider();
         self.load_backlog().await;
-        let policy = self.options.policy.clone();
-        let mut attempt = 0usize;
+        let start = Instant::now();
+        let now = || start.elapsed();
+        let mut sink: Option<SplitSink<Ws, Message>> = None;
+        let mut stream: Option<SplitStream<Ws>> = None;
+        let (activated_tx, mut activated) = tokio::sync::mpsc::unbounded_channel();
+
         loop {
-            let started = Instant::now();
-            match self.session().await? {
-                SessionEnd::Bounce(delay) => {
-                    tracing::info!("server bounced the agent, reconnecting");
-                    attempt = 0;
-                    tokio::time::sleep(delay.unwrap_or(Duration::from_secs(1))).await;
-                    continue;
+            let (events, frames, deadline) = {
+                let mut session = self.shared.lock();
+                session.handle_timeout(now());
+                let events: Vec<Event> = std::iter::from_fn(|| session.poll_event()).collect();
+                let frames: Vec<String> = std::iter::from_fn(|| session.poll_transmit())
+                    .map(|envelope| to_text(&envelope))
+                    .collect();
+                (events, frames, session.poll_timeout())
+            };
+            let busy = !events.is_empty() || !frames.is_empty();
+
+            if let Some(open) = sink.as_mut() {
+                for frame in frames {
+                    if let Err(e) = open.send(Message::Text(frame)).await {
+                        self.shared
+                            .lock()
+                            .handle_disconnect(now(), &format!("send: {e}"));
+                        break;
+                    }
                 }
-                SessionEnd::Dropped(reason) => tracing::warn!("agent connection lost: {reason}"),
             }
-            if started.elapsed() >= policy.reset_after {
-                attempt = 0;
+
+            for event in events {
+                match event {
+                    Event::Connect => {
+                        let token = self.tokens.get_token().await?;
+                        let connected = crate::transport::connect_ws(
+                            &self.options.endpoint_url,
+                            self.options.connector.as_ref(),
+                        )
+                        .await;
+                        match connected {
+                            Ok((ws, _)) => {
+                                let (open, incoming) = ws.split();
+                                sink = Some(open);
+                                stream = Some(incoming);
+                                let declaration = self.declaration();
+                                self.shared.lock().connected(now(), token, declaration);
+                            }
+                            Err(e) => self.shared.lock().connect_failed(
+                                now(),
+                                &format!("connect to {}: {e}", self.options.endpoint_url),
+                            ),
+                        }
+                    }
+                    Event::Close => {
+                        stream = None;
+                        if let Some(mut open) = sink.take() {
+                            let _ = open.close().await;
+                        }
+                    }
+                    Event::Registered { agent, diagnostics } => {
+                        tracing::info!(
+                            "registered as agent {agent} with {} actions",
+                            self.executor.registry().len()
+                        );
+                        for d in diagnostics {
+                            tracing::warn!(
+                                "registration {}: {} ({}){}",
+                                d.level.as_deref().unwrap_or("WARNING"),
+                                d.message,
+                                d.code,
+                                d.path.map(|p| format!(" at {p}")).unwrap_or_default()
+                            );
+                        }
+                    }
+                    Event::ReloadJournal => {
+                        let entries = self.read_unacked().await;
+                        self.shared.lock().reloaded(entries);
+                    }
+                    Event::Inquiries(tasks) => self.answer_inquiries(tasks),
+                    Event::Activate => {
+                        let executor = self.executor.clone();
+                        let done = activated_tx.clone();
+                        tokio::spawn(async move {
+                            let result = executor.activate().await.map_err(|e| format!("{e:#}"));
+                            let _ = done.send(result);
+                        });
+                    }
+                    Event::Message(message) => self.dispatch(message),
+                    Event::Acked { session, pos } => self.record_ack(session, pos),
+                    Event::MalformedAssign { task, error } => {
+                        self.journal.emit(FromAgent::Critical { task, error }, None)
+                    }
+                    Event::Ended(error) => return Err(error.into()),
+                }
             }
-            attempt += 1;
-            if attempt > policy.max_retries {
-                return Err(AgentError::Exhausted(attempt - 1));
+            if busy {
+                // Acting may have queued more: REGISTER, reports, the end.
+                continue;
             }
-            let delay = policy.delay_for(attempt);
-            tracing::info!(
-                "reconnecting in {delay:?} (attempt {attempt}/{})",
-                policy.max_retries
-            );
-            tokio::time::sleep(delay).await;
+
+            let incoming = async {
+                match stream.as_mut() {
+                    Some(stream) => stream.next().await,
+                    None => std::future::pending().await,
+                }
+            };
+            let sleep = async {
+                match deadline {
+                    Some(at) => tokio::time::sleep_until(start + at).await,
+                    None => std::future::pending().await,
+                }
+            };
+            tokio::select! {
+                frame = incoming => {
+                    let mut session = self.shared.lock();
+                    match frame {
+                        None => session.handle_disconnect(now(), "stream ended"),
+                        Some(Err(e)) => session.handle_disconnect(now(), &format!("read: {e}")),
+                        Some(Ok(Message::Text(text))) => session.handle_text(now(), &text),
+                        Some(Ok(Message::Close(frame))) => {
+                            let (code, reason) = frame
+                                .map(|f| (u16::from(f.code), f.reason.to_string()))
+                                .unwrap_or((1005, String::new()));
+                            session.handle_close(now(), code, &reason);
+                        }
+                        Some(Ok(_)) => {}
+                    }
+                }
+                _ = self.shared.wake.notified() => {}
+                Some(result) = activated.recv() => self.shared.lock().activated(result),
+                _ = sleep => {}
+            }
         }
     }
 
@@ -286,13 +385,14 @@ impl Agent {
         }
         #[cfg(feature = "wal")]
         if let Some(store) = &self.store {
-            match store.unacked_entries(Some(&self.session_id)).await {
+            let session_id = self.shared.lock().session_id().to_owned();
+            match store.unacked_entries(Some(&session_id)).await {
                 Ok(entries) if !entries.is_empty() => {
                     tracing::info!(
                         "re-sending {} journal entries of earlier sessions",
                         entries.len()
                     );
-                    self.outbox.reload(entries);
+                    self.shared.lock().reloaded(Some(entries));
                 }
                 Ok(_) => {}
                 Err(e) => tracing::warn!("could not read the journal backlog: {e:#}"),
@@ -315,237 +415,42 @@ impl Agent {
         }
     }
 
-    /// Start activation after the first INIT; later INITs do nothing.
-    fn start_activation(&self) {
-        {
-            let mut activation = self.activation.lock().expect("activation lock");
-            if !matches!(*activation, Activation::NotStarted) {
-                return;
-            }
-            *activation = Activation::Running(vec![]);
-        }
-        let executor = self.executor.clone();
-        let activation = self.activation.clone();
-        let changed = self.activation_changed.clone();
-        tokio::spawn(async move {
-            let result = executor.activate().await;
-            let next = match &result {
-                Ok(()) => Activation::Done,
-                Err(e) => Activation::Failed(format!("{e:#}")),
-            };
-            let previous =
-                std::mem::replace(&mut *activation.lock().expect("activation lock"), next);
-            if let (Ok(()), Activation::Running(buffered)) = (&result, previous) {
-                for assign in buffered {
-                    executor.assign(assign);
-                }
-            }
-            changed.notify_waiters();
-        });
-    }
-
-    fn activation_failure(&self) -> Option<String> {
-        match &*self.activation.lock().expect("activation lock") {
-            Activation::Failed(e) => Some(e.clone()),
-            _ => None,
-        }
-    }
-
-    /// Frames dropped from memory (see [`Outbox::needs_reload`]) are read
-    /// back from the local journal before resending.
-    async fn reload_spilled(&self) {
+    /// The frames dropped from memory, read back from the local journal.
+    async fn read_unacked(&self) -> Option<Vec<JournalEntry>> {
         #[cfg(feature = "wal")]
         if let Some(store) = &self.store {
-            if self.outbox.needs_reload() {
-                self.journal.flush(crate::executor::FLUSH_TIMEOUT).await;
-                match store.unacked_entries(None).await {
-                    Ok(entries) => self.outbox.reload(entries),
-                    Err(e) => tracing::warn!("could not read the journal to resend it: {e:#}"),
+            self.journal.flush(crate::executor::FLUSH_TIMEOUT).await;
+            return match store.unacked_entries(None).await {
+                Ok(entries) => Some(entries),
+                Err(e) => {
+                    tracing::warn!("could not read the journal to resend it: {e:#}");
+                    None
                 }
-            }
+            };
         }
+        None
     }
 
-    /// Run now if activated, else hold until activation is done.
-    fn assign(&self, assign: Assign) {
-        let mut activation = self.activation.lock().expect("activation lock");
-        match &mut *activation {
-            Activation::Done => {
-                drop(activation);
-                self.executor.assign(assign);
-            }
-            Activation::Running(buffered) => buffered.push(assign),
-            Activation::Failed(_) => {
-                tracing::warn!("dropping an assignment: the agent failed to start")
-            }
-            // Cannot happen (assignments come after INIT), but never lose one.
-            Activation::NotStarted => *activation = Activation::Running(vec![assign]),
+    fn record_ack(&self, session: String, pos: u64) {
+        #[cfg(feature = "wal")]
+        if let Some(store) = self.store.clone() {
+            tokio::spawn(async move {
+                if let Err(e) = store.set_acked(&session, pos).await {
+                    tracing::warn!("could not record the journal ack: {e:#}");
+                }
+            });
         }
-    }
-
-    async fn session(&self) -> Result<SessionEnd, AgentError> {
-        let token = self.tokens.get_token().await?;
-
-        let (ws, _) = match crate::transport::connect_ws(
-            &self.options.endpoint_url,
-            self.options.connector.as_ref(),
-        )
-        .await
-        {
-            Ok(ws) => ws,
-            Err(e) => {
-                return Ok(SessionEnd::Dropped(format!(
-                    "connect to {}: {e}",
-                    self.options.endpoint_url
-                )))
-            }
-        };
-        let (mut sink, mut stream) = ws.split();
-
-        let register = Envelope::new(FromAgent::Register {
-            token,
-            force: self.options.force,
-            session_id: Some(self.session_id.clone()),
-            features: vec![],
-            declaration: self.declaration(),
-        });
-        if let Err(e) = sink.send(Message::Text(to_json(&register))).await {
-            return Ok(SessionEnd::Dropped(format!("send REGISTER: {e}")));
-        }
-
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Envelope>();
-        let mut initialized = false;
-        let mut early: Vec<ToAgent> = vec![];
-
-        let end = loop {
-            let activation_changed = self.activation_changed.notified();
-            let frame = tokio::select! {
-                Some(envelope) = rx.recv() => {
-                    if let Err(e) = sink.send(Message::Text(to_json(&envelope))).await {
-                        break SessionEnd::Dropped(format!("send: {e}"));
-                    }
-                    continue;
-                }
-                _ = activation_changed => {
-                    if let Some(error) = self.activation_failure() {
-                        self.outbox.detach();
-                        return Err(AgentError::Activation(error));
-                    }
-                    continue;
-                }
-                frame = tokio::time::timeout(IDLE_TIMEOUT, stream.next()) => frame,
-            };
-
-            let text = match frame {
-                Err(_) => {
-                    break SessionEnd::Dropped(
-                        "no frame from the server within the idle timeout".into(),
-                    )
-                }
-                Ok(None) => break SessionEnd::Dropped("stream ended".into()),
-                Ok(Some(Err(e))) => break SessionEnd::Dropped(format!("read: {e}")),
-                Ok(Some(Ok(Message::Text(text)))) => text,
-                Ok(Some(Ok(Message::Close(frame)))) => {
-                    let (code, reason) = frame
-                        .map(|f| (u16::from(f.code), f.reason.to_string()))
-                        .unwrap_or((1005, String::new()));
-                    if matches!(code, CLOSE_BLOCKED | CLOSE_BUSY | CLOSE_KICKED) {
-                        self.outbox.detach();
-                        return Err(AgentError::Closed { code, reason });
-                    }
-                    break SessionEnd::Dropped(format!("closed with code {code} {reason}"));
-                }
-                Ok(Some(Ok(_))) => continue,
-            };
-
-            let message = match parse_to_agent(&text) {
-                Ok(message) => message,
-                Err((raw, e)) => {
-                    self.reject_frame(raw, e);
-                    continue;
-                }
-            };
-
-            match message {
-                ToAgent::Heartbeat {} => {
-                    let answer = Envelope::new(FromAgent::HeartbeatAnswer {});
-                    if let Err(e) = sink.send(Message::Text(to_json(&answer))).await {
-                        break SessionEnd::Dropped(format!("send: {e}"));
-                    }
-                }
-                ToAgent::Init {
-                    agent,
-                    inquiries,
-                    diagnostics,
-                    ..
-                } => {
-                    tracing::info!(
-                        "registered as agent {agent} with {} actions",
-                        self.executor.registry().len()
-                    );
-                    for d in diagnostics {
-                        tracing::warn!(
-                            "registration {}: {} ({}){}",
-                            d.level.as_deref().unwrap_or("WARNING"),
-                            d.message,
-                            d.code,
-                            d.path.map(|p| format!(" at {p}")).unwrap_or_default()
-                        );
-                    }
-                    self.reload_spilled().await;
-                    self.outbox.attach(tx.clone());
-                    self.outbox.resend_unacked();
-                    self.answer_inquiries(inquiries.into_iter().map(|i| i.task));
-                    self.start_activation();
-                    initialized = true;
-                    for message in early.drain(..) {
-                        self.dispatch(message);
-                    }
-                }
-                ToAgent::ProtocolError { error } => {
-                    self.outbox.detach();
-                    return Err(AgentError::Refused(error));
-                }
-                ToAgent::Kick { reason } => {
-                    self.outbox.detach();
-                    return Err(AgentError::Kicked(reason));
-                }
-                ToAgent::Bounce { duration } => {
-                    break SessionEnd::Bounce(duration.map(Duration::from_secs));
-                }
-                other if !initialized => early.push(other),
-                other => self.dispatch(other),
-            }
-        };
-        self.outbox.detach();
-        let _ = sink.close().await;
-        Ok(end)
+        #[cfg(not(feature = "wal"))]
+        let _ = (session, pos);
     }
 
     fn dispatch(&self, message: ToAgent) {
         match message {
-            ToAgent::Assign(assign) => self.assign(*assign),
+            ToAgent::Assign(assign) => self.executor.assign(*assign),
             ToAgent::Cancel { task } => self.executor.cancel(&task),
             ToAgent::Interrupt { task } => self.executor.interrupt(&task),
             ToAgent::Pause { task } => self.executor.pause(&task),
             ToAgent::Resume { task, step } => self.executor.resume(&task, step),
-            // Frames are retired by JOURNAL_ACK; the server stops sending
-            // EVENT_ACK once it gets positions.
-            ToAgent::EventAck { .. } => {}
-            ToAgent::JournalAck {
-                journal_session,
-                pos,
-            } => {
-                self.outbox.journal_ack(&journal_session, pos);
-                #[cfg(feature = "wal")]
-                if let Some(store) = self.store.clone() {
-                    tokio::spawn(async move {
-                        if let Err(e) = store.set_acked(&journal_session, pos).await {
-                            tracing::warn!("could not record the journal ack: {e:#}");
-                        }
-                    });
-                }
-            }
             ToAgent::Collect { drawers } => {
                 for drawer in drawers {
                     self.executor.shelf().remove(&drawer);
@@ -554,32 +459,11 @@ impl Agent {
             ToAgent::Shelved { error: Some(e), .. } | ToAgent::Unshelved { error: Some(e), .. } => {
                 tracing::warn!("the server could not record a drawer: {e}")
             }
-            ToAgent::Unknown => tracing::debug!("ignoring an unsupported message"),
             other => tracing::debug!("ignoring {other:?}"),
         }
     }
 
-    /// A frame that did not parse. A broken ASSIGN is answered so the caller
-    /// is not left waiting; anything else is logged.
-    fn reject_frame(&self, raw: Option<serde_json::Value>, error: serde_json::Error) {
-        let task = raw
-            .as_ref()
-            .filter(|v| v.get("type").and_then(|t| t.as_str()) == Some("ASSIGN"))
-            .and_then(|v| v.get("task"))
-            .and_then(|t| t.as_str());
-        match task {
-            Some(task) => self.journal.emit(
-                FromAgent::Critical {
-                    task: task.to_owned(),
-                    error: format!("malformed ASSIGN: {error}"),
-                },
-                None,
-            ),
-            None => tracing::warn!("could not parse a server frame: {error}"),
-        }
-    }
-
-    fn answer_inquiries(&self, tasks: impl Iterator<Item = String>) {
+    fn answer_inquiries(&self, tasks: Vec<String>) {
         for task in tasks {
             if self.executor.is_running(&task) {
                 self.journal.emit(
@@ -604,6 +488,111 @@ impl Agent {
     }
 }
 
-fn to_json(envelope: &Envelope) -> String {
-    serde_json::to_string(envelope).expect("messages serialize")
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::messages::Envelope;
+
+    fn shared() -> (Arc<Shared>, Journal) {
+        let shared = Arc::new(Shared::new(Session::new(SessionConfig::new("s", 1))));
+        let journal = Journal::new(shared.clone(), None, Some("s".into()));
+        (shared, journal)
+    }
+
+    /// Connected and past INIT: reports go out.
+    fn live(shared: &Shared) {
+        let mut session = shared.lock();
+        session.handle_timeout(Duration::ZERO);
+        session.connected(
+            Duration::ZERO,
+            "t".into(),
+            serde_json::from_value(serde_json::json!({})).unwrap(),
+        );
+        session.handle_text(
+            Duration::ZERO,
+            r#"{"type":"INIT","id":"i","agent":"a","inquiries":[],"diagnostics":[]}"#,
+        );
+        session.poll_transmit();
+    }
+
+    fn drain(shared: &Shared) -> Vec<Envelope> {
+        let mut session = shared.lock();
+        std::iter::from_fn(|| session.poll_transmit()).collect()
+    }
+
+    fn log(task: &str) -> FromAgent {
+        FromAgent::Log {
+            task: task.into(),
+            message: "m".into(),
+            level: Default::default(),
+        }
+    }
+
+    #[test]
+    fn effects_are_numbered_and_sent_at_once() {
+        let (shared, journal) = shared();
+        live(&shared);
+        journal.emit(log("t"), None);
+        journal.emit(
+            FromAgent::Effect {
+                task: "t".into(),
+                effect: crate::messages::EffectKind::Now,
+                value: 1.5.into(),
+                key: None,
+            },
+            None,
+        );
+        let sent = drain(&shared);
+        assert_eq!((sent[1].pos, sent[1].task_step), (Some(2), Some(2)));
+        let json = serde_json::to_value(&sent[1]).unwrap();
+        assert_eq!(
+            (
+                json["type"].as_str(),
+                json["effect"].as_str(),
+                json["value"].as_f64()
+            ),
+            (Some("EFFECT"), Some("NOW"), Some(1.5))
+        );
+    }
+
+    #[test]
+    fn probes_and_requests_are_never_numbered_or_retained() {
+        let (shared, journal) = shared();
+        live(&shared);
+        journal.emit(log("p-1"), None);
+        journal.emit(FromAgent::Completed { task: "p-1".into() }, None);
+        journal.emit(
+            FromAgent::AssignRequest {
+                reference: None,
+                parent_step: Some(3),
+                call_key: None,
+                args: Default::default(),
+                action: Some("a".into()),
+                action_hash: None,
+                implementation: None,
+                agent: None,
+                interface: None,
+                parent: Some("t".into()),
+                dependency: None,
+                method: None,
+                resolution: None,
+                hooks: None,
+                capture: None,
+                step: None,
+                prompt: None,
+                state_requires: vec![],
+            },
+            None,
+        );
+        journal.emit(log("t"), None);
+        let sent = drain(&shared);
+        assert_eq!(
+            sent.iter()
+                .map(|e| (e.pos, e.task_step))
+                .collect::<Vec<_>>(),
+            [(None, None), (None, None), (None, None), (Some(1), Some(1))]
+        );
+        assert_eq!(sent[2].seq, None, "a request has no seq");
+        assert_eq!(shared.lock().outbox().retained_len(), 1);
+    }
 }

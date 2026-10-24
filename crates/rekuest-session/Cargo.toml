@@ -1,0 +1,24 @@
+[package]
+name = "rekuest-session"
+description = "The rekuest agent session as a sans-IO state machine: runs under tokio, on wasm and on embassy"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "README.md"
+
+# no_std + alloc: no async, no clock, no OS randomness. The driver feeds
+# time and frames in and takes frames, events and deadlines out.
+[dependencies]
+rekuest-protocol.workspace = true
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+uuid = { version = "1", default-features = false }
+tracing = { version = "0.1", default-features = false }
+
+[features]
+# FakeServer and Echo: a scripted server and a minimal app, for drivers' tests.
+testing = []

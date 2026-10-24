@@ -1,0 +1,25 @@
+# The rekuest session on wasm32-unknown-unknown: a minimal driver on the
+# browser/node event loop (wasm-bindgen-futures, setTimeout) running the
+# shared scripted scenario against a fake socket served by another task.
+# `wasm-pack test --node` runs it. Not a workspace member.
+[package]
+name = "wasm-control"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+rekuest-session = { path = "../../crates/rekuest-session", features = ["testing"] }
+futures = "0.3"
+gloo-timers = { version = "0.3", features = ["futures"] }
+js-sys = "0.3"
+wasm-bindgen-futures = "0.4"
+serde_json = "1"
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
