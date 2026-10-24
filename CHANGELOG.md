@@ -1,6 +1,30 @@
 # CHANGELOG
 
 
+## v0.11.1 (2026-10-24)
+
+### Bug Fixes
+
+- **fakts**: Give mesh aliases 20 s to answer their challenge
+  ([`76fbf5e`](https://github.com/arkitektio/arkirust/commit/76fbf5ef7cd736693f057777d575ece61687d117))
+
+The first request to a mesh peer sets up its tunnel (a WireGuard handshake, through DERP at first),
+  about 5 s on an ESP32; with 3 s the alias was skipped and a mesh-only service unreachable. Direct
+  aliases keep 3 s.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+### Continuous Integration
+
+- Publish to crates.io on a manual run
+  ([`f077d59`](https://github.com/arkitektio/arkirust/commit/f077d5919654dfff14dac0f888a008342679d783))
+
+A release whose tag push failed (GitHub's commit_refs error) left 0.11.0 tagged but unpublished; a
+  workflow_dispatch run publishes what crates.io lacks.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+
 ## v0.11.0 (2026-10-24)
 
 ### Features
