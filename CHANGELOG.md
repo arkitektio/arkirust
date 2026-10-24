@@ -1,6 +1,41 @@
 # CHANGELOG
 
 
+## v0.9.0 (2026-10-24)
+
+### Features
+
+- **fakts**: Keep the fakts in a store of the app's choosing
+  ([`ad91dfe`](https://github.com/arkitektio/arkirust/commit/ad91dfe7264aa263ce43f49a1b1990b3788137ae))
+
+FaktsStore (load, save, clear under the app's cache key) replaces the hard-wired cache file, so a
+  target without a filesystem keeps its credential where it can (a firmware's NVS). FileStore is the
+  old file cache and stays the default; FaktsBuilder::store and ConnectOptions::store take another
+  one.
+
+BREAKING CHANGE: fakts::cache's read/write/remove are private; use FileStore.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+- **rekuest**: The agent's websocket runs over a connector
+  ([`2db6cb1`](https://github.com/arkitektio/arkirust/commit/2db6cb1b0f23aad15da73aed2e25562ea3ca5bfa))
+
+AgentOptions.connector (rekuest::Connector) opens the stream the websocket and its TLS run over:
+  Direct (plain TCP, the default), HttpProxy (the mesh sidecar's CONNECT proxy, what arkitekt picks
+  for a mesh alias), or the app's own, e.g. a connection through a mesh node it runs itself. Without
+  the wal feature, AgentOptions::new no longer names a SQLite journal file.
+
+BREAKING CHANGE: AgentOptions.proxy is gone (use connector: Arc::new(HttpProxy::new(proxy))), and
+  connect_ws takes a &dyn Connector.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+### Breaking Changes
+
+- **rekuest**: Agentoptions.proxy is gone (use connector: Arc::new(HttpProxy::new(proxy))), and
+  connect_ws takes a &dyn Connector.
+
+
 ## v0.8.0 (2026-10-24)
 
 ### Chores
