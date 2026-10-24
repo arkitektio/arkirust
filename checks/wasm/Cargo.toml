@@ -3,6 +3,8 @@
 # the shared scripted scenario against a fake socket served by another task:
 # once with the bare session (`run`), once with a real `#[action]` through the
 # executor and journal (`run_agent`). `wasm-pack test --node` runs both.
+# tests/real_stack.rs logs in at a real lok and registers with a real takt
+# (rekuest's `real_rekuest` test starts the stack and runs it).
 # Not a workspace member.
 [package]
 name = "wasm-control"
@@ -20,9 +22,11 @@ rekuest-session = { path = "../../crates/rekuest-session", features = ["testing"
 futures = "0.3"
 gloo-timers = { version = "0.3", features = ["futures"] }
 js-sys = "0.3"
+wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 serde_json = "1"
-rekuest = { path = "../../crates/rekuest", default-features = false }
+rekuest = { path = "../../crates/rekuest", default-features = false, features = ["web", "rath"] }
+fakts = { path = "../../crates/fakts", default-features = false }
 send_wrapper = { version = "0.6", features = ["futures"] }
 
 [dev-dependencies]

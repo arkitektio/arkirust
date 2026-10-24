@@ -1,7 +1,9 @@
 //! The HTTP legs of fakts v2: discovery, device-code demand + polling,
 //! refresh, and the headless mandate-key login.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use web_time::Instant;
 
 use reqwest::{Client, StatusCode, Url};
 use serde::Serialize;
@@ -93,14 +95,9 @@ pub async fn discover(http: &Client, url: &str) -> Result<(String, WellKnown)> {
     let mut last_error = String::from("no candidate urls");
     for base in candidates(url) {
         let endpoint = format!("{base}/.well-known/fakts");
-        match http
-            .get(&endpoint)
-            .timeout(Duration::from_secs(10))
-            .send()
-            .await
-        {
-            Ok(resp) if resp.status().is_success() => {
-                let doc: WellKnown = resp.json().await.map_err(|e| {
+        match crate::http::fetch(with_timeout(http.get(&endpoint), Duration::from_secs(10))).await {
+            Ok(reply) if reply.status.is_success() => {
+                let doc: WellKnown = reply.json().map_err(|e| {
                     FaktsError::Discovery(format!("{endpoint}: invalid document: {e}"))
                 })?;
                 match doc.protocol_version.as_deref() {
@@ -113,7 +110,7 @@ pub async fn discover(http: &Client, url: &str) -> Result<(String, WellKnown)> {
                     }
                 }
             }
-            Ok(resp) => last_error = format!("{endpoint}: HTTP {}", resp.status()),
+            Ok(reply) => last_error = format!("{endpoint}: HTTP {}", reply.status),
             Err(e) => last_error = format!("{endpoint}: {e}"),
         }
     }
@@ -203,12 +200,12 @@ pub async fn device_code_grant(
     };
 
     let demand = loop {
-        let resp = http.post(endpoint).json(&body).send().await?;
-        if resp.status() == StatusCode::TOO_MANY_REQUESTS {
-            tokio::time::sleep(Duration::from_secs(5)).await;
+        let reply = crate::http::fetch(http.post(endpoint).json(&body)).await?;
+        if reply.status == StatusCode::TOO_MANY_REQUESTS {
+            crate::http::sleep(Duration::from_secs(5)).await;
             continue;
         }
-        let demand: DeviceCodeResponse = resp.json().await?;
+        let demand: DeviceCodeResponse = reply.json()?;
         if demand.status.as_deref() == Some("error") || demand.error.is_some() {
             return Err(FaktsError::Protocol(format!(
                 "device authorization refused: {}",
@@ -244,19 +241,16 @@ pub async fn device_code_grant(
         if Instant::now() >= deadline {
             return Err(FaktsError::Expired);
         }
-        tokio::time::sleep(interval.min(deadline.saturating_duration_since(Instant::now()))).await;
+        crate::http::sleep(interval.min(deadline.saturating_duration_since(Instant::now()))).await;
 
-        let resp = http
-            .post(&token_endpoint)
-            .form(&[
-                ("grant_type", DEVICE_CODE_GRANT),
-                ("device_code", device_code.as_str()),
-                ("client_id", client_id.as_str()),
-            ])
-            .send()
-            .await?;
+        let reply = crate::http::fetch(http.post(&token_endpoint).form(&[
+            ("grant_type", DEVICE_CODE_GRANT),
+            ("device_code", device_code.as_str()),
+            ("client_id", client_id.as_str()),
+        ]))
+        .await?;
 
-        match parse_token_response(resp).await? {
+        match parse_token_response(reply)? {
             Ok(response) => {
                 return Ok(GrantOutcome {
                     response,
@@ -333,22 +327,19 @@ pub async fn mandate_key_grant(
     request_auth_key: bool,
 ) -> Result<TokenResponse> {
     let manifest = serde_json::to_string(manifest)?;
-    let resp = http
-        .post(token_endpoint)
-        .form(&[
-            ("grant_type", MANDATE_KEY_GRANT),
-            ("key", options.key.as_str()),
-            ("manifest", manifest.as_str()),
-            ("requested_client_kind", options.client_kind.as_str()),
-            ("requested_client_role", options.client_role.as_str()),
-            (
-                "request_auth_key",
-                if request_auth_key { "true" } else { "false" },
-            ),
-        ])
-        .send()
-        .await?;
-    match parse_token_response(resp).await? {
+    let reply = crate::http::fetch(http.post(token_endpoint).form(&[
+        ("grant_type", MANDATE_KEY_GRANT),
+        ("key", options.key.as_str()),
+        ("manifest", manifest.as_str()),
+        ("requested_client_kind", options.client_kind.as_str()),
+        ("requested_client_role", options.client_role.as_str()),
+        (
+            "request_auth_key",
+            if request_auth_key { "true" } else { "false" },
+        ),
+    ]))
+    .await?;
+    match parse_token_response(reply)? {
         Ok(response) => Ok(response),
         Err(err) if err.error == "invalid_grant" => Err(FaktsError::InvalidGrant(format!(
             "the server refused the mandate key ({}): it was revoked, has expired or does not \
@@ -370,16 +361,13 @@ pub async fn refresh_grant(
     client_id: &str,
     refresh_token: &str,
 ) -> Result<TokenResponse> {
-    let resp = http
-        .post(token_endpoint)
-        .form(&[
-            ("grant_type", "refresh_token"),
-            ("refresh_token", refresh_token),
-            ("client_id", client_id),
-        ])
-        .send()
-        .await?;
-    match parse_token_response(resp).await? {
+    let reply = crate::http::fetch(http.post(token_endpoint).form(&[
+        ("grant_type", "refresh_token"),
+        ("refresh_token", refresh_token),
+        ("client_id", client_id),
+    ]))
+    .await?;
+    match parse_token_response(reply)? {
         Ok(response) => Ok(response),
         Err(err) if matches!(err.error.as_str(), "invalid_grant" | "invalid_client") => {
             Err(FaktsError::InvalidGrant(err.error))
@@ -391,11 +379,11 @@ pub async fn refresh_grant(
     }
 }
 
-async fn parse_token_response(
-    resp: reqwest::Response,
+fn parse_token_response(
+    reply: crate::http::Reply,
 ) -> Result<std::result::Result<TokenResponse, OAuthError>> {
-    let status = resp.status();
-    let bytes = resp.bytes().await?;
+    let status = reply.status;
+    let bytes = reply.body;
     if status.is_success() {
         return Ok(Ok(serde_json::from_slice(&bytes)?));
     }
@@ -405,6 +393,17 @@ async fn parse_token_response(
             "token endpoint answered HTTP {status}: {}",
             String::from_utf8_lossy(&bytes)
         ))),
+    }
+}
+
+/// A per-request timeout where the target has one (fetch has none in reqwest).
+fn with_timeout(request: reqwest::RequestBuilder, timeout: Duration) -> reqwest::RequestBuilder {
+    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+    return request.timeout(timeout);
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    {
+        let _ = timeout;
+        request
     }
 }
 

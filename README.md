@@ -394,8 +394,15 @@ journal); `Agent` is it with a tokio websocket, and `checks/wasm` runs a real
 both on by default and turned on by `arkitekt`; `wal` and `serve` need tokio.
 Action futures must be `Send` everywhere, so a browser action that holds a JS
 value across an `.await` wraps it (e.g. `send_wrapper`); wasm has one thread.
-Not yet without std (embassy): the executor still uses std's mutexes, maps
-and thread locals.
+
+In a browser or node (wasm32), `rekuest`'s `web` feature has `web::Agent`:
+the same driver over the JS `WebSocket`, on the JS event loop (`rt::Js`),
+with tokens from `fakts`, which logs in over `fetch` there (as `rath` makes
+its requests); there is no cache file and no mesh. The e2e job runs it under
+node against the real stack (`checks/wasm/tests/real_stack.rs`). Node does
+not enforce CORS; a browser needs lok and takt to allow its origin.
+`arkitekt` itself is not on wasm yet. Not yet without std (embassy): the
+executor still uses std's mutexes, maps and thread locals.
 
 ## Development
 

@@ -591,14 +591,23 @@ impl Fakts {
             } else {
                 CHALLENGE_TIMEOUT
             };
-            let builder = Client::builder()
-                .redirect(reqwest::redirect::Policy::none())
-                .timeout(timeout);
-            Ok(match proxy {
-                Some(proxy) => builder.proxy(reqwest::Proxy::all(proxy)?),
-                None => builder,
-            }
-            .build()?)
+            #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+            let builder = {
+                let builder = Client::builder()
+                    .redirect(reqwest::redirect::Policy::none())
+                    .timeout(timeout);
+                match proxy {
+                    Some(proxy) => builder.proxy(reqwest::Proxy::all(proxy)?),
+                    None => builder,
+                }
+            };
+            // fetch follows redirects and has no proxy; there is no mesh in a browser.
+            #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+            let builder = {
+                let _ = (proxy, timeout);
+                Client::builder()
+            };
+            Ok(builder.build()?)
         };
         let direct = challenge_client(None)?;
         let proxied = self
@@ -643,13 +652,13 @@ impl Fakts {
     async fn challenge(&self, http: &Client, instance: &Instance, alias: &Alias) -> Result<()> {
         let url = alias.challenge_path();
         let Some(key) = &instance.challenge_key else {
-            let resp = http.get(&url).send().await?;
-            return if resp.status().is_success() {
+            let reply = crate::http::fetch(http.get(&url)).await?;
+            return if reply.status.is_success() {
                 Ok(())
             } else {
                 Err(FaktsError::Protocol(format!(
                     "challenge answered {}",
-                    resp.status()
+                    reply.status
                 )))
             };
         };
@@ -657,18 +666,18 @@ impl Fakts {
         let mut raw = [0u8; 24];
         rand::thread_rng().fill_bytes(&mut raw);
         let nonce = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(raw);
-        let resp = http.get(&url).query(&[("nonce", &nonce)]).send().await?;
-        if !resp.status().is_success() {
+        let reply = crate::http::fetch(http.get(&url).query(&[("nonce", &nonce)])).await?;
+        if !reply.status.is_success() {
             return Err(FaktsError::Protocol(format!(
                 "challenge answered {}",
-                resp.status()
+                reply.status
             )));
         }
         #[derive(serde::Deserialize)]
         struct Signed {
             signature: String,
         }
-        let signed: Signed = resp.json().await?;
+        let signed: Signed = reply.json()?;
         verify_challenge(key, &nonce, &signed.signature)
     }
 

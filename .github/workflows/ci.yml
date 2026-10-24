@@ -73,9 +73,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            checks/wasm
+      # The wasm agent's run (checks/wasm under node, from real_rekuest).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: cargo-bins/cargo-binstall@main
+      - run: cargo binstall -y --locked wasm-pack
       - run: cargo test -p fakts --test real_lok -- --ignored --nocapture
-      # A real agent registers with takt and gets its journal acknowledged.
+      # A real agent registers with takt and gets its journal acknowledged,
+      # natively and from wasm under node (fakts over fetch, the JS WebSocket).
       - run: cargo test -p rekuest --test real_rekuest -- --ignored --nocapture
 
   # The agent stack on the ESP32-S3 (checks/esp32s3): no ring, no signals,
@@ -127,8 +140,10 @@ jobs:
       # The core itself, without std.
       - run: cargo build -p rekuest-session -p rekuest-protocol --no-default-features --target thumbv7em-none-eabihf
       - run: cargo build -p rekuest-session -p rekuest-protocol --no-default-features --target wasm32-unknown-unknown
-      # The agent itself (executor, journal, states, #[action]) without tokio.
+      # The agent itself (executor, journal, states, #[action]) without tokio,
+      # and the browser agent with its login (fakts) and GraphQL client (rath).
       - run: cargo clippy -p rekuest --no-default-features --target wasm32-unknown-unknown -- -D warnings
+      - run: cargo clippy -p rekuest -p fakts -p arkitekt-rath --no-default-features --features rekuest/web,rekuest/rath --target wasm32-unknown-unknown -- -D warnings
       - run: wasm-pack test --node
         working-directory: checks/wasm
       - run: cargo clippy --target wasm32-unknown-unknown --all-targets -- -D warnings

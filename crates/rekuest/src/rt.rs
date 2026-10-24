@@ -56,27 +56,50 @@ pub fn install(runtime: Arc<dyn Runtime>) -> Result<(), Arc<dyn Runtime>> {
     RUNTIME.set(runtime)
 }
 
-/// The installed runtime, else tokio (with the `tokio` feature).
+/// The installed runtime, else the JS event loop (`web`, on wasm32), else
+/// tokio (with the `tokio` feature).
 pub fn current() -> &'static dyn Runtime {
-    if let Some(runtime) = RUNTIME.get() {
-        return runtime.as_ref();
+    match RUNTIME.get() {
+        Some(runtime) => runtime.as_ref(),
+        None => fallback()
+            .expect("no async runtime: call rekuest::rt::install before building an agent"),
     }
-    #[cfg(feature = "tokio")]
-    {
-        &Tokio
-    }
-    #[cfg(not(feature = "tokio"))]
-    panic!("no async runtime: call rekuest::rt::install before building an agent")
 }
 
 /// Whether there is a runtime to spawn on from here.
 pub fn available() -> bool {
     match RUNTIME.get() {
         Some(runtime) => runtime.is_available(),
-        #[cfg(feature = "tokio")]
-        None => Tokio.is_available(),
-        #[cfg(not(feature = "tokio"))]
-        None => false,
+        None => fallback().is_some_and(|runtime| runtime.is_available()),
+    }
+}
+
+#[allow(unreachable_code)]
+fn fallback() -> Option<&'static dyn Runtime> {
+    #[cfg(all(feature = "web", target_arch = "wasm32"))]
+    return Some(&Js);
+    #[cfg(feature = "tokio")]
+    return Some(&Tokio);
+    None
+}
+
+/// The JS event loop (wasm32 with `web`): `spawn_local` and `setTimeout`.
+/// Its futures are not `Send`; wasm has one thread, so wrapping them is sound.
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Js;
+
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+impl Runtime for Js {
+    fn spawn(&self, future: BoxFuture) {
+        wasm_bindgen_futures::spawn_local(future);
+    }
+
+    fn sleep(&self, duration: Duration) -> BoxFuture {
+        let millis = duration.as_millis().min(u32::MAX as u128) as u32;
+        Box::pin(send_wrapper::SendWrapper::new(
+            gloo_timers::future::TimeoutFuture::new(millis),
+        ))
     }
 }
 

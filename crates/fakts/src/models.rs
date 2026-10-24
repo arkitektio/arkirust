@@ -165,10 +165,14 @@ impl Alias {
     /// A client for this alias: proxied through the mesh sidecar when needed.
     pub fn http_client_builder(&self) -> reqwest::Result<reqwest::ClientBuilder> {
         let builder = reqwest::Client::builder();
-        Ok(match &self.proxy {
+        #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+        return Ok(match &self.proxy {
             Some(proxy) => builder.proxy(reqwest::Proxy::all(proxy)?),
             None => builder,
-        })
+        });
+        // A browser has no proxy, and no mesh to reach.
+        #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+        Ok(builder)
     }
 
     /// See [`Alias::http_client_builder`].

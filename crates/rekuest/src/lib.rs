@@ -22,6 +22,8 @@ extern crate self as rekuest;
 mod action;
 #[cfg(feature = "tokio")]
 pub mod agent;
+#[cfg(any(feature = "tokio", feature = "web"))]
+mod agent_error;
 mod context;
 pub mod driver;
 mod emit;
@@ -40,13 +42,17 @@ pub mod store;
 mod task;
 #[cfg(feature = "tokio")]
 pub mod transport;
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+pub mod web;
 
 // The wire types live in `rekuest-protocol` (shared with servers); these paths stay.
 pub use rekuest_protocol::{definition, messages, ports};
 
 pub use crate::action::{Action, ActionError, Concurrency, Registry};
 #[cfg(feature = "tokio")]
-pub use crate::agent::{Agent, AgentError, AgentOptions};
+pub use crate::agent::{Agent, AgentOptions};
+#[cfg(any(feature = "tokio", feature = "web"))]
+pub use crate::agent_error::AgentError;
 pub use crate::context::{Context, ContextBuilder, MissingClient};
 pub use crate::definition::{ActionKind, AgentDeclaration, Definition, Implementation};
 pub use crate::driver::Driver;

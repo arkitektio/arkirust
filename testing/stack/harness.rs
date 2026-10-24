@@ -72,7 +72,13 @@ impl Stack {
         }
 
         let stack = Self {
-            project: format!("arkirust-e2e-{}", std::process::id()),
+            // One project per stack: tests in one binary run side by side.
+            project: {
+                static STACKS: std::sync::atomic::AtomicUsize =
+                    std::sync::atomic::AtomicUsize::new(0);
+                let n = STACKS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                format!("arkirust-e2e-{}-{n}", std::process::id())
+            },
             env: vec![
                 ("LOK_HOST_PORT", lok.to_string()),
                 ("REKUEST_HOST_PORT", rekuest.to_string()),

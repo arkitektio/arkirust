@@ -98,6 +98,7 @@ pub fn cache_key(manifest: &Manifest, url: &str) -> String {
     format!("{}{}", manifest.hash(), url)
 }
 
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 /// Read the cache, returning `None` when it is missing, unreadable or stale.
 async fn read(path: &Path, key: &str) -> Option<CacheFile> {
     let raw = tokio::fs::read(path).await.ok()?;
@@ -111,6 +112,7 @@ async fn read(path: &Path, key: &str) -> Option<CacheFile> {
     (file.hash == key).then_some(file)
 }
 
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 /// Write the cache with owner-only permissions (0600 file, 0700 directory).
 async fn write(path: &Path, key: &str, fakts: &ActiveFakts) -> Result<()> {
     if let Some(parent) = path.parent() {
@@ -129,15 +131,35 @@ async fn write(path: &Path, key: &str, fakts: &ActiveFakts) -> Result<()> {
     Ok(())
 }
 
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 async fn remove(path: &Path) {
     let _ = tokio::fs::remove_file(path).await;
 }
 
 #[cfg(unix)]
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 async fn set_mode(path: &Path, mode: u32) {
     use std::os::unix::fs::PermissionsExt;
     let _ = tokio::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).await;
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, all(target_arch = "wasm32", target_os = "unknown"))))]
 async fn set_mode(_path: &Path, _mode: u32) {}
+
+/// No filesystem on wasm: nothing is read, a write is refused (give the
+/// builder a [`FaktsStore`] of your own, e.g. on `localStorage`).
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+async fn read(_path: &Path, _key: &str) -> Option<CacheFile> {
+    None
+}
+
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+async fn write(path: &Path, _key: &str, _fakts: &ActiveFakts) -> Result<()> {
+    Err(crate::FaktsError::Io(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        format!("no filesystem to cache the fakts at {}", path.display()),
+    )))
+}
+
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+async fn remove(_path: &Path) {}

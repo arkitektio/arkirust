@@ -63,6 +63,7 @@ impl Connector for HttpProxy {
 pub type Ws = WebSocketStream<MaybeTlsStream<Box<dyn Stream>>>;
 
 /// Connect to `url` (`ws://` or `wss://`) over a stream `connector` opens.
+#[allow(clippy::result_large_err)] // tungstenite's own error, as its connect returns it
 pub async fn connect_ws(url: &str, connector: &dyn Connector) -> Result<(Ws, Response), Error> {
     let request = url.into_client_request()?;
     let uri = request.uri();

@@ -8,6 +8,9 @@
 //! ```sh
 //! cargo test -p rekuest --test real_rekuest -- --ignored --nocapture
 //! ```
+//!
+//! The second test runs the same from wasm: `checks/wasm`'s real-stack test
+//! under node (`wasm-pack test --node`, which must be installed).
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -108,4 +111,39 @@ async fn the_agent_registers_and_the_server_acknowledges_its_journal() {
 
     assert!(!running.is_finished(), "the agent is still serving");
     running.abort();
+}
+
+#[tokio::test]
+#[ignore = "starts the docker test stack and runs checks/wasm under node: run with --ignored"]
+async fn a_wasm_agent_registers_and_the_server_acknowledges_its_journal() {
+    fakts::install_crypto_provider();
+    let stack = Stack::up();
+    stack.wait_healthy("lok", stack.lok).await;
+    stack.wait_healthy("rekuest", stack.rekuest).await;
+
+    let checks = harness::stack_dir().join("../../checks/wasm");
+    let output = tokio::process::Command::new("wasm-pack")
+        .args([
+            "test",
+            "--node",
+            "--test",
+            "real_stack",
+            "--",
+            "--nocapture",
+        ])
+        .env(
+            "ARKIRUST_E2E_LOK",
+            format!("http://localhost:{}", stack.lok),
+        )
+        .env("ARKIRUST_E2E_KEY", MANDATE_KEY)
+        .current_dir(checks)
+        .output()
+        .await
+        .expect("wasm-pack runs (is it installed?)");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success() && stdout.contains("ARKIRUST_E2E_WASM_ACKED"),
+        "the wasm agent did not get its journal acknowledged:\n{stdout}\n{stderr}"
+    );
 }

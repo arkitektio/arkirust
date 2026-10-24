@@ -22,19 +22,30 @@ use thiserror::Error;
 /// Header carrying the token of the rekuest task a request is made for.
 pub const TASK_HEADER: &str = "Rekuest-Task";
 
-tokio::task_local! {
-    /// The token of the rekuest task currently being executed, if any.
-    pub static CURRENT_TASK_TOKEN: Option<String>;
+std::thread_local! {
+    /// The token of the rekuest task whose future is being polled, if any.
+    static CURRENT_TASK_TOKEN: std::cell::RefCell<Option<String>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 /// Run `fut` with `token` as the current task token, so every GraphQL request
 /// made from inside it carries the `Rekuest-Task` header.
+///
+/// Set while `fut` is polled (on any runtime, as a task local is): work it
+/// hands to another thread does not carry it.
 pub async fn with_task_token<F: std::future::Future>(token: Option<String>, fut: F) -> F::Output {
-    CURRENT_TASK_TOKEN.scope(token, fut).await
+    let mut fut = std::pin::pin!(fut);
+    std::future::poll_fn(move |cx| {
+        let previous = CURRENT_TASK_TOKEN.with(|t| t.replace(token.clone()));
+        let poll = fut.as_mut().poll(cx);
+        CURRENT_TASK_TOKEN.with(|t| *t.borrow_mut() = previous);
+        poll
+    })
+    .await
 }
 
 fn current_task_token() -> Option<String> {
-    CURRENT_TASK_TOKEN.try_with(|t| t.clone()).ok().flatten()
+    CURRENT_TASK_TOKEN.with(|t| t.borrow().clone())
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -164,8 +175,8 @@ impl Rath {
             if let Some(task) = current_task_token() {
                 request = request.header(TASK_HEADER, task);
             }
-            let resp = request.send().await?;
-            let status = resp.status();
+            let reply = fakts::http::fetch(request).await?;
+            let status = reply.status;
 
             if status == reqwest::StatusCode::UNAUTHORIZED {
                 tracing::debug!(
@@ -176,7 +187,7 @@ impl Rath {
                 continue;
             }
 
-            let bytes = resp.bytes().await?;
+            let bytes = reply.body;
             let parsed: RawResponse<serde_json::Value> = match serde_json::from_slice(&bytes) {
                 Ok(parsed) => parsed,
                 Err(_) if !status.is_success() => {

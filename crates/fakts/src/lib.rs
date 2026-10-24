@@ -25,6 +25,7 @@ pub mod cache;
 mod error;
 mod fakts;
 pub mod grants;
+pub mod http;
 #[cfg(feature = "mesh")]
 pub mod mesh;
 pub mod mesh_join;
@@ -51,7 +52,11 @@ pub use crate::models::*;
 /// Without the `ring` feature this does nothing: the application installs a
 /// provider itself (`CryptoProvider::install_default`) before connecting.
 pub fn install_crypto_provider() {
-    #[cfg(feature = "ring")]
+    // On wasm the browser (fetch) does TLS: there is no provider to pick.
+    #[cfg(all(
+        feature = "ring",
+        not(all(target_arch = "wasm32", target_os = "unknown"))
+    ))]
     {
         static ONCE: std::sync::Once = std::sync::Once::new();
         ONCE.call_once(|| {

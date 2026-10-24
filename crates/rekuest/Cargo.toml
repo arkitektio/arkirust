@@ -34,6 +34,13 @@ tokio = { workspace = true, features = ["rt", "macros", "sync", "time", "net", "
 tokio-tungstenite = { workspace = true, optional = true }
 tracing.workspace = true
 uuid.workspace = true
+# The `web` agent: the JS WebSocket and event loop (wasm32).
+web-sys = { version = "0.3", features = ["WebSocket", "MessageEvent", "CloseEvent", "Event", "BinaryType"], optional = true }
+wasm-bindgen = { version = "0.2", optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }
+js-sys = { version = "0.3", optional = true }
+gloo-timers = { version = "0.3", features = ["futures"], optional = true }
+send_wrapper = { version = "0.6", features = ["futures"], optional = true }
 axum = { workspace = true, optional = true }
 rusqlite = { workspace = true, optional = true }
 reqwest = { workspace = true, optional = true }
@@ -50,6 +57,9 @@ default = ["wal", "tokio", "rath"]
 # fakts for its tokens). Without it, install a `rt::Runtime` and drive the
 # session yourself (`checks/wasm`).
 tokio = ["dep:tokio", "dep:tokio-tungstenite", "dep:fakts"]
+# The agent in a browser or node (wasm32): `web::Agent` over the JS WebSocket,
+# with fakts for its tokens, and `rt::Js` (the JS event loop) as the runtime.
+web = ["dep:fakts", "dep:web-sys", "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys", "dep:gloo-timers", "dep:send_wrapper"]
 # Actions' GraphQL calls (rath) carry their task's token.
 rath = ["dep:rath"]
 # Keep the journal in a local SQLite file (write-ahead: unsent reports survive restarts).
@@ -60,7 +70,7 @@ serve = ["wal", "dep:axum"]
 testing = ["serve", "dep:reqwest"]
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["rt-multi-thread", "signal"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "signal", "process"] }
 # The tests are an application: they pick ring as the TLS provider.
 fakts = { workspace = true, features = ["ring"] }
 reqwest.workspace = true

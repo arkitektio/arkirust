@@ -18,15 +18,29 @@ dirs = { workspace = true, optional = true }
 ed25519-dalek.workspace = true
 hex.workspace = true
 rand.workspace = true
-reqwest.workspace = true
-rustls.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["rt", "sync", "time", "fs"] }
+web-time = "1"
 tracing.workspace = true
 mesh = { workspace = true, optional = true, features = ["session"] }
+
+# Native: reqwest over rustls, tokio's timers and files (the cache file).
+[target.'cfg(not(all(target_arch = "wasm32", target_os = "unknown")))'.dependencies]
+reqwest.workspace = true
+rustls.workspace = true
+tokio = { workspace = true, features = ["rt", "sync", "time", "fs"] }
+
+# wasm32-unknown-unknown: reqwest over fetch (the browser does TLS), timers
+# from JS, randomness from JS; nothing is cached unless the app gives a store.
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+tokio = { workspace = true, features = ["sync"] }
+getrandom = { version = "0.2", features = ["js"] }
+chrono = { workspace = true, features = ["wasmbind"] }
+gloo-timers = { version = "0.3", features = ["futures"] }
+send_wrapper = { version = "0.6", features = ["futures"] }
 
 [features]
 default = ["ring", "user-dirs"]
