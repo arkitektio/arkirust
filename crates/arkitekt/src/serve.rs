@@ -56,7 +56,7 @@ impl Served {
         );
         let result = axum::serve(listener, self.router)
             .with_graceful_shutdown(async {
-                let _ = tokio::signal::ctrl_c().await;
+                crate::runtime::shutdown_signal().await;
                 tracing::info!("shutting down");
             })
             .await;

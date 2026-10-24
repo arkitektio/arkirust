@@ -251,7 +251,7 @@ impl Runtime {
         );
         let result = tokio::select! {
             result = agent.run() => result.map_err(anyhow::Error::from),
-            _ = tokio::signal::ctrl_c() => {
+            _ = shutdown_signal() => {
                 tracing::info!("shutting down");
                 Ok(())
             }
@@ -291,4 +291,13 @@ pub fn device_id() -> anyhow::Result<String> {
     }
     std::fs::write(&path, &id)?;
     Ok(id)
+}
+
+/// Resolves on Ctrl-C; never, without the `signal` feature (targets without
+/// signals, where the app runs until the device resets).
+pub(crate) async fn shutdown_signal() {
+    #[cfg(feature = "signal")]
+    let _ = tokio::signal::ctrl_c().await;
+    #[cfg(not(feature = "signal"))]
+    std::future::pending::<()>().await;
 }

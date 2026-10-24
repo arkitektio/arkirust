@@ -1,0 +1,17 @@
+# The SDK's agent stack (fakts, rath, rekuest) still compiles for the
+# ESP32-S3 (ESP-IDF std, Xtensa): `cargo check` with Espressif's toolchain.
+# Never linked or flashed. Not a workspace member.
+[package]
+name = "esp32s3-check"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+# Default features off: no ring (its C does not build for ESP-IDF), no
+# SQLite journal. A firmware installs a pure-Rust rustls provider instead.
+fakts = { path = "../../crates/fakts", default-features = false }
+rath = { path = "../../crates/rath", package = "arkitekt-rath", default-features = false }
+rekuest = { path = "../../crates/rekuest", default-features = false }

@@ -50,8 +50,8 @@ jobs:
         env:
           ARKITEKT_MESH_HARNESS: ${{ github.workspace }}/arkitekt-mesh/crates/mesh/tests/harness
 
-  # The native mesh on every platform meshd ships for.
-  mesh-native:
+  # The SDK on every desktop platform, with the native mesh.
+  platforms:
     strategy:
       fail-fast: false
       matrix:
@@ -61,7 +61,28 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - run: cargo check --workspace --all-targets
       - run: cargo check -p arkitekt --features mesh-relay
+
+  # The agent stack on the ESP32-S3 (checks/esp32s3): no ring, no signals,
+  # no SQLite.
+  esp32s3:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: checks/esp32s3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cargo-bins/cargo-binstall@main
+      - name: Xtensa toolchain (esp-1.93)
+        run: |
+          cargo binstall -y --locked espup
+          espup install --targets esp32s3 --toolchain-version 1.93.0.0 \
+            --name esp-1.93 --export-file "$HOME/export-esp.sh"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: checks/esp32s3
+      - run: . "$HOME/export-esp.sh" && cargo check
 
   # Squash-merged PR titles become the commits semantic-release reads, so enforce Conventional Commits.
   pr-title:
@@ -81,7 +102,7 @@ jobs:
   # The mesh (and its Python bindings and meshd) is released from
   # arkitektio/arkitekt-mesh.
   release:
-    needs: [test, mesh-native]
+    needs: [test, platforms, esp32s3]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository_owner == 'arkitektio'
     runs-on: ubuntu-latest
     concurrency:

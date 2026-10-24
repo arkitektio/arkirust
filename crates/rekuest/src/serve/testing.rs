@@ -118,6 +118,7 @@ impl AgentTestClient {
             init["token"] = json!(token);
         }
         ws.send(Message::Text(init.to_string())).await?;
+        fakts::install_crypto_provider();
         let mut client = Self {
             base_url,
             http: reqwest::Client::new(),

@@ -161,6 +161,7 @@ async fn start() -> (String, rekuest::serve::LocalAgent) {
 #[tokio::test]
 async fn matches_the_python_contract() {
     let (base, agent) = start().await;
+    fakts::install_crypto_provider();
     let http = reqwest::Client::new();
     let ws_url = base.replace("http", "ws") + "/ws";
     let auth = ("authorization", "Bearer good");

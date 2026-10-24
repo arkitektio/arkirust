@@ -38,14 +38,20 @@ pub use crate::models::*;
 
 /// Select the process-wide TLS provider (ring), once.
 ///
-/// Different dependencies enable different rustls providers (`ring` via
-/// reqwest and tungstenite, `aws-lc-rs` via object_store). With both enabled,
-/// rustls cannot pick one on its own and panics on the first TLS connection,
-/// so every entry point that opens connections calls this first.
+/// Different dependencies enable different rustls providers (`ring` via the
+/// `ring` feature, `aws-lc-rs` via object_store). With both enabled, rustls
+/// cannot pick one on its own and panics on the first TLS connection, so
+/// every entry point that opens connections calls this first.
+///
+/// Without the `ring` feature this does nothing: the application installs a
+/// provider itself (`CryptoProvider::install_default`) before connecting.
 pub fn install_crypto_provider() {
-    static ONCE: std::sync::Once = std::sync::Once::new();
-    ONCE.call_once(|| {
-        // Fails only if the application already installed one, which is fine.
-        let _ = rustls::crypto::ring::default_provider().install_default();
-    });
+    #[cfg(feature = "ring")]
+    {
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        ONCE.call_once(|| {
+            // Fails only if the application already installed one, which is fine.
+            let _ = rustls::crypto::ring::default_provider().install_default();
+        });
+    }
 }

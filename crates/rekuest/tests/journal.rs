@@ -94,6 +94,12 @@ async fn drain(ws: &mut Ws, quiet: Duration) -> Vec<Value> {
     frames
 }
 
+/// The tests' HTTP client, with ring as the TLS provider.
+fn http_client() -> reqwest::Client {
+    fakts::install_crypto_provider();
+    reqwest::Client::new()
+}
+
 async fn assign(http: &reqwest::Client, base: &str, interface: &str, args: Value) -> String {
     let r: Value = http
         .post(format!("{base}/assign/{interface}"))
@@ -135,7 +141,7 @@ fn assert_contiguous(pos: &[u64]) {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn one_order_for_tasks_and_state_and_replay_at_any_position() {
     let (base, agent) = start().await;
-    let http = reqwest::Client::new();
+    let http = http_client();
 
     let (mut ws, init) = connect(&base, json!({"type": "INIT", "journal": true})).await;
     let (mut legacy, legacy_init) = connect(&base, json!({"type": "INIT"})).await;
@@ -265,7 +271,7 @@ async fn one_order_for_tasks_and_state_and_replay_at_any_position() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn delivery_order_is_journal_order_under_concurrency() {
     let (base, agent) = start().await;
-    let http = reqwest::Client::new();
+    let http = http_client();
     let (mut ws, init) = connect(&base, json!({"type": "INIT", "journal": true})).await;
     let start_pos = init["journal"]["pos"].as_u64().unwrap();
 
@@ -337,7 +343,7 @@ async fn delivery_order_is_journal_order_under_concurrency() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn resume_after_a_disconnect() {
     let (base, agent) = start().await;
-    let http = reqwest::Client::new();
+    let http = http_client();
 
     let (mut ws, init) = connect(&base, json!({"type": "INIT", "journal": true})).await;
     let session = init["journal"]["session_id"].as_str().unwrap().to_owned();
@@ -418,7 +424,7 @@ async fn resume_after_a_disconnect() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn resume_from_storage_beyond_memory() {
     let (base, agent) = start().await;
-    let http = reqwest::Client::new();
+    let http = http_client();
     let n = rekuest::journal::RING_CAPACITY as i64 + 100;
     let task = assign(&http, &base, "count_up", json!({"until": n})).await;
     while !agent
@@ -450,7 +456,7 @@ async fn resume_from_storage_beyond_memory() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn nothing_of_a_cancelled_task_after_its_end() {
     let (base, agent) = start().await;
-    let http = reqwest::Client::new();
+    let http = http_client();
     let (mut ws, init) = connect(&base, json!({"type": "INIT", "journal": true})).await;
     let session = init["journal"]["session_id"].as_str().unwrap().to_owned();
 

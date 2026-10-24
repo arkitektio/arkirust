@@ -22,7 +22,9 @@ keywords = ["arkitekt", "microscopy", "bioimage", "graphql"]
 categories = ["science", "api-bindings"]
 
 [workspace.dependencies]
-fakts = { path = "crates/fakts", version = "0.7.0" }
+# Without its `ring` default: the crypto provider is the application's choice
+# (arkitekt's `ring` feature, or one the app installs).
+fakts = { path = "crates/fakts", version = "0.7.0", default-features = false }
 rath = { path = "crates/rath", version = "0.7.0", package = "arkitekt-rath" }
 rekuest = { path = "crates/rekuest", version = "0.7.0" }
 rekuest-protocol = { path = "crates/rekuest-protocol", version = "0.7.0" }
@@ -36,9 +38,13 @@ mesh = { version = "0.7", package = "arkitekt-mesh" }
 anyhow = "1"
 thiserror = "2"
 async-trait = "0.1"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "fs", "signal", "net", "io-util"] }
+# No features here: each crate names the ones it uses, so the SDK builds for
+# targets without signals, threads or a filesystem (ESP-IDF).
+tokio = { version = "1", default-features = false }
 futures = "0.3"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# TLS through rustls with whatever crypto provider is installed: fakts' `ring`
+# feature installs ring; targets ring does not build for install their own.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-webpki-roots-no-provider"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 graphql_client = "0.14"
@@ -57,7 +63,7 @@ json-patch = "4"
 axum = { version = "0.8", features = ["ws"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
 indexmap = { version = "2", features = ["serde"] }
-rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "logging"] }
 ndarray = "0.17"
 zarrs = { version = "0.23", default-features = false, features = ["async", "ndarray", "gzip", "zstd", "sharding", "crc32c", "transpose"] }
 zarrs_object_store = "0.7"

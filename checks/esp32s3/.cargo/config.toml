@@ -1,0 +1,9 @@
+# ESP32-S3 (Xtensa, ESP-IDF std): Espressif's toolchain and build-std.
+[build]
+target = "xtensa-esp32s3-espidf"
+
+[target.xtensa-esp32s3-espidf]
+rustflags = ["--cfg", "espidf_time64"]
+
+[unstable]
+build-std = ["std", "panic_abort"]

@@ -338,6 +338,24 @@ Not implemented yet:
 - [ ] Other mikro data types (tables, files, meshes, …) and multiscale pyramids
 - [ ] Other services (unlok, fluss, kabinet, …)
 
+## Targets
+
+The SDK builds for Linux, macOS and Windows (x86-64 and ARM), and its agent
+stack (`fakts`, `rath`, `rekuest`) for the ESP32-S3 (ESP-IDF std); CI checks
+all of them (`checks/esp32s3` for the board). What a target lacks is behind
+features:
+
+* `ring` (`arkitekt` and `fakts`, on by default): ring as the TLS crypto
+  provider. Without it, install a rustls provider before connecting, e.g.
+  `rustls_rustcrypto::provider().install_default()` on ESP-IDF, where ring's C
+  does not build.
+* `signal` (`arkitekt`, on by default): stop on Ctrl-C.
+* `wal` (`rekuest`, on by default): the SQLite journal. Without it the journal
+  stays in memory.
+
+Each crate names only the tokio features it uses, so a firmware can run the
+SDK on a current-thread runtime.
+
 ## Development
 
 ```sh

@@ -19,14 +19,18 @@ anyhow.workspace = true
 async-trait.workspace = true
 futures.workspace = true
 serde_json.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["rt", "macros", "net"] }
 tracing.workspace = true
 uuid.workspace = true
 dirs.workspace = true
 axum = { workspace = true, optional = true }
 
 [features]
-default = []
+default = ["signal", "ring"]
+# ring as the TLS crypto provider (see `fakts::install_crypto_provider`).
+ring = ["fakts/ring"]
+# Stop on Ctrl-C (`Runtime::run`, `serve`). Off on targets without signals.
+signal = ["tokio/signal"]
 # Serve an app over HTTP + websocket without a rekuest server (`arkitekt::serve`).
 serve = ["rekuest/serve", "dep:axum"]
 # Join the deployment's mesh with the `arkitekt-meshd` sidecar (`ConnectOptions::mesh`,
@@ -42,7 +46,7 @@ testing = ["serve", "rekuest/testing"]
 
 [dev-dependencies]
 serde.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread"] }
 
 [[test]]
 name = "serve"

@@ -23,7 +23,7 @@ thiserror.workspace = true
 tracing.workspace = true
 # Joining and publishing to LiveKit rooms (builds WebRTC: large).
 livekit = { version = "0.9", optional = true }
-tokio = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true, features = ["rt", "sync", "time"] }
 
 [features]
 default = []
