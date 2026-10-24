@@ -64,6 +64,15 @@ jobs:
       - run: cargo check --workspace --all-targets
       - run: cargo check -p arkitekt --features mesh-relay
 
+  # Against the real servers (testing/stack): lok, rekuest and takt.
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test -p fakts --test real_lok -- --ignored --nocapture
+
   # The agent stack on the ESP32-S3 (checks/esp32s3): no ring, no signals,
   # no SQLite.
   esp32s3:
@@ -74,7 +83,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: cargo-bins/cargo-binstall@main
+      # From the repository root: the check's rust-toolchain.toml names the
+      # toolchain this step installs.
       - name: Xtensa toolchain (esp-1.93)
+        working-directory: .
         run: |
           cargo binstall -y --locked espup
           espup install --targets esp32s3 --toolchain-version 1.93.0.0 \
@@ -102,7 +114,7 @@ jobs:
   # The mesh (and its Python bindings and meshd) is released from
   # arkitektio/arkitekt-mesh.
   release:
-    needs: [test, platforms, esp32s3]
+    needs: [test, platforms, esp32s3, e2e]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository_owner == 'arkitektio'
     runs-on: ubuntu-latest
     concurrency:

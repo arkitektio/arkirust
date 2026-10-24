@@ -1,0 +1,110 @@
+services:
+  redis:
+    image: redis:latest
+  db:
+    image: jhnnsrs/daten:latest
+    restart: always
+    environment:
+      POSTGRES_MULTIPLE_DATABASES: rekuest, lok
+      POSTGRES_PASSWORD: hello_django
+      POSTGRES_USER: hello_django
+  # Brings each database to its image's release, once, before anything is started: a
+  # service's own start only serves.
+  rekuest-migrate:
+    depends_on:
+    - db
+    image: jhnnsrs/rekuest:${REKUEST_SERVICE_TAG:-latest}
+    command: arkitekt-service run migrate
+    volumes:
+    - ./configs/rekuest.yaml:/workspace/config.yaml
+  rekuest:
+    depends_on:
+      redis:
+        condition: service_started
+      db:
+        condition: service_started
+      rustfs:
+        condition: service_started
+      rekuest-migrate:
+        condition: service_completed_successfully
+    image: jhnnsrs/rekuest:${REKUEST_SERVICE_TAG:-latest}
+    command: arkitekt-service debug
+    stop_grace_period: 1s
+    environment:
+      # The server asks takt through the socket the two mount; the URL then only gives
+      # the path.
+      REKUEST__TAKT_URL: http://takt:8080
+      REKUEST__TAKT_SOCKET: /run/takt/internal.sock
+    # Host ports are picked per-run by the test harness so parallel or
+    # leftover stacks cannot collide on a fixed port.
+    ports:
+    - "${REKUEST_HOST_PORT}:80"
+    volumes:
+    - ./configs/rekuest.yaml:/workspace/config.yaml
+    - takt_run:/run/takt
+  # rekuest's other half (the agent protocol). Nothing here talks to it, but the
+  # server's `ht` answers for it too, and is unhealthy without it. Released with
+  # the server under the same tags, and reads the server's config.
+  takt:
+    depends_on:
+    - redis
+    - db
+    - rekuest
+    image: jhnnsrs/rekuest-takt:${REKUEST_SERVICE_TAG:-latest}
+    stop_grace_period: 1s
+    environment:
+      REKUEST__SERVER_URL: http://rekuest:80
+      TAKT_INTERNAL_BIND: unix:/run/takt/internal.sock
+    volumes:
+    - ./configs/rekuest.yaml:/workspace/config.yaml:ro
+    - takt_run:/run/takt
+  lok-migrate:
+    depends_on:
+    - db
+    image: jhnnsrs/lok:${LOK_SERVICE_TAG:-latest}
+    command: arkitekt-service run migrate
+    volumes:
+    - "${LOK_CONFIG_FILE}:/workspace/config.yaml"
+  lok:
+    depends_on:
+      redis:
+        condition: service_started
+      db:
+        condition: service_started
+      rustfs:
+        condition: service_started
+      lok-migrate:
+        condition: service_completed_successfully
+    image: jhnnsrs/lok:${LOK_SERVICE_TAG:-latest}
+    command: arkitekt-service debug
+    stop_grace_period: 1s
+    ports:
+    - "${LOK_HOST_PORT}:80"
+    volumes:
+    # Rendered by the test harness: the advertised rekuest port is only known once
+    # the host ports have been picked.
+    - "${LOK_CONFIG_FILE}:/workspace/config.yaml"
+  rustfs:
+    environment:
+      RUSTFS_VOLUMES: /data
+      RUSTFS_ADDRESS: ":9000"
+      RUSTFS_SECRET_KEY: e8821a29d189789e39c9922a3bfcfb4a
+      RUSTFS_ACCESS_KEY: crappygreysetter
+    image: rustfs/rustfs:latest
+    ports:
+    - "${RUSTFS_HOST_PORT}:9000"
+  initc:
+    depends_on:
+      rustfs:
+        condition: service_started
+    environment:
+      RUSTFS_HOST: http://rustfs:9000
+      RUSTFS_SECRET_KEY: e8821a29d189789e39c9922a3bfcfb4a
+      RUSTFS_ACCESS_KEY: crappygreysetter
+    image: jhnnsrs/init:latest
+    volumes:
+    - ./configs/rustfs.yaml:/workspace/config.yaml
+
+
+volumes:
+  takt_run:

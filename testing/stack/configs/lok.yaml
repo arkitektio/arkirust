@@ -1,0 +1,176 @@
+# Throwaway key material for the integration stack only: generated for this
+# file, never used by a deployment. lok refuses to boot on the key and secret
+# that used to be copied here from the server repository's committed config.
+postgres:
+  db_name: lok
+  dependency: db
+  engine: django.db.backends.postgresql
+  host: db
+  password: hello_django
+  port: 5432
+  username: hello_django
+deployment:
+  name: default
+django:
+  admin:
+    email: admin@admin.com
+    password: admin
+    username: admin
+  debug: true
+  hosts:
+  - "*"
+  secret_key: 7395712029f31c489694c333a7144872b46d4721a22ed94c6a79a5d756a34f33
+  csrf_trusted_origins:
+  - http://jhnnsrs-lab.hyena-sole.ts.net
+  - https://jhnnsrs-lab.hyena-sole.ts.net
+  - http://jhnnsrs-server
+  - https://jhnnsrs-server
+  - http://localhost
+  - https://localhost
+  force_script_name: ""
+authentikate:
+  # authentikate 4.0 requires an audience; "*" accepts any.
+  audience: "*"
+  issuers:
+    - kind: rsa
+      # lok anchors its discovery endpoints and the `iss` claim of the tokens it
+      # mints to `oidc_issuer`, and authentikate looks the verifying key up by
+      # that exact string, so both carry the run's host port (rendered by
+      # the test harness, like the rekuest port below).
+      iss: http://localhost:__LOK_HOST_PORT__
+      kid: lok-key-1
+      public_key: ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCsPZdNXnWMbEs1FrNwx5H9sye5ptMN8IoFCmDk3cB70TXh+JP+kyFLNCxJrofYb+Ydgr6NLtaWSCqUBX2qLzUB1aKz5megYszRBZVq4jvsAHnNE+yfwFbQlOQCMLHYhQZ5TBhUDBMkwxWyS6UA+Ox7NXjxC4GrEGbJxxm6cGMOZ6+z36j260VHKYo9Dgaaac1Q0bcOzpS8Em8wmqyyUP5YTDZSujzHwp+7sLronV7OmYa7YktHcRAVnKn0YFwn081iV9fYsfwoecYE4uLAT+JdI3V1fkC0clC0JRzt/EYz664Vw+kBTG94vzTi+NTLAkeR+AkYWpYPwoy42mZF7Ho/
+redis:
+  dependency: redis
+  host: redis
+  port: 6379
+scopes:
+  kabinet_add_repo: Add repositories to the database
+  kabinet_deploy: Deploy containers
+  mikro_read: Read image from the database
+  mikro_write: Write image to the database
+  openid: The open id connect scope
+  read: A generic read access
+  read_image: Read image from the database
+  rekuest_agent: Act as an agent
+  rekuest_call: Call other apps with rekuest
+  write: A generic write access
+token_expire_seconds: 700000
+
+issuer:
+  oidc_issuer: "http://localhost:__LOK_HOST_PORT__"
+
+oidc_issuer: "http://localhost:__LOK_HOST_PORT__"
+lok:
+  issuer: lok
+  key_type: RS256
+  public_key: ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCsPZdNXnWMbEs1FrNwx5H9sye5ptMN8IoFCmDk3cB70TXh+JP+kyFLNCxJrofYb+Ydgr6NLtaWSCqUBX2qLzUB1aKz5megYszRBZVq4jvsAHnNE+yfwFbQlOQCMLHYhQZ5TBhUDBMkwxWyS6UA+Ox7NXjxC4GrEGbJxxm6cGMOZ6+z36j260VHKYo9Dgaaac1Q0bcOzpS8Em8wmqyyUP5YTDZSujzHwp+7sLronV7OmYa7YktHcRAVnKn0YFwn081iV9fYsfwoecYE4uLAT+JdI3V1fkC0clC0JRzt/EYz664Vw+kBTG94vzTi+NTLAkeR+AkYWpYPwoy42mZF7Ho/
+private_key: "-----BEGIN PRIVATE KEY-----
+MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCsPZdNXnWMbEs1
+FrNwx5H9sye5ptMN8IoFCmDk3cB70TXh+JP+kyFLNCxJrofYb+Ydgr6NLtaWSCqU
+BX2qLzUB1aKz5megYszRBZVq4jvsAHnNE+yfwFbQlOQCMLHYhQZ5TBhUDBMkwxWy
+S6UA+Ox7NXjxC4GrEGbJxxm6cGMOZ6+z36j260VHKYo9Dgaaac1Q0bcOzpS8Em8w
+mqyyUP5YTDZSujzHwp+7sLronV7OmYa7YktHcRAVnKn0YFwn081iV9fYsfwoecYE
+4uLAT+JdI3V1fkC0clC0JRzt/EYz664Vw+kBTG94vzTi+NTLAkeR+AkYWpYPwoy4
+2mZF7Ho/AgMBAAECggEAL1nrW5DJXiZzco/gGvQylX2IQUi0oxNqzkHxK1ovTZrR
+ZmMxRH5sW8FnH4aEwCLbL2e/PQ8QXVZPpkvwJTY/K1bxGOYRvQ0MY7ZWQoEZmiLz
+WUbN+YkmFMep+1QpwG2pvvUFhy2eoa+kKlUTcrX8RU8JBbN1HXMv3u8GirPU96Nj
+qZ6Vx7a7GbjG00CgX9+0heOv5KUtV6dR79/KB2aUpSgSP09UoDE2JMK1s/TDPdvj
+RCLe/Y5OeiQGecNL2fPROI4FQPMytXBWisGrGRSPxT4gKKqYTVpzU/r7hH823D3r
+K/01Wbu640dW/fe12Q7agEouAiQePK0x8JkXhk9QmQKBgQDn+orlyo4X2ypFtbja
+TvL/7PR6tE79ClS/2QYnwTdNUIFG0dqorQQel4eD2W55Z29jBht0PMW1CNso4EXz
+8r9bk3WnG+LJr+FR7Nx4Qql9booX3tempjbmIg5uRjt75MDhUaF7ZkmAlCJCG+3f
+BaCfsl7hyD0uz51GZ1gx/2ooywKBgQC+E3fd3g1P+KM6wKinsO2Ra6XLzQU2Wimm
+M/2xuanEpG9BLzUH++nSg/V1xHsb+//+kOLSi65abrfrMWBkEa0dnZ5CxNhaO4Le
+3yTsogA9F+Qu9UjwE5BcbUFF7foPlbsys4/GNmIxwnALcIs5vCoI2LKDFUKcXbGb
+NGiVgCRp3QKBgQCc0Uq6Ip7B07+U1k67DWnJxlZS6LcI6cX21vAJSd1nn4d054Io
+SqWhRJAwenjrCxhKWaOPhVGlmvIEhO/lBHGFp35+VCSQcRwhdLxpc67+Aw7JKjSg
+DHbKRbV5qHKnwzD8YGGIeNIxYHJ0PEsmW7iEnGD1wpZRobnRESWWzvHl1wKBgG2B
+j9ReArNpHrlRl5kM4MGgECPrGS6oIUikuWsz+O/WgFZAmT/hTWPALKFNslN8Co8h
+79u3J5roIMO6bbsZR/BBB5WWDMNnd81pJ7/A0XxhEFBRdlUCIHBvbWSZZzClZfUe
+6B0c5dOfHqgojb2Uf28bUTUeAYNOo200c3B2JARtAoGAagS6obIfzr1ca3bYSbhV
+4t7pySl1mypPe73Ma38hxzQoLgwyPGtU7qgbAKceWBX6Z9lIb6DpDntgE3tpzs/1
+TfxFzERhBGpvQ/DpIyoeL2i5J2e9xQrQPbYYmQ8j3AXZprGOspTWJ6fdh0I32BPE
+2pFwqmoFmGrNxFxYfCOZp5c=
+-----END PRIVATE KEY-----
+"
+public_key: ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCsPZdNXnWMbEs1FrNwx5H9sye5ptMN8IoFCmDk3cB70TXh+JP+kyFLNCxJrofYb+Ydgr6NLtaWSCqUBX2qLzUB1aKz5megYszRBZVq4jvsAHnNE+yfwFbQlOQCMLHYhQZ5TBhUDBMkwxWyS6UA+Ox7NXjxC4GrEGbJxxm6cGMOZ6+z36j260VHKYo9Dgaaac1Q0bcOzpS8Em8wmqyyUP5YTDZSujzHwp+7sLronV7OmYa7YktHcRAVnKn0YFwn081iV9fYsfwoecYE4uLAT+JdI3V1fkC0clC0JRzt/EYz664Vw+kBTG94vzTi+NTLAkeR+AkYWpYPwoy42mZF7Ho/
+
+datalayer:
+  access_key: mikro_access_key
+  secret_key: mikro_secret_key
+  host: rustfs
+  port: 9000
+  protocol: http
+  media:
+    bucket: media
+
+
+organizations:
+  - name: demo
+    identifier: demo
+    owner: demo
+    auto_configure: true
+
+users:
+  - name: demo
+    username: demo
+    password: demo
+
+memberships: 
+  - user: demo
+    organization: demo 
+    # One of the roles lok creates with every organization: one it does not know fails
+    # the whole membership.
+    roles: ["admin"]
+
+mandate_keys:
+  - name: integration
+    key: Y22joLbkjm4vtXMj_T4FD3U99Mb71pTFnUe-8KToAQI
+    user: demo
+    organization: demo
+    hub: localhost
+
+
+kommunity_partners:
+  - identifier: little_sidecar
+    name: "Sidecar Demo"
+    website_url: "https://sidecar.fake"
+    partner_kind: "preauthorized"
+    auto_configure: true
+    preconfigured_hub:
+        identifier: localhost
+        instances:
+        - aliases:
+          - challenge: ht
+            host: localhost
+            id: local_rekuest
+            # Rendered by the test harness with rekuest's published host
+            # port. This address is handed to the client, which challenges it
+            # for real, so it must match the port compose actually published.
+            port: __REKUEST_HOST_PORT__
+            kind: absolute
+            name: demo.arkitekt.live
+            scope: public
+            ssl: false
+          identifier: Rekuest Service
+          manifest:
+            description: Rekuest Service for Arkitekt Live
+            identifier: live.arkitekt.rekuest
+            name: Rekuest
+            device_id: 47de8b7327024c68820ea042d1bdb37b
+            public_sources:
+            - kind: github
+              url: https://github.com/arkitektio/rekuest-server-next
+            roles:
+            - description: Can assign to apps
+              key: Assigner
+            - description: Can review data
+              key: Reviewer
+            scopes:
+            - description: Read access to Rekuest data
+              key: read
+            - description: Write access to Rekuest data
+              key: write
+            version: 1.0.0
+        
