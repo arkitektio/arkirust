@@ -1,6 +1,117 @@
 # CHANGELOG
 
 
+## v0.16.0 (2026-10-25)
+
+### Features
+
+- Arkitekt-serve serves apps over HTTP; the manifest takes its provider's requirements
+  ([`2ecf00e`](https://github.com/arkitektio/arkirust/commit/2ecf00e38bfe065bcfc0dd0a013437882408b4b0))
+
+arkitekt-serve is the HTTP provider (Python's arkitekt-fastapi): the routes, the observer websocket,
+  the journal queries and AgentTestClient move out of rekuest (feature `serve` gone), and
+  arkitekt::serve (feature `serve`) is it. The recorded Python contract and the journal tests moved
+  with it.
+
+The spec no longer names rekuest: App::manifest(device_id, provider) takes the requirements of
+  whoever serves the app, rekuest::requirement() is what its agent needs, and
+  arkitekt_core::manifest(&app, device_id) is the manifest of an app served by a rekuest agent.
+
+BREAKING CHANGE: rekuest::serve is arkitekt_serve; App::manifest_for and rekuest_requirement are
+  gone (arkitekt::manifest(&app, device_id)).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+- Arkitekt-spec owns the action language and the app's declaration
+  ([`330b13c`](https://github.com/arkitektio/arkirust/commit/330b13c4bac2eb775ee01c178616dde55d95c66c))
+
+As in Python, what an app is and what runs it are separate crates.
+
+arkitekt-spec (new, no_std): the action language (definitions, ports, implementations, the agent
+  declaration; moved from rekuest-protocol, which re-exports them), the manifest and aliases (from
+  fakts), and with `declare` the declaration: App, #[action], Registry, PortType/Structure, states
+  (typed cells, StateMut/StateRef), hooks, Service and Wiring, Task with its TaskBackend, and rt,
+  the runtime interface. A server takes it without `declare`: only the wire types.
+
+rekuest is the runtime: the executor runs each task as an AgentTask (a TaskBackend recording
+  EFFECTs), the state hub numbers the spec's state changes, the journal keeps the reports. It no
+  longer re-exports the declaration.
+
+rekuest-macros is now arkitekt-macros and expands against the spec, found directly or through
+  arkitekt, rekuest or arkitekt-embassy. #[service] builds from a Wiring: #[require] aliases,
+  anything else provided by type (fakts provides Fakts).
+
+BREAKING CHANGE: App::run/connect are arkitekt::run(app) and arkitekt::connect(app); declaration
+  types moved from rekuest:: to arkitekt_spec:: (arkitekt::spec, and still at arkitekt::); Alias's
+  reqwest clients are fakts::AliasExt; Service::build takes a &dyn Wiring.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+- The runtime runs on platforms: arkitekt-core, arkitekt-tokio, arkitekt-web
+  ([`8312b4b`](https://github.com/arkitektio/arkirust/commit/8312b4b7bad198f197bc49b98a1b16984288baf1))
+
+arkitekt-core (no_std) is Runtime<P: Platform>: it logs an app in, builds its services from a Wiring
+  and serves its actions with the platform's agent. A Platform brings what differs: where to find
+  the deployment, the device id, the login's host and store, and the agent.
+
+- arkitekt-tokio: the desktop and server platform (reqwest, tungstenite, the login file, the SQLite
+  journal, environment discovery, mesh, Ctrl-C). - arkitekt-web: the browser and node platform
+  (fetch, the JS WebSocket). - arkitekt-embassy: Board, the microcontroller platform (NetHost and
+  its agent over embassy-net).
+
+arkitekt is the facade: run(app) / connect(app) on tokio (feature `tokio`, default), arkitekt::web
+  with `web`. The e2e runs the wasm and embassy apps through their platforms against the real stack;
+  the board wiring connects on Board.
+
+BREAKING CHANGE: ConnectOptions keeps what every platform has; cache_path, mesh_proxy and mesh are
+  arkitekt_tokio::Tokio's. arkitekt without default features no longer has the tokio platform
+  (feature `tokio`).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+### Refactoring
+
+- **rekuest**: One link loop for every agent
+  ([`a008a4c`](https://github.com/arkitektio/arkirust/commit/a008a4c439285329ca9987700e9378c610e4ee04))
+
+rekuest::link::run keeps the session up over any websocket: a Dial opens a cancel-safe Socket, an
+  optional Backlog keeps the journal beyond memory. The tokio Agent (tungstenite + the SQLite
+  journal as its Backlog), the web Agent (the JS WebSocket) and arkitekt-embassy's agent (its own
+  client over embassy-net) are that loop now instead of three copies of it; their APIs and tests are
+  unchanged. Nothing is Send-bound: board and browser sockets are not, a concrete socket's futures
+  stay Send when it is.
+
+fakts is a regular dependency of rekuest (the link's tokens), and AgentError is there without std;
+  arkitekt-embassy re-exports it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+### Testing
+
+- **embassy**: Tls against public servers (Let's Encrypt, GlobalSign, Sectigo)
+  ([`91e6cbb`](https://github.com/arkitektio/arkirust/commit/91e6cbb20d2f61a38bbacc329888c9addaf177b0))
+
+checks/embassy's public_tls fetches a page from any https server with its certificate checked; the
+  host network adapters move to host_net.rs, shared with real_stack. The docs say which CA
+  Verify::Ca wants: the root that signed the last certificate the server sends.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+- **tokio**: The tokio platform against the real stack; its futures stay Send
+  ([`e382d07`](https://github.com/arkitektio/arkirust/commit/e382d0767153d87df9977639bc33d147c4bf4434))
+
+arkitekt-tokio's real_stack connects an App the way arkitekt::run does (the mandate-key login, its
+  services, rekuest's alias) and serves it with the platform's agent until the server acknowledges
+  the journal; the e2e job runs it. arkitekt's service test checks run and connect_with stay Send.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+### Breaking Changes
+
+- Rekuest::serve is arkitekt_serve; App::manifest_for and rekuest_requirement are gone
+  (arkitekt::manifest(&app, device_id)).
+
+
 ## v0.15.0 (2026-10-25)
 
 ### Features
