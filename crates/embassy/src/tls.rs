@@ -37,6 +37,23 @@ fn runtime_random(dest: &mut [u8]) -> Result<(), getrandom::Error> {
 #[cfg(target_os = "none")]
 getrandom::register_custom_getrandom!(runtime_random);
 
+/// The step buffers grow by: no doubling (a 16 KiB record would make a
+/// 32 KiB buffer), no more than needed rounded up to it.
+const STEP: usize = 4096;
+
+/// What a buffer of `len` bytes needing `more` grows to.
+fn grown(len: usize, more: usize) -> usize {
+    (len + more).div_ceil(STEP) * STEP
+}
+
+/// Room for `more` in `plain`.
+fn grow(plain: &mut VecDeque<u8>, more: usize) {
+    let (len, cap) = (plain.len(), plain.capacity());
+    if len + more > cap {
+        plain.reserve_exact(grown(len, more) - len);
+    }
+}
+
 /// How much ciphertext is read from the transport at a time.
 const READ_CHUNK: usize = 4096;
 
@@ -224,6 +241,7 @@ impl<'b, C: Read + Write> TlsStream<'b, C> {
                     while let Some(record) = traffic.next_record() {
                         let record = record.map_err(tls_error)?;
                         discard += record.discard;
+                        grow(&mut self.plain, record.payload.len());
                         self.plain.extend(record.payload);
                     }
                     None
@@ -321,6 +339,10 @@ impl<'b, C: Read + Write> TlsStream<'b, C> {
             .map_err(|e| ConnError(embedded_io_async::Error::kind(&e)))?;
         if n == 0 {
             self.eof = true;
+        }
+        let (len, cap) = (self.incoming.len(), self.incoming.capacity());
+        if len + n > cap {
+            self.incoming.reserve_exact(grown(len, n) - len);
         }
         self.incoming.extend_from_slice(&chunk[..n]);
         Ok(())
