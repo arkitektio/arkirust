@@ -419,7 +419,7 @@ that is `fakts::http::Reqwest`), and rath sends through the same host; typed
 An embassy app implements `fakts::Host` and `rekuest::rt::Runtime` on one
 struct.
 
-`arkitekt-embassy` (no_std, not on crates.io yet) is that for embassy:
+`arkitekt-embassy` (no_std) is that for embassy:
 `Embassy` (the runtime; the board's RNG and clock come in through it),
 `NetHost` + `serve_http` (fakts' and rath's host: a small HTTP/1.1 client
 over embedded-nal-async, one network task, so the futures are `Send` although

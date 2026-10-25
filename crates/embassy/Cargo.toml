@@ -9,8 +9,6 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 readme = "README.md"
-# Not on crates.io yet: a first publish needs the name reserved by hand.
-publish = false
 
 # no_std + alloc. The network is embedded-nal-async's (embassy-net's
 # TcpClient and DnsSocket on a board, any implementation on a host).

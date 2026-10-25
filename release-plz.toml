@@ -44,6 +44,10 @@ name = "arkitekt"
 version_group = "arkitekt"
 
 [[package]]
+name = "arkitekt-embassy"
+version_group = "arkitekt"
+
+[[package]]
 name = "arkitekt-examples"
 release = false
 publish = false
