@@ -131,14 +131,41 @@ enum Wait {
     Closed,
 }
 
+/// A record buffer: the caller's ([`conn::open`](crate::conn::open)) or the
+/// stream's own ([`conn::open_owned`](crate::conn::open_owned)).
+pub enum Buf<'b> {
+    Borrowed(&'b mut Vec<u8>),
+    Owned(Vec<u8>),
+}
+
+impl core::ops::Deref for Buf<'_> {
+    type Target = Vec<u8>;
+
+    fn deref(&self) -> &Vec<u8> {
+        match self {
+            Buf::Borrowed(b) => b,
+            Buf::Owned(b) => b,
+        }
+    }
+}
+
+impl core::ops::DerefMut for Buf<'_> {
+    fn deref_mut(&mut self) -> &mut Vec<u8> {
+        match self {
+            Buf::Borrowed(b) => b,
+            Buf::Owned(b) => b,
+        }
+    }
+}
+
 /// A TLS client stream; see the module docs.
 pub struct TlsStream<'b, C> {
     io: C,
     conn: UnbufferedClientConnection,
     /// Ciphertext received, not yet processed (from the front).
-    incoming: &'b mut Vec<u8>,
+    incoming: Buf<'b>,
     /// Records encoded, not yet written (from the front).
-    outgoing: &'b mut Vec<u8>,
+    outgoing: Buf<'b>,
     plain: VecDeque<u8>,
     /// The server closed (close_notify, or the transport's end).
     eof: bool,
@@ -155,12 +182,12 @@ impl<'b, C: Read + Write> TlsStream<'b, C> {
         io: C,
         host: &str,
         config: Arc<ClientConfig>,
-        buffers: (&'b mut Vec<u8>, &'b mut Vec<u8>),
+        buffers: (Buf<'b>, Buf<'b>),
     ) -> Result<Self, ConnError> {
         let name = ServerName::try_from(host.to_string())
             .map_err(|_| ConnError(ErrorKind::InvalidInput))?;
         let conn = UnbufferedClientConnection::new(config, name).map_err(tls_error)?;
-        let (incoming, outgoing) = buffers;
+        let (mut incoming, mut outgoing) = buffers;
         incoming.clear();
         outgoing.clear();
         let mut stream = Self {
@@ -190,7 +217,7 @@ impl<'b, C: Read + Write> TlsStream<'b, C> {
         let mut sent = false;
         loop {
             let UnbufferedStatus { mut discard, state } =
-                self.conn.process_tls_records(self.incoming);
+                self.conn.process_tls_records(&mut self.incoming[..]);
             let state = state.map_err(tls_error)?;
             let wait = match state {
                 ConnectionState::ReadTraffic(mut traffic) => {
@@ -270,7 +297,7 @@ impl<'b, C: Read + Write> TlsStream<'b, C> {
         while !self.outgoing.is_empty() {
             let n = self
                 .io
-                .write(self.outgoing)
+                .write(&self.outgoing[..])
                 .await
                 .map_err(|e| ConnError(embedded_io_async::Error::kind(&e)))?;
             if n == 0 {

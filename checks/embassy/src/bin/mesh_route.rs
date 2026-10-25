@@ -17,7 +17,7 @@ mod host_net;
 use std::net::{SocketAddr, UdpSocket};
 use std::sync::Arc;
 
-use arkitekt_embassy::conn::{self, TlsBuffers, Transport, Verify};
+use arkitekt_embassy::conn::{self, Transport, Verify};
 use arkitekt_embassy::route::{MeshHandoff, Routed};
 use arkitekt_embassy::{serve_http, NetHost};
 use embassy_executor::Spawner;
@@ -57,17 +57,16 @@ struct BoardDial {
 }
 
 impl Dial for BoardDial {
-    type Conn<'a> = Transport<'static, FromFutures<async_io::Async<std::net::TcpStream>>>;
+    type Conn<'a> = Transport<'a, FromFutures<async_io::Async<std::net::TcpStream>>>;
 
     async fn dial(&self, host: &str, port: u16, tls: Tls<'_>) -> Result<Self::Conn<'_>, DialError> {
-        // The record buffers live as long as the connection may (a check).
-        let buffers: &'static mut TlsBuffers = Box::leak(Box::default());
         let (secure, name, verify) = match tls {
             Tls::None => (false, host, Verify::Unverified),
             Tls::Verify(name) => (true, name, Verify::Ca(self.ca.clone())),
             Tls::Unverified(name) => (true, name, Verify::Unverified),
         };
-        conn::open(&TCP, &HostDns, secure, name, port, &verify, buffers)
+        // Its record buffers go with it: the node reconnects.
+        conn::open_owned(&TCP, &HostDns, secure, name, port, &verify)
             .await
             .map_err(DialError)
     }

@@ -15,7 +15,7 @@ use core::net::SocketAddr;
 use embedded_io_async::{ErrorKind, ErrorType, Read, Write};
 use embedded_nal_async::{AddrType, Dns, TcpConnect};
 
-use crate::tls::TlsStream;
+use crate::tls::{Buf, TlsStream};
 
 /// The largest TLS record a server may send.
 pub const TLS_RECORD: usize = 16_640;
@@ -109,7 +109,8 @@ impl<C: Read + Write> Write for Transport<'_, C> {
     }
 }
 
-/// Resolve `host`, connect to `port`, and (if `secure`) shake hands.
+/// Resolve `host`, connect to `port`, and (if `secure`) shake hands, into
+/// the caller's record buffers.
 pub async fn open<'a, 'b, T: TcpConnect, D: Dns>(
     tcp: &'a T,
     dns: &D,
@@ -118,6 +119,40 @@ pub async fn open<'a, 'b, T: TcpConnect, D: Dns>(
     port: u16,
     verify: &Verify,
     buffers: &'b mut TlsBuffers,
+) -> Result<Transport<'b, T::Connection<'a>>, String>
+where
+    'a: 'b,
+{
+    let buffers = (
+        Buf::Borrowed(&mut buffers.read),
+        Buf::Borrowed(&mut buffers.write),
+    );
+    connect(tcp, dns, secure, host, port, verify, buffers).await
+}
+
+/// As [`open`], the record buffers the connection's own: for connections
+/// made again and again (a mesh node's control and DERP), whose buffers
+/// go with them.
+pub async fn open_owned<'a, T: TcpConnect, D: Dns>(
+    tcp: &'a T,
+    dns: &D,
+    secure: bool,
+    host: &str,
+    port: u16,
+    verify: &Verify,
+) -> Result<Transport<'a, T::Connection<'a>>, String> {
+    let buffers = (Buf::Owned(Vec::new()), Buf::Owned(Vec::new()));
+    connect(tcp, dns, secure, host, port, verify, buffers).await
+}
+
+async fn connect<'a, 'b, T: TcpConnect, D: Dns>(
+    tcp: &'a T,
+    dns: &D,
+    secure: bool,
+    host: &str,
+    port: u16,
+    verify: &Verify,
+    buffers: (Buf<'b>, Buf<'b>),
 ) -> Result<Transport<'b, T::Connection<'a>>, String>
 where
     'a: 'b,
@@ -140,13 +175,8 @@ where
         tracing::warn!("TLS to {} without verifying the server", host);
     }
     let config = crate::tls::config(verify).map_err(|e| format!("TLS with {host}:{port}: {e}"))?;
-    let tls = TlsStream::connect(
-        socket,
-        host,
-        config,
-        (&mut buffers.read, &mut buffers.write),
-    )
-    .await
-    .map_err(|e| format!("TLS with {host}:{port}: {e:?}"))?;
+    let tls = TlsStream::connect(socket, host, config, buffers)
+        .await
+        .map_err(|e| format!("TLS with {host}:{port}: {e:?}"))?;
     Ok(Transport::Tls(Box::new(tls)))
 }
