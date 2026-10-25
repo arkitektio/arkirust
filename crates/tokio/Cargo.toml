@@ -1,0 +1,45 @@
+[package]
+name = "arkitekt-tokio"
+description = "Arkitekt apps on tokio: the desktop and server platform (reqwest, tungstenite, a login file, the SQLite journal, Ctrl-C)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "README.md"
+
+[dependencies]
+arkitekt-core.workspace = true
+arkitekt-spec = { workspace = true, features = ["std", "declare"] }
+fakts = { workspace = true, features = ["std"] }
+# The tokio Agent, and task tokens on the GraphQL clients (rath).
+rekuest = { workspace = true, features = ["tokio", "rath"] }
+anyhow.workspace = true
+tokio = { workspace = true, features = ["rt", "macros", "net"] }
+tracing.workspace = true
+uuid.workspace = true
+dirs = { workspace = true, optional = true }
+
+[features]
+default = ["signal", "ring", "wal", "user-dirs"]
+# Default places in the user's directories: the login file and the
+# persisted device id (`device_id`). Without it (ESP-IDF) the app passes a
+# store and a device id in `ConnectOptions`.
+user-dirs = ["fakts/user-dirs", "dep:dirs"]
+# The agent's write-ahead journal in SQLite (`rekuest/wal`): unsent reports
+# survive a restart. Off on targets SQLite's C does not build for.
+wal = ["rekuest/wal"]
+# ring as the TLS crypto provider (see `fakts::install_crypto_provider`).
+ring = ["fakts/ring"]
+# Stop on Ctrl-C. Off on targets without signals.
+signal = ["tokio/signal"]
+# Join the deployment's mesh with the `arkitekt-meshd` sidecar (`Tokio::mesh`,
+# or `ARKITEKT_MESH=1`); needs `arkitekt-meshd`.
+mesh = ["fakts/mesh"]
+# Also run the mesh node in-process (`ARKITEKT_MESH=native`, the `arkitekt-mesh` crate), no sidecar.
+mesh-native = ["mesh", "fakts/mesh-native"]
+# The native node's TURN relay and TCP forwards (`Fakts::mesh_turn`/`mesh_forward`),
+# for WebRTC media such as LiveKit (see the `lovekit` crate).
+mesh-relay = ["mesh-native", "fakts/mesh-relay"]

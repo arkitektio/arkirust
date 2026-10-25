@@ -1,0 +1,20 @@
+[package]
+name = "arkitekt-web"
+description = "Arkitekt apps in a browser or node (wasm32): the platform over fetch and the JS WebSocket"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "README.md"
+
+# Only wasm32-unknown-unknown has something to build: elsewhere the crate is empty.
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+arkitekt-core.workspace = true
+arkitekt-spec = { workspace = true, features = ["std", "declare"] }
+fakts = { workspace = true, features = ["std"] }
+# The web Agent (the JS WebSocket, rt::Js), task tokens on rath's requests.
+rekuest = { workspace = true, features = ["web", "rath"] }
+anyhow.workspace = true

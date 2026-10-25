@@ -114,7 +114,7 @@ impl Agent {
             name: self.options.name.clone(),
             description: self.options.description.clone(),
         };
-        let mut dial = Board {
+        let mut dial = Net {
             tcp,
             dns,
             verify: &self.options.verify,
@@ -134,14 +134,14 @@ impl Agent {
 
 /// Websockets over the board's TCP (and TLS), into one set of TLS buffers:
 /// one connection at a time.
-struct Board<'n, T, D> {
+struct Net<'n, T, D> {
     tcp: &'n T,
     dns: &'n D,
     verify: &'n Verify,
     buffers: TlsBuffers,
 }
 
-impl<'n, T: TcpConnect, D: Dns> Dial for Board<'n, T, D> {
+impl<'n, T: TcpConnect, D: Dns> Dial for Net<'n, T, D> {
     type Socket<'a>
         = WebSocket<Transport<'a, T::Connection<'n>>>
     where

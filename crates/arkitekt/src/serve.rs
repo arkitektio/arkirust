@@ -24,7 +24,7 @@ pub use rekuest::serve::{
     SubscriptionInit, Unauthorized,
 };
 
-use crate::runtime::{ConnectOptions, Runtime};
+use crate::{ConnectOptions, Runtime, Tokio};
 use arkitekt_spec::App;
 
 /// A served app: its router (the agent routes merged into yours), the agent
@@ -56,7 +56,7 @@ impl Served {
         );
         let result = axum::serve(listener, self.router)
             .with_graceful_shutdown(async {
-                crate::runtime::shutdown_signal().await;
+                arkitekt_tokio::shutdown_signal().await;
                 tracing::info!("shutting down");
             })
             .await;
@@ -94,7 +94,7 @@ pub async fn serve_with(
         options.title = app.identifier().to_owned();
         options.version = app.version().to_owned();
     }
-    let runtime = Runtime::connect_local(app, connect).await?;
+    let runtime = Runtime::connect_local(Tokio::default(), app, connect).await?;
     let (router, agent) = rekuest::serve::configure(
         router,
         runtime.app().registry().clone(),

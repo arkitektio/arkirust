@@ -1,0 +1,21 @@
+[package]
+name = "arkitekt-core"
+description = "Connect and serve an Arkitekt app on any platform: the Platform a backend implements (tokio, the browser, embassy) and the Runtime over it"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "README.md"
+
+# no_std + alloc: what is platform-specific (HTTP, the agent's socket, where
+# the login is kept, the device id) comes from the Platform.
+[dependencies]
+arkitekt-spec = { workspace = true, features = ["declare"] }
+fakts.workspace = true
+rekuest.workspace = true
+anyhow = { version = "1", default-features = false }
+async-trait.workspace = true
+tracing = { version = "0.1", default-features = false }

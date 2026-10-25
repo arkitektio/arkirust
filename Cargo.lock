@@ -115,25 +115,39 @@ name = "arkitekt"
 version = "0.15.0"
 dependencies = [
  "anyhow",
+ "arkitekt-core",
  "arkitekt-rath",
  "arkitekt-spec",
+ "arkitekt-tokio",
+ "arkitekt-web",
  "async-trait",
  "axum",
- "dirs",
  "fakts",
- "futures",
  "rekuest",
  "serde",
  "serde_json",
  "tokio",
  "tracing",
- "uuid",
+]
+
+[[package]]
+name = "arkitekt-core"
+version = "0.15.0"
+dependencies = [
+ "anyhow",
+ "arkitekt-spec",
+ "async-trait",
+ "fakts",
+ "rekuest",
+ "tracing",
 ]
 
 [[package]]
 name = "arkitekt-embassy"
 version = "0.15.0"
 dependencies = [
+ "anyhow",
+ "arkitekt-core",
  "arkitekt-spec",
  "async-trait",
  "base64 0.22.1",
@@ -303,6 +317,32 @@ dependencies = [
  "tracing",
  "uuid",
  "wasm-bindgen-futures",
+]
+
+[[package]]
+name = "arkitekt-tokio"
+version = "0.15.0"
+dependencies = [
+ "anyhow",
+ "arkitekt-core",
+ "arkitekt-spec",
+ "dirs",
+ "fakts",
+ "rekuest",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "arkitekt-web"
+version = "0.15.0"
+dependencies = [
+ "anyhow",
+ "arkitekt-core",
+ "arkitekt-spec",
+ "fakts",
+ "rekuest",
 ]
 
 [[package]]

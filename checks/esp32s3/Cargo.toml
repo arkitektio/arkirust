@@ -15,4 +15,4 @@ publish = false
 fakts = { path = "../../crates/fakts", default-features = false, features = ["std"] }
 rath = { path = "../../crates/rath", package = "arkitekt-rath", default-features = false, features = ["std"] }
 rekuest = { path = "../../crates/rekuest", default-features = false, features = ["tokio", "rath"] }
-arkitekt = { path = "../../crates/arkitekt", default-features = false }
+arkitekt = { path = "../../crates/arkitekt", default-features = false, features = ["tokio"] }

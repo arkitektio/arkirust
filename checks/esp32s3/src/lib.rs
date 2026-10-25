@@ -2,4 +2,4 @@
 pub use fakts::Fakts;
 pub use rath::Rath;
 pub use rekuest::Agent;
-pub use arkitekt::App;
+pub use arkitekt::{connect_with, App, ConnectOptions, Runtime};

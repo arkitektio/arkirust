@@ -5,12 +5,12 @@
 
 use alloc::sync::Arc;
 
-use arkitekt_embassy::{serve_http, Agent, AgentOptions, NetHost, Verify};
-use arkitekt_spec::{action, Context, Registry};
+use arkitekt_embassy::{serve_http, Board, ConnectOptions, NetHost, Runtime, Verify};
+use arkitekt_spec::{action, App};
 use embassy_net::dns::DnsSocket;
 use embassy_net::tcp::client::{TcpClient, TcpClientState};
 use embassy_net::Stack;
-use fakts::{Fakts, Grant, MandateKeyOptions, Manifest, Requirement};
+use fakts::{Grant, MandateKeyOptions};
 
 static HOST: NetHost = NetHost::new();
 
@@ -31,29 +31,21 @@ pub async fn http(stack: Stack<'static>) -> ! {
 
 /// Log in at `lok` with a mandate key and serve the app (the agent's own
 /// socket from the same stack).
-pub async fn run(stack: Stack<'static>, lok: &str, key: &str) -> Result<(), &'static str> {
-    let mut manifest = Manifest::new("board", "0.1.0");
-    manifest
-        .requirements
-        .push(Requirement::new("rekuest", "live.arkitekt.rekuest"));
-    let fakts = Fakts::builder(lok, manifest)
-        .host(Arc::new(&HOST))
-        .grant(Grant::MandateKey(Arc::new(MandateKeyOptions::new(key))))
-        .no_cache(true)
-        .load()
-        .await
-        .map_err(|_| "login failed")?;
-    let alias = fakts.get_alias("rekuest").await.map_err(|_| "no rekuest")?;
-    let mut registry = Registry::new();
-    registry.register(add);
-    let agent = Agent::new(
-        AgentOptions::new(alias.to_ws_path("agi")),
-        registry,
-        Context::default(),
-        Arc::new(fakts),
-    );
+pub async fn run(stack: Stack<'static>, lok: &str, key: &str) -> anyhow::Result<()> {
     let state: TcpClientState<1, 4096, 4096> = TcpClientState::new();
     let tcp = TcpClient::new(stack, &state);
     let dns = DnsSocket::new(stack);
-    agent.run(&tcp, &dns).await.map_err(|_| "the agent stopped")
+    let board = Board {
+        host: &HOST,
+        tcp: &tcp,
+        dns: &dns,
+        verify: Verify::Unverified,
+    };
+    let options = ConnectOptions {
+        grant: Some(Grant::MandateKey(Arc::new(MandateKeyOptions::new(key)))),
+        no_cache: true,
+        ..ConnectOptions::default().url(lok)
+    };
+    let app = App::new("board", "0.1.0").action(add);
+    Runtime::connect(board, app, options).await?.serve().await
 }

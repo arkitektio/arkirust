@@ -32,18 +32,21 @@
 //! | [`Service`]       | `@registry.service` builders                |
 //! | [`Runtime`]       | `connect(app)` / `run(app)`                 |
 
-mod runtime;
 #[cfg(feature = "serve")]
 pub mod serve;
 
-pub use crate::runtime::{
-    connect, connect_with, device_id, easy, run, run_with, ConnectOptions, Runtime,
-    DEFAULT_ARKITEKT_URL,
-};
 #[cfg(feature = "serve")]
 pub use crate::serve::{serve, serve_with, ServeOptions, Served};
+pub use arkitekt_core::{ConnectOptions, Platform, DEFAULT_ARKITEKT_URL};
+#[cfg(feature = "tokio")]
+pub use arkitekt_tokio::{connect, connect_with, device_id, run, run_with, Runtime, Tokio};
 
+pub use arkitekt_core as core;
 pub use arkitekt_spec as spec;
+#[cfg(feature = "tokio")]
+pub use arkitekt_tokio as tokio_platform;
+#[cfg(all(feature = "web", target_arch = "wasm32", target_os = "unknown"))]
+pub use arkitekt_web as web;
 pub use fakts;
 pub use rath;
 pub use rekuest;
@@ -55,6 +58,11 @@ pub use arkitekt_spec::{
 };
 pub use async_trait::async_trait;
 pub use fakts::{Fakts, Requirement};
+
+/// An app for scripts that only call services: `connect(easy("script", "0.1.0").service(..))`.
+pub fn easy(identifier: impl Into<String>, version: impl Into<String>) -> App {
+    App::new(identifier, version)
+}
 
 /// Lets the macros find the spec through arkitekt. Not a public API.
 #[doc(hidden)]

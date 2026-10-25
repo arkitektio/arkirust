@@ -9,7 +9,9 @@ agent, fakts' login and rath's GraphQL over embedded-nal-async TCP and TLS
 - `NetHost` + `serve_http`: fakts' (and rath's) `Host`. One network task owns
   the TCP client and makes every exchange; callers wait on embassy-sync
   channels, so their futures are `Send` although the sockets are not.
-- `Agent`: rekuest's driver over a websocket client of its own.
+- `Agent`: rekuest's link over a websocket client of its own.
+- `Board`: the platform (arkitekt-core): `Runtime::connect(board, app,
+  options)` logs the app in through `NetHost` and `serve()` runs the agent.
 
 `https://` and `wss://` are TLS 1.3 (embedded-tls 0.19, AES-128-GCM): the
 server's certificate chain and name are checked against the CA given as

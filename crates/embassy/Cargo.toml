@@ -13,7 +13,9 @@ readme = "README.md"
 # no_std + alloc. The network is embedded-nal-async's (embassy-net's
 # TcpClient and DnsSocket on a board, any implementation on a host).
 [dependencies]
+arkitekt-core.workspace = true
 arkitekt-spec = { workspace = true, features = ["declare"] }
+anyhow = { version = "1", default-features = false }
 rekuest = { workspace = true, features = ["rath"] }
 rekuest-session.workspace = true
 fakts.workspace = true

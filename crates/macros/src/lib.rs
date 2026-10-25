@@ -179,8 +179,8 @@ impl ActionOptions {
 }
 
 /// Where `arkitekt-spec` lives for the crate being compiled: itself, or
-/// re-exported by the first of arkitekt, rekuest and arkitekt-embassy it
-/// depends on.
+/// re-exported by the first facade it depends on (arkitekt, a platform
+/// crate, rekuest).
 pub(crate) fn spec_path() -> TokenStream2 {
     if let Ok(found) = crate_name("arkitekt-spec") {
         return match found {
@@ -191,7 +191,14 @@ pub(crate) fn spec_path() -> TokenStream2 {
             }
         };
     }
-    for facade in ["arkitekt", "rekuest", "arkitekt-embassy"] {
+    for facade in [
+        "arkitekt",
+        "arkitekt-core",
+        "arkitekt-tokio",
+        "arkitekt-web",
+        "arkitekt-embassy",
+        "rekuest",
+    ] {
         if let Ok(found) = crate_name(facade) {
             let ident = match found {
                 FoundCrate::Itself => Ident::new(&facade.replace('-', "_"), Span::call_site()),

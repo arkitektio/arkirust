@@ -11,48 +11,52 @@ categories.workspace = true
 readme = "../../README.md"
 
 [dependencies]
+arkitekt-core.workspace = true
+arkitekt-spec = { workspace = true, features = ["std", "declare"] }
+arkitekt-tokio = { workspace = true, optional = true }
+# Only on wasm32-unknown-unknown.
+arkitekt-web = { workspace = true, optional = true }
 fakts = { workspace = true, features = ["std"] }
 rath = { workspace = true, features = ["std"] }
-# The tokio Agent, and task tokens on the GraphQL clients (rath).
-rekuest = { workspace = true, features = ["tokio", "rath"] }
-arkitekt-spec = { workspace = true, features = ["std", "declare"] }
+rekuest = { workspace = true, features = ["std"] }
 anyhow.workspace = true
 async-trait.workspace = true
-futures.workspace = true
-serde_json.workspace = true
-tokio = { workspace = true, features = ["rt", "macros", "net"] }
+tokio = { workspace = true, features = ["rt", "macros", "net"], optional = true }
 tracing.workspace = true
-uuid.workspace = true
-dirs = { workspace = true, optional = true }
 axum = { workspace = true, optional = true }
 
 [features]
-default = ["signal", "ring", "wal", "user-dirs"]
-# Default places in the user's directories: the fakts cache and the
+default = ["tokio", "signal", "ring", "wal", "user-dirs"]
+# The tokio platform (arkitekt-tokio): `run(app)`, `connect(app)`, `Runtime`.
+tokio = ["dep:arkitekt-tokio", "dep:tokio"]
+# The browser platform (arkitekt-web, wasm32): `arkitekt::web::run(app, options)`.
+web = ["dep:arkitekt-web"]
+# Default places in the user's directories: the login file and the
 # persisted device id (`device_id`). Without it (ESP-IDF) the app passes a
 # store and a device id in `ConnectOptions`.
-user-dirs = ["fakts/user-dirs", "dep:dirs"]
+user-dirs = ["tokio", "arkitekt-tokio/user-dirs"]
 # The agent's write-ahead journal in SQLite (`rekuest/wal`): unsent reports
 # survive a restart. Off on targets SQLite's C does not build for.
-wal = ["rekuest/wal"]
+wal = ["tokio", "arkitekt-tokio/wal"]
 # ring as the TLS crypto provider (see `fakts::install_crypto_provider`).
-ring = ["fakts/ring"]
-# Stop on Ctrl-C (`Runtime::run`, `serve`). Off on targets without signals.
-signal = ["tokio/signal"]
+ring = ["tokio", "arkitekt-tokio/ring"]
+# Stop on Ctrl-C. Off on targets without signals.
+signal = ["tokio", "arkitekt-tokio/signal"]
 # Serve an app over HTTP + websocket without a rekuest server (`arkitekt::serve`).
-serve = ["rekuest/serve", "dep:axum"]
-# Join the deployment's mesh with the `arkitekt-meshd` sidecar (`ConnectOptions::mesh`,
-# or `ARKITEKT_MESH=1`); needs `arkitekt-meshd` (see meshd/).
-mesh = ["fakts/mesh"]
+serve = ["tokio", "wal", "rekuest/serve", "dep:axum"]
+# Join the deployment's mesh with the `arkitekt-meshd` sidecar (`Tokio::mesh`,
+# or `ARKITEKT_MESH=1`); needs `arkitekt-meshd`.
+mesh = ["tokio", "arkitekt-tokio/mesh"]
 # Also run the mesh node in-process (`ARKITEKT_MESH=native`, the `arkitekt-mesh` crate), no sidecar.
-mesh-native = ["mesh", "fakts/mesh-native"]
+mesh-native = ["mesh", "arkitekt-tokio/mesh-native"]
 # The native node's TURN relay and TCP forwards (`Fakts::mesh_turn`/`mesh_forward`),
 # for WebRTC media such as LiveKit (see the `lovekit` crate).
-mesh-relay = ["mesh-native", "fakts/mesh-relay"]
+mesh-relay = ["mesh-native", "arkitekt-tokio/mesh-relay"]
 # `AgentTestClient` for testing served apps.
 testing = ["serve", "rekuest/testing"]
 
 [dev-dependencies]
+serde_json.workspace = true
 serde.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 

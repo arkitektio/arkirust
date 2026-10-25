@@ -1,7 +1,7 @@
-//! A wasm agent on the real stack: logs in at lok with the stack's mandate
-//! key (fakts over fetch), registers with takt over the JS WebSocket
-//! (`rekuest::web::Agent`), activates, and the server acknowledges its
-//! journal. Node has `fetch` and `WebSocket` (and enforces no CORS; a
+//! A wasm app on the real stack, on arkitekt-web: connects (the login at
+//! lok with the stack's mandate key, fakts over fetch), registers with takt
+//! over the JS WebSocket (rekuest's web agent), activates, and the server
+//! acknowledges its journal. Node has `fetch` and `WebSocket` (and enforces no CORS; a
 //! browser would need lok and takt to allow its origin).
 //!
 //! Run by `cargo test -p rekuest --test real_rekuest -- --ignored`, which
@@ -11,9 +11,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use arkitekt_spec::{action, Context, Registry};
-use fakts::{Fakts, Grant, MandateKeyOptions, Manifest, Requirement};
-use rekuest::web::{Agent, AgentOptions};
+use arkitekt_core::ConnectOptions;
+use arkitekt_spec::{action, App};
+use fakts::{Grant, MandateKeyOptions};
+use rekuest::ConnectionPolicy;
 use wasm_bindgen::JsValue;
 use wasm_bindgen_test::wasm_bindgen_test;
 
@@ -47,40 +48,32 @@ async fn a_wasm_agent_registers_and_the_server_acknowledges_its_journal() {
     let (Some(lok), Some(key)) = (env("ARKIRUST_E2E_LOK"), env("ARKIRUST_E2E_KEY")) else {
         return;
     };
-    let mut manifest = Manifest::new("test_manifest", "0.1.0");
-    manifest
-        .requirements
-        .push(Requirement::new("rekuest", "live.arkitekt.rekuest"));
-    let fakts = Fakts::builder(lok, manifest)
-        .grant(Grant::MandateKey(Arc::new(MandateKeyOptions::new(key))))
-        .no_cache(true)
-        .load()
+    let options = ConnectOptions {
+        url: Some(lok),
+        grant: Some(Grant::MandateKey(Arc::new(MandateKeyOptions::new(key)))),
+        no_cache: true,
+        policy: Some(ConnectionPolicy {
+            initial: Duration::from_millis(200),
+            ..ConnectionPolicy::default()
+        }),
+        ..ConnectOptions::default()
+    };
+    let app = App::new("test_manifest", "0.1.0").action(add);
+    let runtime = arkitekt_web::connect(app, options)
         .await
         .expect("lok logs the key in");
-    let alias = fakts
-        .get_alias("rekuest")
-        .await
-        .expect("rekuest is reachable");
+    let alias = runtime.agent_alias().await.expect("rekuest is reachable");
 
-    // rath over fetch, with the agent's token.
-    let graphql = rath::Rath::new(alias.to_http_path("graphql"), Arc::new(fakts.clone()));
+    // rath over fetch, with the app's token.
+    let fakts = runtime.agent_fakts().expect("logged in").clone();
+    let graphql = rath::Rath::new(alias.to_http_path("graphql"), Arc::new(fakts));
     let typename = graphql
         .execute_raw(&serde_json::json!({"query": "{ __typename }"}))
         .await
         .expect("rath reaches rekuest's GraphQL");
     assert_eq!(typename["__typename"], "Query");
 
-    let mut options = AgentOptions::new(alias.to_ws_path("agi"));
-    options.name = Some("arkirust-e2e-wasm".into());
-    options.policy.initial = Duration::from_millis(200);
-    let mut registry = Registry::new();
-    registry.register(add);
-    let agent = Arc::new(Agent::new(
-        options,
-        registry,
-        Context::default(),
-        Arc::new(fakts),
-    ));
+    let agent = Arc::new(arkitekt_web::agent(&runtime).await.expect("an agent"));
     wasm_bindgen_futures::spawn_local({
         let agent = agent.clone();
         async move {

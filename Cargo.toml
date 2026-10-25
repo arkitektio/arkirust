@@ -9,6 +9,9 @@ members = [
     "crates/embassy",
     "crates/macros",
     "crates/spec",
+    "crates/core",
+    "crates/tokio",
+    "crates/web",
     "crates/arkitekt",
     "crates/mikro",
     "crates/lovekit",
@@ -39,6 +42,10 @@ arkitekt-macros = { path = "crates/macros", version = "0.15.0" }
 # Without `std` and `declare` (both default): only the wire types.
 arkitekt-spec = { path = "crates/spec", version = "0.15.0", default-features = false }
 arkitekt = { path = "crates/arkitekt", version = "0.15.0" }
+arkitekt-core = { path = "crates/core", version = "0.15.0" }
+arkitekt-web = { path = "crates/web", version = "0.15.0" }
+# Without its defaults (signals, ring, SQLite, user directories): arkitekt's features pick them.
+arkitekt-tokio = { path = "crates/tokio", version = "0.15.0", default-features = false }
 mikro = { path = "crates/mikro", version = "0.15.0", package = "arkitekt-mikro" }
 lovekit = { path = "crates/lovekit", version = "0.15.0", package = "arkitekt-lovekit" }
 # Released from its own repository (arkitektio/arkitekt-mesh), not in lockstep.

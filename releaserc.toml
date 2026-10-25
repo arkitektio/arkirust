@@ -17,6 +17,9 @@ version_toml = [
     "Cargo.toml:workspace.dependencies.arkitekt-macros.version",
     "Cargo.toml:workspace.dependencies.arkitekt-spec.version",
     "Cargo.toml:workspace.dependencies.arkitekt.version",
+    "Cargo.toml:workspace.dependencies.arkitekt-core.version",
+    "Cargo.toml:workspace.dependencies.arkitekt-tokio.version",
+    "Cargo.toml:workspace.dependencies.arkitekt-web.version",
     "Cargo.toml:workspace.dependencies.mikro.version",
     "Cargo.toml:workspace.dependencies.lovekit.version",
 ]

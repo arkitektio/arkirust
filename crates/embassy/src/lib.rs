@@ -21,13 +21,16 @@ pub mod agent;
 pub mod conn;
 pub mod http;
 pub mod http1;
+pub mod platform;
 pub mod runtime;
 pub mod ws;
 
 pub use crate::agent::{Agent, AgentError, AgentOptions};
 pub use crate::conn::Verify;
 pub use crate::http::{serve_http, NetHost};
+pub use crate::platform::{Board, Runtime};
 pub use crate::runtime::{Embassy, Entropy};
+pub use arkitekt_core::{ConnectOptions, Platform};
 
 pub use arkitekt_spec as spec;
 pub use arkitekt_spec::{action, App, Context, Registry, State, StateMut, StateRef, Task};

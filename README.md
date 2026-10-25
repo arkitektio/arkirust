@@ -48,7 +48,11 @@ async fn main() -> anyhow::Result<()> {
 | [`arkitekt-spec`](crates/spec)       | `arkitekt-spec`     | What an app is: the action language (definitions, ports), `App`, `#[action]`, `Registry`, states, hooks, `Task`, `Service`, and `rt` (the runtime interface); no_std. Without its `declare` feature only the wire types |
 | [`arkitekt-macros`](crates/macros)    | `@register`         | `#[action]`, `#[derive(State)]`, `#[service]` (used through `arkitekt-spec`)                     |
 | [`rekuest`](crates/rekuest)           | `arkitekt-runtime` + `rekuest` | Runs the declared actions (executor, journal, state hub) and serves them: the `/agi` websocket agent |
-| [`arkitekt`](crates/arkitekt)         | `arkitekt`          | `run(app)` / `connect(app)` and `Runtime`; re-exports everything above                           |
+| [`arkitekt-core`](crates/core)        | `arkitekt` (`Runtime`) | `Runtime<P: Platform>`: logs an app in, builds its services, serves it with the platform's agent; no_std |
+| [`arkitekt-tokio`](crates/tokio)      |                     | The desktop and server platform: reqwest, tungstenite, a login file, the SQLite journal, Ctrl-C  |
+| [`arkitekt-web`](crates/web)          |                     | The browser and node platform (wasm32): `fetch` and the JS `WebSocket`                           |
+| [`arkitekt-embassy`](crates/embassy)  |                     | The microcontroller platform (`Board`, no_std): embassy-net, its own HTTP/1.1, websocket and TLS 1.3 |
+| [`arkitekt`](crates/arkitekt)         | `arkitekt`          | `run(app)` / `connect(app)` on tokio (default; `web` for the browser's); re-exports everything above |
 | [`mikro`](crates/mikro)               | `mikro`             | Mikro client: array datasets stored as zarr v3 on the S3 datalayer                                |
 | [`lovekit`](crates/lovekit)           | `lovekit`           | Lovekit client: LiveKit broadcasts and stream tokens; with `livekit`, joins rooms and publishes video, also through the mesh |
 
@@ -416,7 +420,7 @@ with tokens from `fakts`, which logs in over `fetch` there (as `rath` makes
 its requests); there is no cache file and no mesh. The e2e job runs it under
 node against the real stack (`checks/wasm/tests/real_stack.rs`). Node does
 not enforce CORS; a browser needs lok and takt to allow its origin.
-`arkitekt` itself is not on wasm yet.
+`arkitekt-web` is the browser's platform: `arkitekt_web::run(app, options)`.
 
 Without its `std` feature (on by default; `tokio`, `web`, `rath`, `wal` and
 `serve` imply it) rekuest is `no_std` + `alloc`, for a microcontroller: locks
@@ -439,10 +443,13 @@ one struct.
 `NetHost` + `serve_http` (fakts' and rath's host: a small HTTP/1.1 client
 over embedded-nal-async, one network task, so the futures are `Send` although
 embassy-net's sockets are not) and `Agent` (the driver over its own websocket
-client). `https://` and `wss://` are TLS 1.3 (embedded-tls), the server's
+client), and `Board`, the platform: `Runtime::connect(Board { host, tcp, dns,
+verify }, app, options)` connects the same `App` as on the desktop, and
+`serve()` runs the agent. `https://` and `wss://` are TLS 1.3 (embedded-tls), the server's
 chain and name checked against a CA the app gives (`Verify::Ca`, the root,
 DER). The e2e job runs it on the host against the real stack
-(`checks/embassy`'s `real_stack`, over async-io TCP): login, rath (over
+(`checks/embassy`'s `real_stack`, over async-io TCP): the app connected on
+`Board`, rath (over
 https) and the agent (over wss), verified against the test gateway's internal
 CA, and a wrong name refused; the board wiring over embassy-net builds for a
 Cortex-M4F.

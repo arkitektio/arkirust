@@ -1,8 +1,9 @@
-//! An embassy agent on the real stack, from the host: arkitekt-embassy's
-//! network task, login and agent on embassy's executor, over the host's TCP
-//! as embedded-nal-async (async-io, its own reactor thread). Logs in at the
-//! lok in `ARKIRUST_E2E_LOK` with `ARKIRUST_E2E_KEY`, registers with takt,
-//! and waits until the server acknowledges the journal; prints
+//! An embassy app on the real stack, from the host: arkitekt-embassy's
+//! network task, and the app connected on its `Board` platform (the login,
+//! then the agent) on embassy's executor, over the host's TCP as
+//! embedded-nal-async (async-io, its own reactor thread). Logs in at the lok
+//! in `ARKIRUST_E2E_LOK` with `ARKIRUST_E2E_KEY`, registers with takt, and
+//! waits until the server acknowledges the journal; prints
 //! `ARKIRUST_E2E_EMBASSY_ACKED` and exits 0.
 //!
 //! The same code runs on a board over embassy-net (`board.rs`); only the
@@ -12,10 +13,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use arkitekt_embassy::conn::TlsBuffers;
-use arkitekt_embassy::{serve_http, Agent, AgentOptions, Embassy, NetHost, Verify};
-use arkitekt_spec::{action, Context, Registry};
+use arkitekt_embassy::{
+    serve_http, Agent, Board, ConnectOptions, Embassy, NetHost, Runtime, Verify,
+};
+use arkitekt_spec::{action, App};
 use embassy_executor::Spawner;
-use fakts::{Fakts, Grant, MandateKeyOptions, Manifest, Requirement};
+use fakts::{Grant, MandateKeyOptions};
+use rekuest::ConnectionPolicy;
 
 #[path = "../host_net.rs"]
 mod host_net;
@@ -84,24 +88,34 @@ async fn main(spawner: Spawner) {
     };
     spawner.spawn(http(verify.clone()).expect("the http task"));
 
-    let mut manifest = Manifest::new("test_manifest", "0.1.0");
-    manifest
-        .requirements
-        .push(Requirement::new("rekuest", "live.arkitekt.rekuest"));
-    let fakts = Fakts::builder(lok, manifest)
-        .host(Arc::new(&HOST))
-        .grant(Grant::MandateKey(Arc::new(MandateKeyOptions::new(key))))
-        .no_cache(true)
-        .load()
+    let board = Board {
+        host: &HOST,
+        tcp: &HostTcp,
+        dns: &HostDns,
+        verify: verify.clone(),
+    };
+    let options = ConnectOptions {
+        url: Some(lok),
+        grant: Some(Grant::MandateKey(Arc::new(MandateKeyOptions::new(key)))),
+        no_cache: true,
+        policy: Some(ConnectionPolicy {
+            initial: Duration::from_millis(200),
+            ..ConnectionPolicy::default()
+        }),
+        ..ConnectOptions::default()
+    };
+    let app = App::new("test_manifest", "0.1.0").action(add);
+    let runtime = Runtime::connect(board, app, options)
         .await
         .unwrap_or_else(|e| {
-            eprintln!("embassy agent: lok did not log the key in: {e}");
+            eprintln!("embassy agent: lok did not log the key in: {e:#}");
             std::process::exit(1)
         });
-    let alias = fakts.get_alias("rekuest").await.unwrap_or_else(|e| {
-        eprintln!("embassy agent: rekuest is not reachable: {e}");
+    let alias = runtime.agent_alias().await.unwrap_or_else(|e| {
+        eprintln!("embassy agent: rekuest is not reachable: {e:#}");
         std::process::exit(1)
     });
+    let fakts = runtime.agent_fakts().expect("logged in").clone();
 
     // rath through the same host, with the agent's token: an answer far
     // larger than the header buffer (the body streams into memory).
@@ -146,22 +160,16 @@ async fn main(spawner: Spawner) {
         println!("ARKIRUST_E2E_EMBASSY_TLS_REFUSES_A_WRONG_NAME");
     }
 
-    let endpoint = match &tls {
-        Some((port, _)) => format!("wss://localhost:{port}/agi"),
-        None => alias.to_ws_path("agi"),
-    };
-    let mut options = AgentOptions::new(endpoint);
-    options.verify = verify;
-    options.name = Some("arkirust-e2e-embassy".into());
-    options.policy.initial = Duration::from_millis(200);
-    let mut registry = Registry::new();
-    registry.register(add);
-    let the_agent: &'static Agent = Box::leak(Box::new(Agent::new(
-        options,
-        registry,
-        Context::default(),
-        Arc::new(fakts),
-    )));
+    // The platform's agent, over TLS to the gateway's https port when given.
+    let mut options = arkitekt_embassy::platform::agent_options(&runtime)
+        .await
+        .expect("the agent's options");
+    if let Some((port, _)) = &tls {
+        options.endpoint_url = format!("wss://localhost:{port}/agi");
+    }
+    let the_agent: &'static Agent = Box::leak(Box::new(
+        arkitekt_embassy::platform::agent_with(&runtime, options).expect("an agent"),
+    ));
     spawner.spawn(agent(the_agent).expect("the agent task"));
 
     for _ in 0..240 {
