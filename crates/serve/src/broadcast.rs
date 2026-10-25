@@ -6,9 +6,9 @@ use std::sync::Mutex;
 
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::emit::Emitter;
-use crate::journal::{stamp, JournalEntry, Route};
-use crate::messages::{Envelope, FromAgent};
+use rekuest::journal::{stamp, JournalEntry, Route};
+use rekuest::messages::{Envelope, FromAgent};
+use rekuest::Emitter;
 
 /// What a subscriber asked for; `None` means everything of that kind.
 #[derive(Debug, Clone, Default)]

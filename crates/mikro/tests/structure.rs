@@ -30,10 +30,10 @@ fn manifest_requires_mikro_s3_and_rekuest() {
     #[arkitekt::action]
     async fn noop() {}
 
-    let manifest: Manifest = App::new("app", "1")
-        .service(mikro::service)
-        .action(noop)
-        .manifest(None);
+    let manifest: Manifest = arkitekt::manifest(
+        &App::new("app", "1").service(mikro::service).action(noop),
+        None,
+    );
     let keys: Vec<(&str, &str)> = manifest
         .requirements
         .iter()
@@ -49,8 +49,6 @@ fn manifest_requires_mikro_s3_and_rekuest() {
     );
 
     // A script that only uses mikro does not ask for rekuest.
-    let script = arkitekt::easy("script", "1")
-        .service(mikro::service)
-        .manifest(None);
+    let script = arkitekt::manifest(&arkitekt::easy("script", "1").service(mikro::service), None);
     assert!(script.requirements.iter().all(|r| r.key != "rekuest"));
 }

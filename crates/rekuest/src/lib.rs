@@ -106,8 +106,6 @@ pub mod executor;
 pub mod journal;
 pub mod link;
 mod locks;
-#[cfg(feature = "serve")]
-pub mod serve;
 pub mod shelf;
 pub mod state;
 #[cfg(feature = "wal")]
@@ -135,6 +133,12 @@ pub use crate::task::AgentTask;
 #[cfg(feature = "tokio")]
 pub use crate::transport::{Connector, Direct, HttpProxy};
 pub use rekuest_session::ConnectionPolicy;
+
+/// What an app served by a rekuest agent requires: the rekuest server.
+pub fn requirement() -> arkitekt_spec::Requirement {
+    arkitekt_spec::Requirement::new("rekuest", "live.arkitekt.rekuest")
+        .description("Where actions are assigned")
+}
 
 /// Lets `#[action]` find the spec through rekuest. Not a public API.
 #[doc(hidden)]

@@ -161,7 +161,11 @@ impl<P: Platform> Runtime<P> {
         remote_agent: bool,
     ) -> anyhow::Result<Self> {
         let device_id = options.device_id.clone().or_else(|| platform.device_id());
-        let manifest = app.manifest_for(device_id, remote_agent);
+        let manifest = if remote_agent {
+            manifest(&app, device_id)
+        } else {
+            app.manifest(device_id, &[])
+        };
         if manifest.requirements.is_empty() && !remote_agent {
             return Ok(Self {
                 platform,
@@ -277,8 +281,19 @@ impl<P> Runtime<P> {
 
     /// The agent's description: the app's.
     pub fn agent_description(&self) -> Option<String> {
-        self.app.manifest(None).description
+        self.app.manifest(None, &[]).description
     }
+}
+
+/// The manifest of `app` served by a rekuest agent: its services'
+/// requirements, and rekuest's when it offers actions.
+pub fn manifest(app: &App, device_id: Option<String>) -> arkitekt_spec::Manifest {
+    let agent = if app.provides() {
+        alloc::vec![rekuest::requirement()]
+    } else {
+        alloc::vec![]
+    };
+    app.manifest(device_id, &agent)
 }
 
 /// Services are built from the app's fakts: each requirement's alias, and

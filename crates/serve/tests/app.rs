@@ -1,11 +1,11 @@
-//! `arkitekt::serve`: an app with states and hooks, served next to its own routes.
+//! `arkitekt_serve::serve`: an app with states and hooks, served next to its own routes.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use arkitekt::serve::{AgentTestClient, History};
-use arkitekt::{action, serve, App, ServeOptions, State, StateMut};
+use arkitekt_serve::{serve, AgentTestClient, History, ServeOptions};
+use arkitekt_spec::{action, App, State, StateMut};
 use axum::routing::get;
 use serde::{Deserialize, Serialize};
 use serde_json::json;

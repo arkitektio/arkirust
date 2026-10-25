@@ -117,11 +117,11 @@ dependencies = [
  "anyhow",
  "arkitekt-core",
  "arkitekt-rath",
+ "arkitekt-serve",
  "arkitekt-spec",
  "arkitekt-tokio",
  "arkitekt-web",
  "async-trait",
- "axum",
  "fakts",
  "rekuest",
  "serde",
@@ -290,6 +290,31 @@ dependencies = [
  "tokio",
  "tracing",
  "wiremock",
+]
+
+[[package]]
+name = "arkitekt-serve"
+version = "0.15.0"
+dependencies = [
+ "anyhow",
+ "arkitekt-core",
+ "arkitekt-serve",
+ "arkitekt-spec",
+ "arkitekt-tokio",
+ "axum",
+ "chrono",
+ "fakts",
+ "futures",
+ "rekuest",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-tungstenite 0.24.0",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -4141,7 +4166,6 @@ dependencies = [
  "arkitekt-spec",
  "async-channel",
  "async-trait",
- "axum",
  "chrono",
  "fakts",
  "futures",

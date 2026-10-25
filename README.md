@@ -52,6 +52,7 @@ async fn main() -> anyhow::Result<()> {
 | [`arkitekt-tokio`](crates/tokio)      |                     | The desktop and server platform: reqwest, tungstenite, a login file, the SQLite journal, Ctrl-C  |
 | [`arkitekt-web`](crates/web)          |                     | The browser and node platform (wasm32): `fetch` and the JS `WebSocket`                           |
 | [`arkitekt-embassy`](crates/embassy)  |                     | The microcontroller platform (`Board`, no_std): embassy-net, its own HTTP/1.1, websocket and TLS 1.3 |
+| [`arkitekt-serve`](crates/serve)      | `arkitekt-fastapi`  | Serves an app over HTTP and a websocket without a rekuest server (Python's contract, recorded) |
 | [`arkitekt`](crates/arkitekt)         | `arkitekt`          | `run(app)` / `connect(app)` on tokio (default; `web` for the browser's); re-exports everything above |
 | [`mikro`](crates/mikro)               | `mikro`             | Mikro client: array datasets stored as zarr v3 on the S3 datalayer                                |
 | [`lovekit`](crates/lovekit)           | `lovekit`           | Lovekit client: LiveKit broadcasts and stream tokens; with `livekit`, joins rooms and publishes video, also through the mesh |
@@ -410,7 +411,9 @@ the SQLite journal, `web::Agent` with the JS `WebSocket`, arkitekt-embassy's
 with its own client over embassy-net; `checks/wasm` runs a real `#[action]`
 through the driver on wasm32. Features of `rekuest`: `tokio` (the
 `Agent`, `transport`, fakts tokens) and `rath` (task tokens on GraphQL calls),
-both on by default and turned on by `arkitekt`; `wal` and `serve` need tokio.
+both on by default and turned on by `arkitekt`; `wal` needs tokio. Serving an
+app over HTTP without a rekuest server is `arkitekt-serve` (Python's
+arkitekt-fastapi), on rekuest's executor and journal.
 Action futures must be `Send` everywhere, so a browser action that holds a JS
 value across an `.await` wraps it (e.g. `send_wrapper`); wasm has one thread.
 

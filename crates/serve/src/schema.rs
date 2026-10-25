@@ -3,9 +3,9 @@
 
 use serde_json::{json, Map, Value};
 
-use crate::state::StateDeclaration;
 use arkitekt_spec::{ActionKind, Definition, Implementation};
 use arkitekt_spec::{Port, PortKind};
+use rekuest::state::StateDeclaration;
 
 fn kind_name(kind: PortKind) -> Value {
     serde_json::to_value(kind).unwrap_or(Value::Null)

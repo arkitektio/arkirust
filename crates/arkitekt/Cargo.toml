@@ -23,7 +23,7 @@ anyhow.workspace = true
 async-trait.workspace = true
 tokio = { workspace = true, features = ["rt", "macros", "net"], optional = true }
 tracing.workspace = true
-axum = { workspace = true, optional = true }
+arkitekt-serve = { workspace = true, optional = true }
 
 [features]
 default = ["tokio", "signal", "ring", "wal", "user-dirs"]
@@ -43,7 +43,7 @@ ring = ["tokio", "arkitekt-tokio/ring"]
 # Stop on Ctrl-C. Off on targets without signals.
 signal = ["tokio", "arkitekt-tokio/signal"]
 # Serve an app over HTTP + websocket without a rekuest server (`arkitekt::serve`).
-serve = ["tokio", "wal", "rekuest/serve", "dep:axum"]
+serve = ["tokio", "wal", "dep:arkitekt-serve"]
 # Join the deployment's mesh with the `arkitekt-meshd` sidecar (`Tokio::mesh`,
 # or `ARKITEKT_MESH=1`); needs `arkitekt-meshd`.
 mesh = ["tokio", "arkitekt-tokio/mesh"]
@@ -53,13 +53,10 @@ mesh-native = ["mesh", "arkitekt-tokio/mesh-native"]
 # for WebRTC media such as LiveKit (see the `lovekit` crate).
 mesh-relay = ["mesh-native", "arkitekt-tokio/mesh-relay"]
 # `AgentTestClient` for testing served apps.
-testing = ["serve", "rekuest/testing"]
+testing = ["serve", "arkitekt-serve/testing"]
 
 [dev-dependencies]
 serde_json.workspace = true
 serde.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 
-[[test]]
-name = "serve"
-required-features = ["testing"]

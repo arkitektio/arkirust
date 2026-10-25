@@ -32,12 +32,9 @@
 //! | [`Service`]       | `@registry.service` builders                |
 //! | [`Runtime`]       | `connect(app)` / `run(app)`                 |
 
+pub use arkitekt_core::{manifest, ConnectOptions, Platform, DEFAULT_ARKITEKT_URL};
 #[cfg(feature = "serve")]
-pub mod serve;
-
-#[cfg(feature = "serve")]
-pub use crate::serve::{serve, serve_with, ServeOptions, Served};
-pub use arkitekt_core::{ConnectOptions, Platform, DEFAULT_ARKITEKT_URL};
+pub use arkitekt_serve::{self as serve, serve, serve_with, ServeOptions, Served};
 #[cfg(feature = "tokio")]
 pub use arkitekt_tokio::{connect, connect_with, device_id, run, run_with, Runtime, Tokio};
 

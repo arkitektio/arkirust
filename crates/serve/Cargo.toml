@@ -1,0 +1,48 @@
+[package]
+name = "arkitekt-serve"
+description = "Serve an Arkitekt app over HTTP and a websocket, without a rekuest server (the port of Python's arkitekt-fastapi)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "README.md"
+
+[dependencies]
+arkitekt-core.workspace = true
+arkitekt-spec = { workspace = true, features = ["std", "declare"] }
+arkitekt-tokio.workspace = true
+# The executor and the SQLite journal the routes serve.
+rekuest = { workspace = true, features = ["tokio", "wal"] }
+anyhow.workspace = true
+axum.workspace = true
+chrono.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["rt", "macros", "net", "sync", "time"] }
+tracing.workspace = true
+uuid.workspace = true
+# AgentTestClient.
+fakts = { workspace = true, features = ["std"], optional = true }
+reqwest = { workspace = true, optional = true }
+tokio-tungstenite = { workspace = true, optional = true }
+
+[features]
+# `AgentTestClient` for testing served apps.
+testing = ["dep:fakts", "dep:reqwest", "dep:tokio-tungstenite"]
+
+[dev-dependencies]
+arkitekt-serve = { path = ".", features = ["testing"] }
+reqwest.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "signal"] }
+tokio-tungstenite.workspace = true
+tempfile = "3"
+# The tests are an application: they pick ring as the TLS provider.
+fakts = { workspace = true, features = ["ring"] }
+
+[[example]]
+name = "serve_twin"

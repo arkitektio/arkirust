@@ -1,15 +1,13 @@
 //! The served agent against the contract recorded from Python
 //! (`fixtures/serve/python`, see `record.sh`).
 
-#![cfg(feature = "serve")]
-
 mod twin;
 
 use std::time::Duration;
 
+use arkitekt_serve::{configure, AuthRequest, History, ServeOptions, Unauthorized};
 use arkitekt_spec::Context;
 use futures::{SinkExt, StreamExt};
-use rekuest::serve::{configure, AuthRequest, History, ServeOptions, Unauthorized};
 use serde_json::{json, Map, Value};
 use tokio_tungstenite::tungstenite::Message;
 
@@ -129,7 +127,7 @@ async fn until_terminal(ws: &mut Ws, task: &str) -> Vec<Value> {
     frames
 }
 
-async fn start() -> (String, rekuest::serve::LocalAgent) {
+async fn start() -> (String, arkitekt_serve::LocalAgent) {
     let options = ServeOptions::default()
         .history(History::Memory)
         .auth(|request| match request {

@@ -1,5 +1,5 @@
-//! Serve an app over HTTP and a websocket, without a rekuest server
-//! (Python's `arkitekt.serve`).
+//! Serve an app over HTTP and a websocket, without a rekuest server: the
+//! Rust port of Python's `arkitekt-fastapi` (`rekuest.contrib.fastapi`).
 //!
 //! ```ignore
 //! let app = App::new("camera", "0.1.0").state(CameraState::default()).action(set_exposure);
@@ -11,21 +11,62 @@
 //! observer websocket at `/ws` streams what happens, and `GET /states`,
 //! `/tasks`, `/locks` and the state history routes show the app's state. The
 //! journal (`/journal…`, or `"journal": true` on the websocket) records every
-//! task event and state change in one order and replays any position. See
-//! [`rekuest::serve`] for every route.
+//! task event and state change in one order and replays any position.
+//!
+//! Or add the routes to a router yourself, for a registry without an `App`:
+//!
+//! ```ignore
+//! let (router, agent) = arkitekt_serve::configure(axum::Router::new(), registry, Context::default(), ServeOptions::default())?;
+//! agent.start().await?;
+//! axum::serve(listener, router).await?;
+//! agent.shutdown().await;
+//! ```
+//!
+//! Routes (paths configurable in [`ServeOptions`]):
+//!
+//! | route | |
+//! |---|---|
+//! | `WS /ws` | send `{"type":"INIT", "action_keys"?, "state_keys"?, "lock_keys"?, "token"?}`, get an `INIT` snapshot, then every matching frame |
+//! | `POST /assign`, `/assign/{interface}` | start a task (authenticated), `{"status":"submitted","task"}` |
+//! | `POST /{interface}` | start a task of that action, `{"status":"submitted","task_id"}` |
+//! | `POST /cancel`, `/pause`, `/resume`, `/step` | control a task |
+//! | `GET /tasks`, `/tasks/{id}`, `/states`, `/states/{interface}`, `/locks` | what is going on |
+//! | `GET /schemas/{implementations,states,locks,bloks}` | the declaration |
+//! | `GET /session_info`, `/states/checkout`, `/states/segments`, … | state history |
+//! | `GET /journal`, `/journal/{session}`, `/journal/{session}/at/{pos}`, `/tasks/{id}/events` | the journal: every report in order, and the world at any position |
+//! | `GET /openapi.json`, `/docs` | API description |
+//!
+//! A websocket client that sends `"journal": true` in its INIT opts into the
+//! journal: its INIT gets a `journal` object (the watermark and the states,
+//! tasks and locks exactly as of it), every frame after carries `pos`,
+//! `journal_session`, `agent_ts` and (for a task's frames) `task_step`, and
+//! with `"resume_after": N` and the `session_id` it first gets the entries it
+//! missed after `N` (another session's position answers `resync: true`).
+//! Without the flag, frames are exactly Python's.
+
+// Handler helpers return a ready `Response` as their error, as axum handlers do.
+#![allow(clippy::result_large_err)]
+
+mod broadcast;
+mod local;
+mod schema;
+#[cfg(feature = "testing")]
+pub mod testing;
 
 use tokio::net::ToSocketAddrs;
 
-pub use rekuest::journal::{Fold, Journal, JournalEntry, Watermark};
-#[cfg(feature = "testing")]
-pub use rekuest::serve::testing::{AgentTestClient, AssignmentResult, Event};
-pub use rekuest::serve::{
-    AuthHook, AuthRequest, EntryQuery, History, HistoryStore, LocalAgent, ServeOptions,
-    SubscriptionInit, Unauthorized,
+pub use crate::local::{
+    configure, AuthHook, AuthRequest, Broadcaster, EntryQuery, History, HistoryStore, LocalAgent,
+    PatchEvent, ServeOptions, SessionBoundary, Snapshot, StateAt, SubscriptionInit, TaskBoundary,
+    Unauthorized,
 };
+#[cfg(feature = "testing")]
+pub use crate::testing::{AgentTestClient, AssignmentResult, Event};
+pub use rekuest::journal::{Fold, Journal, JournalEntry, Watermark};
 
-use crate::{ConnectOptions, Runtime, Tokio};
+use arkitekt_core::ConnectOptions;
 use arkitekt_spec::App;
+use arkitekt_tokio::{Runtime, Tokio};
 
 /// A served app: its router (the agent routes merged into yours), the agent
 /// behind them, and the runtime holding its service clients.
@@ -95,7 +136,7 @@ pub async fn serve_with(
         options.version = app.version().to_owned();
     }
     let runtime = Runtime::connect_local(Tokio::default(), app, connect).await?;
-    let (router, agent) = rekuest::serve::configure(
+    let (router, agent) = configure(
         router,
         runtime.app().registry().clone(),
         runtime.context().clone(),

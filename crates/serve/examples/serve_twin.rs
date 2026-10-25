@@ -1,12 +1,12 @@
 //! The Rust twin of `tests/fixtures/serve/twin.py`, served over HTTP.
 //!
-//!     cargo run -p rekuest --features serve --example serve_twin -- 8766 /tmp/rust-twin.db
+//!     cargo run -p arkitekt-serve --example serve_twin -- 8766 /tmp/rust-twin.db
 
 #[path = "../tests/twin/mod.rs"]
 mod twin;
 
+use arkitekt_serve::{configure, AuthRequest, History, ServeOptions, Unauthorized};
 use arkitekt_spec::Context;
-use rekuest::serve::{configure, AuthRequest, History, ServeOptions, Unauthorized};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

@@ -7,7 +7,7 @@ Run (from the arkirust repo root):
 
     P=~/Code/packages
     PYTHONPATH=$P/rekuest:$P/fakts:$P/rath $P/newswitch/.venv/bin/python \
-        crates/rekuest/tests/fixtures/serve/twin.py 8765 /tmp/twin.db
+        crates/serve/tests/fixtures/serve/twin.py 8765 /tmp/twin.db
 """
 
 import sys

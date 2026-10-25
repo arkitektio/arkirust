@@ -1,15 +1,13 @@
 //! The journal: one gap-free order of everything a served agent reports,
 //! resumable over the websocket and replayable at any position.
 
-#![cfg(feature = "serve")]
-
 mod twin;
 
 use std::time::Duration;
 
+use arkitekt_serve::{configure, History, LocalAgent, ServeOptions};
 use arkitekt_spec::{action, Context, StateMut};
 use futures::{SinkExt, StreamExt};
-use rekuest::serve::{configure, History, LocalAgent, ServeOptions};
 use serde_json::{json, Value};
 use tokio_tungstenite::tungstenite::Message;
 use twin::CameraState;

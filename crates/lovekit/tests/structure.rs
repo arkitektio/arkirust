@@ -10,10 +10,10 @@ fn manifest_requires_lovekit_and_livekit() {
     #[arkitekt::action]
     async fn noop() {}
 
-    let manifest: Manifest = App::new("app", "1")
-        .service(lovekit::service)
-        .action(noop)
-        .manifest(None);
+    let manifest: Manifest = arkitekt::manifest(
+        &App::new("app", "1").service(lovekit::service).action(noop),
+        None,
+    );
     let keys: Vec<(&str, &str)> = manifest
         .requirements
         .iter()

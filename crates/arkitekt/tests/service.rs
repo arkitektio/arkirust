@@ -41,10 +41,10 @@ fn requirements_from_parameters() {
 
 #[test]
 fn manifest_collects_service_requirements() {
-    let manifest = App::new("app", "0.1.0")
-        .service(thing)
-        .service(plain)
-        .manifest(None);
+    let manifest = arkitekt::manifest(
+        &App::new("app", "0.1.0").service(thing).service(plain),
+        None,
+    );
     let keys: Vec<_> = manifest
         .requirements
         .iter()

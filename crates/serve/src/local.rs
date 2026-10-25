@@ -1,48 +1,8 @@
-//! Serve an app over HTTP and a websocket, without a rekuest server.
-//!
-//! This is the Rust port of Python's `rekuest.contrib.fastapi`: the app's
-//! actions become REST commands, an observer websocket streams what the
-//! agent reports, and GET routes expose tasks, states, locks and the state
-//! history (kept in SQLite). The HTTP and websocket contract is the Python
-//! one, quirks included, so clients written against a Python app work
-//! unchanged.
-//!
-//! ```ignore
-//! let (router, agent) = rekuest::serve::configure(axum::Router::new(), registry, Context::default(), ServeOptions::default())?;
-//! agent.start().await?;
-//! axum::serve(listener, router).await?;
-//! agent.shutdown().await;
-//! ```
-//!
-//! Routes (paths configurable in [`ServeOptions`]):
-//!
-//! | route | |
-//! |---|---|
-//! | `WS /ws` | send `{"type":"INIT", "action_keys"?, "state_keys"?, "lock_keys"?, "token"?}`, get an `INIT` snapshot, then every matching frame |
-//! | `POST /assign`, `/assign/{interface}` | start a task (authenticated), `{"status":"submitted","task"}` |
-//! | `POST /{interface}` | start a task of that action, `{"status":"submitted","task_id"}` |
-//! | `POST /cancel`, `/pause`, `/resume`, `/step` | control a task |
-//! | `GET /tasks`, `/tasks/{id}`, `/states`, `/states/{interface}`, `/locks` | what is going on |
-//! | `GET /schemas/{implementations,states,locks,bloks}` | the declaration |
-//! | `GET /session_info`, `/states/checkout`, `/states/segments`, … | state history |
-//! | `GET /journal`, `/journal/{session}`, `/journal/{session}/at/{pos}`, `/tasks/{id}/events` | the journal: every report in order, and the world at any position |
-//! | `GET /openapi.json`, `/docs` | API description |
-//!
-//! A websocket client that sends `"journal": true` in its INIT opts into the
-//! journal: its INIT gets a `journal` object (the watermark and the states,
-//! tasks and locks exactly as of it), every frame after carries `pos`,
-//! `journal_session`, `agent_ts` and (for a task's frames) `task_step`, and
-//! with `"resume_after": N` and the `session_id` it first gets the entries it
-//! missed after `N` (another session's position answers `resync: true`).
-//! Without the flag, frames are exactly Python's.
+//! The local agent: the routes, the observer websocket and the journal
+//! queries (see the crate docs).
 
 // Handler helpers return a ready `Response` as their error, as axum handlers do.
 #![allow(clippy::result_large_err)]
-
-mod broadcast;
-mod schema;
-#[cfg(feature = "testing")]
-pub mod testing;
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -57,17 +17,17 @@ use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 
-use crate::executor::{Executor, FLUSH_TIMEOUT};
-use crate::journal::{Fold, Journal, JournalEntry, JournalSink};
-use crate::messages::Assign;
-use crate::state::Sink;
 use arkitekt_spec::Context;
 use arkitekt_spec::Registry;
+use rekuest::executor::{Executor, FLUSH_TIMEOUT};
+use rekuest::journal::{Fold, Journal, JournalEntry, JournalSink};
+use rekuest::messages::Assign;
+use rekuest::state::Sink;
 
-pub use crate::store::{
+pub use crate::broadcast::Broadcaster;
+pub use rekuest::store::{
     EntryQuery, HistoryStore, PatchEvent, SessionBoundary, Snapshot, StateAt, TaskBoundary,
 };
-pub use broadcast::Broadcaster;
 
 /// The first frame a websocket client sends.
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -799,7 +759,7 @@ async fn handle_socket(shared: Arc<Shared>, mut socket: WebSocket) {
     }
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-    let filters = broadcast::Filters {
+    let filters = crate::broadcast::Filters {
         action_keys: key_set(&init.action_keys),
         state_keys: key_set(&init.state_keys),
         lock_keys: key_set(&init.lock_keys),
@@ -869,7 +829,7 @@ async fn handle_socket(shared: Arc<Shared>, mut socket: WebSocket) {
 async fn journal_opening(
     agent: &LocalAgent,
     init: &SubscriptionInit,
-    filters: broadcast::Filters,
+    filters: crate::broadcast::Filters,
     tx: tokio::sync::mpsc::UnboundedSender<String>,
 ) -> (u64, (Value, Vec<Arc<JournalEntry>>)) {
     // Under the journal lock: live frames after the watermark queue up in
@@ -1040,7 +1000,7 @@ async fn schema_implementations(State(shared): S) -> Response {
         .registry()
         .implementations()
         .iter()
-        .map(|i| (i.interface.clone(), schema::api_implementation(i)))
+        .map(|i| (i.interface.clone(), crate::schema::api_implementation(i)))
         .collect();
     Json(json!({ "count": implementations.len(), "implementations": implementations }))
         .into_response()
@@ -1053,7 +1013,7 @@ async fn schema_states(State(shared): S) -> Response {
         .registry()
         .states()
         .iter()
-        .map(|s| (s.name.clone(), schema::api_state(s)))
+        .map(|s| (s.name.clone(), crate::schema::api_state(s)))
         .collect();
     Json(json!({ "count": states.len(), "states": states })).into_response()
 }
@@ -1065,7 +1025,7 @@ async fn schema_locks(State(shared): S) -> Response {
         .registry()
         .lock_keys()
         .iter()
-        .map(|k| (k.clone(), schema::api_lock(k)))
+        .map(|k| (k.clone(), crate::schema::api_lock(k)))
         .collect();
     Json(json!({ "count": locks.len(), "locks": locks })).into_response()
 }
@@ -1701,10 +1661,13 @@ fn build_openapi(agent: &LocalAgent, options: &ServeOptions) -> Value {
                 operation["tags"] = json!(definition.collections);
             }
             paths.insert(path, json!({ "post": operation }));
-            components.insert(format!("{name}Request"), schema::request_schema(definition));
+            components.insert(
+                format!("{name}Request"),
+                crate::schema::request_schema(definition),
+            );
             components.insert(
                 format!("{name}Response"),
-                schema::schema_from_ports(&definition.returns, &format!("{name}Response")),
+                crate::schema::schema_from_ports(&definition.returns, &format!("{name}Response")),
             );
         }
     }
@@ -1712,7 +1675,7 @@ fn build_openapi(agent: &LocalAgent, options: &ServeOptions) -> Value {
         let title = format!("{}State", declaration.name);
         components.insert(
             title.clone(),
-            schema::schema_from_ports(&declaration.ports, &title),
+            crate::schema::schema_from_ports(&declaration.ports, &title),
         );
     }
 

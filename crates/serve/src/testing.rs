@@ -15,7 +15,7 @@ use futures::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use tokio_tungstenite::tungstenite::Message;
 
-use super::LocalAgent;
+use crate::LocalAgent;
 
 type Ws =
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
@@ -268,7 +268,7 @@ impl AgentTestClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::serve::{configure, History, ServeOptions};
+    use crate::{configure, History, ServeOptions};
     use arkitekt_spec::{action, Context, Registry};
 
     /// Double

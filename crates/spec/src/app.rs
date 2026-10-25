@@ -160,24 +160,16 @@ impl App {
         &self.services
     }
 
-    /// Whether this app serves actions (and so needs the rekuest agent).
+    /// Whether this app offers anything (and so needs something to serve it).
     pub fn provides(&self) -> bool {
         !self.registry.is_empty()
     }
 
     /// The manifest, derived from the declaration: the requirements are
-    /// exactly what the services (and, if actions are offered, the agent) need.
-    pub fn manifest(&self, device_id: Option<String>) -> Manifest {
-        self.manifest_for(device_id, true)
-    }
-
-    /// The manifest; `remote_agent` adds the rekuest requirement when the app
-    /// offers actions (a served app needs no rekuest server).
-    pub fn manifest_for(&self, device_id: Option<String>, remote_agent: bool) -> Manifest {
-        let mut requirements = vec![];
-        if remote_agent && self.provides() {
-            requirements.push(rekuest_requirement());
-        }
+    /// exactly what whoever serves the app (`provider`: a rekuest agent
+    /// needs rekuest, an app served over HTTP nothing) and the services need.
+    pub fn manifest(&self, device_id: Option<String>, provider: &[Requirement]) -> Manifest {
+        let mut requirements = provider.to_vec();
         for service in &self.services {
             for requirement in service.requirements() {
                 if !requirements
@@ -197,9 +189,4 @@ impl App {
         manifest.device_id = device_id;
         manifest
     }
-}
-
-/// The requirement the rekuest agent needs to serve actions.
-pub fn rekuest_requirement() -> Requirement {
-    Requirement::new("rekuest", "live.arkitekt.rekuest").description("Where actions are assigned")
 }

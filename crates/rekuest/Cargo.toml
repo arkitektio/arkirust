@@ -46,9 +46,7 @@ wasm-bindgen-futures = { version = "0.4", optional = true }
 js-sys = { version = "0.3", optional = true }
 gloo-timers = { version = "0.3", features = ["futures"], optional = true }
 send_wrapper = { version = "0.6", features = ["futures"], optional = true }
-axum = { workspace = true, optional = true }
 rusqlite = { workspace = true, optional = true }
-reqwest = { workspace = true, optional = true }
 
 # wasm32-unknown-unknown: the clock, uuids and random bytes come from JS.
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
@@ -77,10 +75,6 @@ web = ["std", "arkitekt-spec/js", "fakts/std", "dep:web-sys", "dep:wasm-bindgen"
 rath = ["dep:rath"]
 # Keep the journal in a local SQLite file (write-ahead: unsent reports survive restarts).
 wal = ["std", "dep:rusqlite", "tokio"]
-# Serve an app over HTTP + websocket without a rekuest server (port of rekuest.contrib.fastapi).
-serve = ["wal", "dep:axum"]
-# AgentTestClient for testing served apps.
-testing = ["serve", "dep:reqwest"]
 
 [dev-dependencies]
 # The state diff is checked against it (src/patch.rs).
@@ -88,13 +82,9 @@ json-patch.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "signal", "process"] }
 # The tests are an application: they pick ring as the TLS provider.
 fakts = { workspace = true, features = ["ring"] }
+# The real-stack harness (testing/stack).
 reqwest.workspace = true
 tempfile = "3"
 tracing-subscriber.workspace = true
 # The scripted server every driver of the session is tested against.
 rekuest-session = { workspace = true, features = ["testing"] }
-axum.workspace = true
-
-[[example]]
-name = "serve_twin"
-required-features = ["serve"]

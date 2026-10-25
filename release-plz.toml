@@ -56,6 +56,10 @@ name = "arkitekt-web"
 version_group = "arkitekt"
 
 [[package]]
+name = "arkitekt-serve"
+version_group = "arkitekt"
+
+[[package]]
 name = "arkitekt"
 version_group = "arkitekt"
 

@@ -2,5 +2,5 @@
 token.json
 *.zarr/
 .arkitekt/
-crates/rekuest/tests/fixtures/serve/rust/
+crates/serve/tests/fixtures/serve/rust/
 __pycache__/

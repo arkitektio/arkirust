@@ -12,6 +12,7 @@ members = [
     "crates/core",
     "crates/tokio",
     "crates/web",
+    "crates/serve",
     "crates/arkitekt",
     "crates/mikro",
     "crates/lovekit",
@@ -44,6 +45,7 @@ arkitekt-spec = { path = "crates/spec", version = "0.15.0", default-features = f
 arkitekt = { path = "crates/arkitekt", version = "0.15.0" }
 arkitekt-core = { path = "crates/core", version = "0.15.0" }
 arkitekt-web = { path = "crates/web", version = "0.15.0" }
+arkitekt-serve = { path = "crates/serve", version = "0.15.0" }
 # Without its defaults (signals, ring, SQLite, user directories): arkitekt's features pick them.
 arkitekt-tokio = { path = "crates/tokio", version = "0.15.0", default-features = false }
 mikro = { path = "crates/mikro", version = "0.15.0", package = "arkitekt-mikro" }

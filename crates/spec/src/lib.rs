@@ -122,7 +122,7 @@ pub use crate::wiring::Alias;
 #[cfg(feature = "declare")]
 pub use crate::{
     action::{Action, ActionError, Concurrency, Registry},
-    app::{rekuest_requirement, App},
+    app::App,
     context::{Context, ContextBuilder, MissingClient},
     hooks::{Background, Hooks, Shutdown, Startup},
     port_type::{unwrap_reference, PortError, PortType, Structure},
