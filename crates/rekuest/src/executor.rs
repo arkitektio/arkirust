@@ -710,14 +710,16 @@ mod tests {
         for round in 0..50 {
             let task = format!("t{round}");
             executor.assign(assign(&task, "hold"));
-            // Let it take the lock on some worker (sometimes not yet).
+            // Every other round, cancel only once it holds the lock (waiting
+            // on time, not a count of yields: a loaded runner is slow).
             if round % 2 == 0 {
-                for _ in 0..1000 {
-                    if executor.locks().views(None)["stage"].task_id.as_deref() == Some(&task) {
-                        break;
+                tokio::time::timeout(Duration::from_secs(5), async {
+                    while executor.locks().views(None)["stage"].task_id.as_deref() != Some(&task) {
+                        tokio::task::yield_now().await;
                     }
-                    tokio::task::yield_now().await;
-                }
+                })
+                .await
+                .expect("the task took the lock");
             }
             executor.cancel(&task);
         }
