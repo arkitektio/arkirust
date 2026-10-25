@@ -2,7 +2,8 @@
 //! assignments as they arrive.
 //!
 //! The protocol is a [`rekuest_session::Session`], a sans-IO state machine,
-//! and [`Driver`] wires it to the executor; this adds the tokio websocket.
+//! [`Driver`] wires it to the executor and [`link::run`](crate::link::run)
+//! keeps it up; this adds the tokio websocket and the SQLite journal.
 //! Connection lifecycle:
 //! 1. connect, send `REGISTER` (token + declaration), wait for `INIT`
 //! 2. re-send every numbered frame not covered by a `JOURNAL_ACK` (earlier
@@ -19,16 +20,17 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use async_trait::async_trait;
 use fakts::TokenLoader;
-use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
-use rekuest_session::{Event, SessionConfig};
+use rekuest_session::SessionConfig;
 use tokio::time::Instant;
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::driver::Driver;
 use crate::executor::Executor;
 use crate::journal::{Journal, JournalEntry};
+use crate::link::{self, Backlog, Dial, Incoming, Link, Socket};
 use crate::transport::{Connector, Direct, Ws};
 use arkitekt_spec::AgentDeclaration;
 use arkitekt_spec::Context;
@@ -149,113 +151,28 @@ impl Agent {
             .declaration(self.options.name.clone(), self.options.description.clone())
     }
 
+    /// The session, executor and journal underneath.
+    pub fn driver(&self) -> &Driver {
+        &self.driver
+    }
+
     /// Serve until a fatal error (or until the retry budget is exhausted).
     /// Call [`Agent::shutdown`] afterwards to run shutdown hooks.
     pub async fn run(&self) -> Result<(), AgentError> {
         fakts::install_crypto_provider();
-        self.load_backlog().await;
         let start = Instant::now();
-        let now = || start.elapsed();
-        // A run after an earlier one ended (or stopped while connecting) starts over.
-        self.driver.with_session(|session| session.restart(now()));
-        let mut sink: Option<SplitSink<Ws, Message>> = None;
-        let mut stream: Option<SplitStream<Ws>> = None;
-
-        loop {
-            let polled = self.driver.poll(now());
-            let busy = !polled.events.is_empty() || !polled.frames.is_empty();
-
-            if let Some(open) = sink.as_mut() {
-                for frame in polled.frames {
-                    if let Err(e) = open.send(Message::Text(frame)).await {
-                        self.driver.with_session(|session| {
-                            session.handle_disconnect(now(), &format!("send: {e}"))
-                        });
-                        break;
-                    }
-                }
-            }
-
-            for event in polled.events {
-                let Some(event) = self.driver.act(event) else {
-                    continue;
-                };
-                match event {
-                    Event::Connect => {
-                        let token = self.tokens.get_token().await?;
-                        let connected = crate::transport::connect_ws(
-                            &self.options.endpoint_url,
-                            self.options.connector.as_ref(),
-                        )
-                        .await;
-                        match connected {
-                            Ok((ws, _)) => {
-                                let (open, incoming) = ws.split();
-                                sink = Some(open);
-                                stream = Some(incoming);
-                                let declaration = self.declaration();
-                                self.driver.with_session(|session| {
-                                    session.connected(now(), token, declaration)
-                                });
-                            }
-                            Err(e) => self.driver.with_session(|session| {
-                                session.connect_failed(
-                                    now(),
-                                    &format!("connect to {}: {e}", self.options.endpoint_url),
-                                )
-                            }),
-                        }
-                    }
-                    Event::Close => {
-                        stream = None;
-                        if let Some(mut open) = sink.take() {
-                            let _ = open.close().await;
-                        }
-                    }
-                    Event::ReloadJournal => {
-                        let entries = self.read_unacked().await;
-                        self.driver
-                            .with_session(|session| session.reloaded(entries));
-                    }
-                    Event::Acked { session, pos } => self.record_ack(session, pos),
-                    Event::Ended(error) => return Err(error.into()),
-                    _ => {}
-                }
-            }
-            if busy {
-                // Acting may have queued more: REGISTER, reports, the end.
-                continue;
-            }
-
-            let incoming = async {
-                match stream.as_mut() {
-                    Some(stream) => stream.next().await,
-                    None => std::future::pending().await,
-                }
-            };
-            let sleep = async {
-                match polled.deadline {
-                    Some(at) => tokio::time::sleep_until(start + at).await,
-                    None => std::future::pending().await,
-                }
-            };
-            tokio::select! {
-                frame = incoming => self.driver.with_session(|session| match frame {
-                    None => session.handle_disconnect(now(), "stream ended"),
-                    Some(Err(e)) => session.handle_disconnect(now(), &format!("read: {e}")),
-                    Some(Ok(Message::Text(text))) => session.handle_text(now(), &text),
-                    Some(Ok(Message::Close(frame))) => {
-                        let (code, reason) = frame
-                            .map(|f| (u16::from(f.code), f.reason.to_string()))
-                            .unwrap_or((1005, String::new()));
-                        session.handle_close(now(), code, &reason);
-                    }
-                    Some(Ok(_)) => {}
-                }),
-                _ = self.driver.woken() => {}
-                _ = sleep => {}
-            }
-        }
+        let link = Link {
+            driver: &self.driver,
+            endpoint: &self.options.endpoint_url,
+            tokens: self.tokens.as_ref(),
+            backlog: Some(self),
+            name: self.options.name.clone(),
+            description: self.options.description.clone(),
+        };
+        let mut dial = Tungstenite {
+            connector: self.options.connector.clone(),
+        };
+        link::run(&link, &mut dial, &|| start.elapsed()).await
     }
 
     /// Run shutdown hooks and flush state changes and the journal.
@@ -263,33 +180,22 @@ impl Agent {
         self.executor().teardown().await;
         self.journal().flush(crate::executor::FLUSH_TIMEOUT).await;
     }
+}
 
-    /// Once: queue what earlier sessions of this agent never got acknowledged
-    /// (from the local journal) ahead of this session, and start pruning.
-    async fn load_backlog(&self) {
+/// The SQLite journal (`wal`): earlier runs' backlog, reloads and acks.
+#[async_trait]
+impl Backlog for Agent {
+    /// Once per agent: what earlier sessions never got acknowledged; also
+    /// starts pruning what is acknowledged.
+    async fn earlier(&self, session_id: &str) -> Vec<JournalEntry> {
         if self
             .backlog_loaded
             .swap(true, std::sync::atomic::Ordering::SeqCst)
         {
-            return;
+            return vec![];
         }
         #[cfg(feature = "wal")]
         if let Some(store) = &self.store {
-            let session_id = self
-                .driver
-                .with_session(|session| session.session_id().to_owned());
-            match store.unacked_entries(Some(&session_id)).await {
-                Ok(entries) if !entries.is_empty() => {
-                    tracing::info!(
-                        "re-sending {} journal entries of earlier sessions",
-                        entries.len()
-                    );
-                    self.driver
-                        .with_session(|session| session.reloaded(Some(entries)));
-                }
-                Ok(_) => {}
-                Err(e) => tracing::warn!("could not read the journal backlog: {e:#}"),
-            }
             if let Some(retention) = self.options.journal_retention {
                 let store = store.clone();
                 tokio::spawn(async move {
@@ -305,11 +211,20 @@ impl Agent {
                     }
                 });
             }
+            return match store.unacked_entries(Some(session_id)).await {
+                Ok(entries) => entries,
+                Err(e) => {
+                    tracing::warn!("could not read the journal backlog: {e:#}");
+                    vec![]
+                }
+            };
         }
+        let _ = session_id;
+        vec![]
     }
 
     /// The frames dropped from memory, read back from the local journal.
-    async fn read_unacked(&self) -> Option<Vec<JournalEntry>> {
+    async fn unacked(&self) -> Option<Vec<JournalEntry>> {
         #[cfg(feature = "wal")]
         if let Some(store) = &self.store {
             self.journal().flush(crate::executor::FLUSH_TIMEOUT).await;
@@ -324,7 +239,8 @@ impl Agent {
         None
     }
 
-    fn record_ack(&self, session: String, pos: u64) {
+    /// Recorded in the background: the link goes on meanwhile.
+    async fn acked(&self, session: String, pos: u64) {
         #[cfg(feature = "wal")]
         if let Some(store) = self.store.clone() {
             tokio::spawn(async move {
@@ -335,5 +251,63 @@ impl Agent {
         }
         #[cfg(not(feature = "wal"))]
         let _ = (session, pos);
+    }
+}
+
+/// Websockets through tungstenite, over a stream `connector` opens.
+struct Tungstenite {
+    connector: Arc<dyn Connector>,
+}
+
+impl Dial for Tungstenite {
+    type Socket<'a>
+        = Ws
+    where
+        Self: 'a;
+
+    async fn dial(&mut self, url: &str) -> Result<Ws, String> {
+        crate::transport::connect_ws(url, self.connector.as_ref())
+            .await
+            .map(|(ws, _)| ws)
+            .map_err(|e| e.to_string())
+    }
+}
+
+impl Socket for Ws {
+    /// tungstenite answers pings itself; binary frames and pongs are skipped.
+    async fn next(&mut self) -> Result<Incoming, String> {
+        loop {
+            return match StreamExt::next(self).await {
+                None => Ok(Incoming::Closed {
+                    code: 1006,
+                    reason: "stream ended".into(),
+                }),
+                Some(Err(e)) => Err(e.to_string()),
+                Some(Ok(Message::Text(text))) => Ok(Incoming::Text(text)),
+                Some(Ok(Message::Close(frame))) => {
+                    let (code, reason) = frame
+                        .map(|f| (u16::from(f.code), f.reason.to_string()))
+                        .unwrap_or((1005, String::new()));
+                    Ok(Incoming::Closed { code, reason })
+                }
+                Some(Ok(_)) => continue,
+            };
+        }
+    }
+
+    async fn send_text(&mut self, text: &str) -> Result<(), String> {
+        self.send(Message::Text(text.to_owned()))
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    async fn pong(&mut self, payload: &[u8]) -> Result<(), String> {
+        self.send(Message::Pong(payload.to_vec()))
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    async fn close(&mut self) {
+        let _ = SinkExt::close(self).await;
     }
 }

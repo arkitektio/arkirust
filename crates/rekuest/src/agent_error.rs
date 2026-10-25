@@ -1,5 +1,7 @@
 //! Why an agent stopped, whichever socket it runs over.
 
+#[allow(unused_imports)]
+use crate::prelude::*;
 use rekuest_session::SessionError;
 
 #[derive(Debug, thiserror::Error)]

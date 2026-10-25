@@ -99,12 +99,12 @@ pub(crate) mod collections {
 
 #[cfg(feature = "tokio")]
 pub mod agent;
-#[cfg(any(feature = "tokio", feature = "web"))]
 mod agent_error;
 pub mod driver;
 mod emit;
 pub mod executor;
 pub mod journal;
+pub mod link;
 mod locks;
 #[cfg(feature = "serve")]
 pub mod serve;
@@ -123,7 +123,6 @@ pub use rekuest_protocol::messages;
 
 #[cfg(feature = "tokio")]
 pub use crate::agent::{Agent, AgentOptions};
-#[cfg(any(feature = "tokio", feature = "web"))]
 pub use crate::agent_error::AgentError;
 pub use crate::driver::Driver;
 pub use crate::emit::{Emitter, NullEmitter};

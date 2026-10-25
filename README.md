@@ -399,8 +399,12 @@ states and `#[action]` code spawn, sleep and wait through `arkitekt_spec::rt`
 (`Runtime`: spawn, sleep, blocking work), which is tokio with the `tokio`
 feature and whatever the app installs (`rt::install`) without it.
 `rekuest::Driver` is an agent without its socket (session + executor +
-journal); `Agent` is it with a tokio websocket, and `checks/wasm` runs a real
-`#[action]` through it on wasm32. Features of `rekuest`: `tokio` (the
+journal), and `rekuest::link::run` keeps it connected over any websocket:
+a `Dial` opens a cancel-safe `Socket`, an optional `Backlog` keeps the
+journal beyond memory. Every agent is that loop: `Agent` with tungstenite and
+the SQLite journal, `web::Agent` with the JS `WebSocket`, arkitekt-embassy's
+with its own client over embassy-net; `checks/wasm` runs a real `#[action]`
+through the driver on wasm32. Features of `rekuest`: `tokio` (the
 `Agent`, `transport`, fakts tokens) and `rath` (task tokens on GraphQL calls),
 both on by default and turned on by `arkitekt`; `wal` and `serve` need tokio.
 Action futures must be `Send` everywhere, so a browser action that holds a JS

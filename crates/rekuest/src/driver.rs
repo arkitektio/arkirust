@@ -10,7 +10,7 @@
 //! back the ones that are the driver's: `Connect`, `Close`,
 //! `ReloadJournal`, `Acked` and `Ended`.
 //!
-//! [`Agent`](crate::Agent) is this with a tokio websocket.
+//! [`link::run`](crate::link::run) is that driver, over any websocket.
 
 #[allow(unused_imports)]
 use crate::prelude::*;

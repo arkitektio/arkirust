@@ -21,9 +21,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use fakts::TokenLoader;
-use futures::future::{select, Either};
 use futures::StreamExt;
-use rekuest_session::{Event, Outbox, SessionConfig};
+use rekuest_session::{Outbox, SessionConfig};
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 use web_sys::{CloseEvent, MessageEvent, WebSocket};
@@ -31,6 +30,7 @@ use web_sys::{CloseEvent, MessageEvent, WebSocket};
 use crate::driver::Driver;
 use crate::executor::Executor;
 use crate::journal::Journal;
+use crate::link::{self, Dial, Link, Socket};
 use arkitekt_spec::AgentDeclaration;
 use arkitekt_spec::Context;
 use arkitekt_spec::Registry;
@@ -63,7 +63,7 @@ impl AgentOptions {
 }
 
 /// What the socket's callbacks hand the agent.
-enum Incoming {
+enum Event {
     Open,
     Text(String),
     Closed { code: u16, reason: String },
@@ -71,21 +71,21 @@ enum Incoming {
 }
 
 /// An open (or opening) JS WebSocket and its callbacks.
-struct Socket {
+struct JsSocket {
     ws: WebSocket,
-    incoming: futures::channel::mpsc::UnboundedReceiver<Incoming>,
+    incoming: futures::channel::mpsc::UnboundedReceiver<Event>,
     _callbacks: [Closure<dyn FnMut(web_sys::Event)>; 3],
     _on_message: Closure<dyn FnMut(MessageEvent)>,
 }
 
-impl Socket {
+impl JsSocket {
     fn open(url: &str) -> Result<Self, String> {
         let ws = WebSocket::new(url).map_err(|e| format!("{e:?}"))?;
         let (tx, incoming) = futures::channel::mpsc::unbounded();
         let on_open = {
             let tx = tx.clone();
             Closure::<dyn FnMut(web_sys::Event)>::new(move |_| {
-                let _ = tx.unbounded_send(Incoming::Open);
+                let _ = tx.unbounded_send(Event::Open);
             })
         };
         let on_close = {
@@ -95,18 +95,18 @@ impl Socket {
                     .dyn_ref::<CloseEvent>()
                     .map(|e| (e.code(), e.reason()))
                     .unwrap_or((1006, String::new()));
-                let _ = tx.unbounded_send(Incoming::Closed { code, reason });
+                let _ = tx.unbounded_send(Event::Closed { code, reason });
             })
         };
         let on_error = {
             let tx = tx.clone();
             Closure::<dyn FnMut(web_sys::Event)>::new(move |_| {
-                let _ = tx.unbounded_send(Incoming::Error);
+                let _ = tx.unbounded_send(Event::Error);
             })
         };
         let on_message = Closure::<dyn FnMut(MessageEvent)>::new(move |event: MessageEvent| {
             if let Some(text) = event.data().as_string() {
-                let _ = tx.unbounded_send(Incoming::Text(text));
+                let _ = tx.unbounded_send(Event::Text(text));
             }
         });
         ws.set_onopen(Some(on_open.as_ref().unchecked_ref()));
@@ -124,15 +124,54 @@ impl Socket {
     /// Wait until the socket is open, or say why it is not.
     async fn opened(&mut self) -> Result<(), String> {
         match self.incoming.next().await {
-            Some(Incoming::Open) => Ok(()),
-            Some(Incoming::Closed { code, reason }) => Err(format!("closed with {code} {reason}")),
-            Some(Incoming::Error) | None => Err("the connection failed".into()),
-            Some(Incoming::Text(_)) => Err("a frame before the connection opened".into()),
+            Some(Event::Open) => Ok(()),
+            Some(Event::Closed { code, reason }) => Err(format!("closed with {code} {reason}")),
+            Some(Event::Error) | None => Err("the connection failed".into()),
+            Some(Event::Text(_)) => Err("a frame before the connection opened".into()),
         }
     }
 }
 
-impl Drop for Socket {
+impl Socket for JsSocket {
+    /// The browser answers pings itself. Cancel-safe: frames wait in the channel.
+    async fn next(&mut self) -> Result<link::Incoming, String> {
+        loop {
+            return match self.incoming.next().await {
+                Some(Event::Text(text)) => Ok(link::Incoming::Text(text)),
+                Some(Event::Closed { code, reason }) => Ok(link::Incoming::Closed { code, reason }),
+                Some(Event::Error) | None => Err("socket error".into()),
+                Some(Event::Open) => continue,
+            };
+        }
+    }
+
+    async fn send_text(&mut self, text: &str) -> Result<(), String> {
+        self.ws.send_with_str(text).map_err(|e| format!("{e:?}"))
+    }
+
+    async fn pong(&mut self, _payload: &[u8]) -> Result<(), String> {
+        Ok(())
+    }
+
+    async fn close(&mut self) {
+        let _ = self.ws.close();
+    }
+}
+
+/// Opens JS WebSockets.
+struct Browser;
+
+impl Dial for Browser {
+    type Socket<'a> = JsSocket;
+
+    async fn dial(&mut self, url: &str) -> Result<JsSocket, String> {
+        let mut opening = JsSocket::open(url)?;
+        opening.opened().await?;
+        Ok(opening)
+    }
+}
+
+impl Drop for JsSocket {
     fn drop(&mut self) {
         self.ws.set_onopen(None);
         self.ws.set_onclose(None);
@@ -197,87 +236,16 @@ impl Agent {
     /// Serve until a fatal error (or until the retry budget is exhausted).
     /// Call [`Agent::shutdown`] afterwards to run shutdown hooks.
     pub async fn run(&self) -> Result<(), AgentError> {
-        let now = clock();
-        self.driver.with_session(|session| session.restart(now()));
-        let mut socket: Option<Socket> = None;
-
-        loop {
-            let polled = self.driver.poll(now());
-            let busy = !polled.events.is_empty() || !polled.frames.is_empty();
-            if let Some(open) = &socket {
-                for frame in &polled.frames {
-                    if let Err(e) = open.ws.send_with_str(frame) {
-                        self.driver.with_session(|session| {
-                            session.handle_disconnect(now(), &format!("send: {e:?}"))
-                        });
-                        break;
-                    }
-                }
-            }
-            for event in polled.events {
-                match self.driver.act(event) {
-                    Some(Event::Connect) => {
-                        let token = self.tokens.get_token().await?;
-                        let opened = match Socket::open(&self.options.endpoint_url) {
-                            Ok(mut opening) => opening.opened().await.map(|()| opening),
-                            Err(e) => Err(e),
-                        };
-                        match opened {
-                            Ok(open) => {
-                                socket = Some(open);
-                                let declaration = self.declaration();
-                                self.driver.with_session(|session| {
-                                    session.connected(now(), token, declaration)
-                                });
-                            }
-                            Err(e) => self.driver.with_session(|session| {
-                                session.connect_failed(
-                                    now(),
-                                    &format!("connect to {}: {e}", self.options.endpoint_url),
-                                )
-                            }),
-                        }
-                    }
-                    Some(Event::Close) => socket = None,
-                    // Nothing was dropped from memory: there is no journal file.
-                    Some(Event::ReloadJournal) => {
-                        self.driver.with_session(|session| session.reloaded(None))
-                    }
-                    Some(Event::Ended(error)) => return Err(error.into()),
-                    _ => {}
-                }
-            }
-            if busy {
-                continue;
-            }
-
-            let wait = polled
-                .deadline
-                .map(|at| at.saturating_sub(now()))
-                .unwrap_or(Duration::from_secs(3600));
-            let timer = gloo_timers::future::TimeoutFuture::new(
-                wait.as_millis().min(u32::MAX as u128) as u32,
-            );
-            let woken = std::pin::pin!(self.driver.woken());
-            let quiet = select(timer, woken);
-            let Some(open) = socket.as_mut() else {
-                quiet.await;
-                continue;
-            };
-            match select(open.incoming.next(), quiet).await {
-                Either::Left((incoming, _)) => self.driver.with_session(|session| match incoming {
-                    Some(Incoming::Text(text)) => session.handle_text(now(), &text),
-                    Some(Incoming::Closed { code, reason }) => {
-                        session.handle_close(now(), code, &reason)
-                    }
-                    Some(Incoming::Error) | None => {
-                        session.handle_disconnect(now(), "socket error")
-                    }
-                    Some(Incoming::Open) => {}
-                }),
-                Either::Right(_) => {}
-            }
-        }
+        let link = Link {
+            driver: &self.driver,
+            endpoint: &self.options.endpoint_url,
+            tokens: self.tokens.as_ref(),
+            // No journal file: what is unacknowledged is kept in memory.
+            backlog: None,
+            name: self.options.name.clone(),
+            description: self.options.description.clone(),
+        };
+        link::run(&link, &mut Browser, &clock()).await
     }
 
     /// Run shutdown hooks and flush state changes.

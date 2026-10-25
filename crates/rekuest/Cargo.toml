@@ -11,7 +11,8 @@ categories.workspace = true
 readme = "../../README.md"
 
 [dependencies]
-fakts = { workspace = true, optional = true }
+# Tokens for the link (fakts::TokenLoader).
+fakts.workspace = true
 rath = { workspace = true, optional = true, default-features = false }
 # The declaration this runs: actions, states, hooks, Task, rt.
 arkitekt-spec = { workspace = true, features = ["declare"] }
@@ -68,10 +69,10 @@ std = [
 # tokio as the runtime (`rt::Tokio`) and the websocket `Agent` on it (with
 # fakts for its tokens). Without it, install a `rt::Runtime` and drive the
 # session yourself (`checks/wasm`).
-tokio = ["std", "dep:tokio", "dep:tokio-tungstenite", "dep:fakts", "arkitekt-spec/tokio"]
+tokio = ["std", "dep:tokio", "dep:tokio-tungstenite", "fakts/std", "arkitekt-spec/tokio"]
 # The agent in a browser or node (wasm32): `web::Agent` over the JS WebSocket,
 # with fakts for its tokens, and `rt::Js` (the JS event loop) as the runtime.
-web = ["std", "arkitekt-spec/js", "dep:fakts", "dep:web-sys", "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys", "dep:gloo-timers", "dep:send_wrapper"]
+web = ["std", "arkitekt-spec/js", "fakts/std", "dep:web-sys", "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys", "dep:gloo-timers", "dep:send_wrapper"]
 # Actions' GraphQL calls (rath) carry their task's token.
 rath = ["dep:rath"]
 # Keep the journal in a local SQLite file (write-ahead: unsent reports survive restarts).
