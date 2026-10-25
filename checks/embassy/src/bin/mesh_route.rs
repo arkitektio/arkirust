@@ -113,6 +113,19 @@ async fn scenario(mesh: &Mesh, lab_url: &str, peer: &str) {
     })
     .await;
     assert_eq!(route.unwrap(), Some(MeshRoute::Direct));
+    // A later login (after an agent or Wi-Fi failure): told at once.
+    let again = MeshJoin {
+        coord_url: Some(lab_url.to_owned()),
+        auth_key: None,
+        hostname: String::from("mesh-route-check"),
+    };
+    let route = embassy_time::with_timeout(
+        embassy_time::Duration::from_millis(100),
+        handoff.join(again),
+    )
+    .await
+    .expect("a later join is answered at once");
+    assert_eq!(route.unwrap(), Some(MeshRoute::Direct));
     println!(
         "joined as {:?}: fakts reaches the mesh directly",
         mesh.addresses()

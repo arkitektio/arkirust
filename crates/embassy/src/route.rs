@@ -18,6 +18,7 @@ use alloc::boxed::Box;
 use alloc::string::String;
 use core::fmt;
 use core::net::{IpAddr, SocketAddr};
+use core::sync::atomic::{AtomicBool, Ordering};
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
@@ -182,9 +183,12 @@ fn same(addr_type: &AddrType) -> AddrType {
 /// the task that runs the mesh node ([`next_join`](Self::next_join)), and
 /// fakts waits until that task says the node joined
 /// ([`joined`](Self::joined)) or will not ([`stay_off`](Self::stay_off)).
+/// Once it joined, later logins (after an agent or Wi-Fi failure) are told
+/// so at once: the node stays on the mesh.
 pub struct MeshHandoff {
     joins: Signal<CriticalSectionRawMutex, MeshJoin>,
     answers: Signal<CriticalSectionRawMutex, Result<bool, String>>,
+    up: AtomicBool,
 }
 
 impl Default for MeshHandoff {
@@ -198,6 +202,7 @@ impl MeshHandoff {
         Self {
             joins: Signal::new(),
             answers: Signal::new(),
+            up: AtomicBool::new(false),
         }
     }
 
@@ -210,16 +215,19 @@ impl MeshHandoff {
     /// For the mesh task: the node is on the mesh; mesh aliases go through
     /// [`Routed`].
     pub fn joined(&self) {
+        self.up.store(true, Ordering::SeqCst);
         self.answers.signal(Ok(true));
     }
 
     /// For the mesh task: no mesh (no key, no node that joined before).
     pub fn stay_off(&self) {
+        self.up.store(false, Ordering::SeqCst);
         self.answers.signal(Ok(false));
     }
 
     /// For the mesh task: joining failed; the login fails with it.
     pub fn failed(&self, reason: String) {
+        self.up.store(false, Ordering::SeqCst);
         self.answers.signal(Err(reason));
     }
 }
@@ -227,6 +235,9 @@ impl MeshHandoff {
 #[async_trait::async_trait]
 impl MeshJoiner for MeshHandoff {
     async fn join(&self, join: MeshJoin) -> fakts::Result<Option<MeshRoute>> {
+        if self.up.load(Ordering::SeqCst) {
+            return Ok(Some(MeshRoute::Direct));
+        }
         self.answers.reset();
         self.joins.signal(join);
         match self.answers.wait().await {
