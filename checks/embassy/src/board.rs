@@ -6,11 +6,11 @@
 use alloc::sync::Arc;
 
 use arkitekt_embassy::{serve_http, Agent, AgentOptions, NetHost, Verify};
+use arkitekt_spec::{action, Context, Registry};
 use embassy_net::dns::DnsSocket;
 use embassy_net::tcp::client::{TcpClient, TcpClientState};
 use embassy_net::Stack;
 use fakts::{Fakts, Grant, MandateKeyOptions, Manifest, Requirement};
-use rekuest::{action, Context, Registry};
 
 static HOST: NetHost = NetHost::new();
 

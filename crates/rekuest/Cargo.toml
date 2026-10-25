@@ -1,6 +1,6 @@
 [package]
 name = "rekuest"
-description = "Rekuest agent: expose typed Rust functions as Arkitekt actions"
+description = "Rekuest: runs an Arkitekt app's actions (executor, journal, states) and serves them to a rekuest server"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -13,7 +13,8 @@ readme = "../../README.md"
 [dependencies]
 fakts = { workspace = true, optional = true }
 rath = { workspace = true, optional = true, default-features = false }
-rekuest-macros.workspace = true
+# The declaration this runs: actions, states, hooks, Task, rt.
+arkitekt-spec = { workspace = true, features = ["declare"] }
 rekuest-protocol.workspace = true
 rekuest-session.workspace = true
 # no_std + alloc unless `std` (default): every dependency without its own
@@ -62,14 +63,15 @@ std = [
     "rekuest-protocol/std", "anyhow/std", "chrono/std", "chrono/clock", "futures/std",
     "hex/std", "indexmap/std", "dep:rand", "serde/std", "serde_json/std", "sha2/std",
     "thiserror/std", "async-channel/std", "tracing/std", "uuid/std", "uuid/v4", "rath?/std",
+    "arkitekt-spec/std",
 ]
 # tokio as the runtime (`rt::Tokio`) and the websocket `Agent` on it (with
 # fakts for its tokens). Without it, install a `rt::Runtime` and drive the
 # session yourself (`checks/wasm`).
-tokio = ["std", "dep:tokio", "dep:tokio-tungstenite", "dep:fakts"]
+tokio = ["std", "dep:tokio", "dep:tokio-tungstenite", "dep:fakts", "arkitekt-spec/tokio"]
 # The agent in a browser or node (wasm32): `web::Agent` over the JS WebSocket,
 # with fakts for its tokens, and `rt::Js` (the JS event loop) as the runtime.
-web = ["std", "dep:fakts", "dep:web-sys", "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys", "dep:gloo-timers", "dep:send_wrapper"]
+web = ["std", "arkitekt-spec/js", "dep:fakts", "dep:web-sys", "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys", "dep:gloo-timers", "dep:send_wrapper"]
 # Actions' GraphQL calls (rath) carry their task's token.
 rath = ["dep:rath"]
 # Keep the journal in a local SQLite file (write-ahead: unsent reports survive restarts).

@@ -16,9 +16,10 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use arkitekt_spec::{action, Context, Registry};
 use fakts::{Fakts, Grant, MandateKeyOptions, Manifest, Requirement};
 use rekuest::store::HistoryStore;
-use rekuest::{action, Agent, AgentOptions, Context, Registry};
+use rekuest::{Agent, AgentOptions};
 
 #[path = "../../../testing/stack/harness.rs"]
 mod harness;

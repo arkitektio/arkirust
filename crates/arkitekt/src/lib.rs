@@ -16,52 +16,48 @@
 //!
 //! #[tokio::main]
 //! async fn main() -> anyhow::Result<()> {
-//!     let app = App::new("hello", "0.1.0").action(greet);
-//!     run(app).await
+//!     run(App::new("hello", "0.1.0").action(greet)).await
 //! }
 //! ```
 //!
 //! The pieces mirror the Python libraries:
 //!
-//! | Rust              | Python                         |
-//! |-------------------|--------------------------------|
-//! | [`fakts`]         | `fakts` (configuration + auth) |
-//! | [`rath`]          | `rath` (GraphQL client)        |
-//! | [`rekuest`]       | `rekuest` (actions + agent)    |
-//! | [`App`]           | `arkitekt.App`                 |
-//! | [`Service`]       | `@registry.service` builders   |
-//! | [`Runtime`]       | `connect(app)` / `run(app)`    |
+//! | Rust              | Python                                      |
+//! |-------------------|---------------------------------------------|
+//! | [`spec`]          | `arkitekt-spec` (the action language, `App`) |
+//! | [`rekuest`]       | `arkitekt-runtime` + `rekuest` (the agent)  |
+//! | [`fakts`]         | `fakts` (configuration + auth)              |
+//! | [`rath`]          | `rath` (GraphQL client)                     |
+//! | [`App`]           | `arkitekt.App`                              |
+//! | [`Service`]       | `@registry.service` builders                |
+//! | [`Runtime`]       | `connect(app)` / `run(app)`                 |
 
-mod app;
 mod runtime;
 #[cfg(feature = "serve")]
 pub mod serve;
-mod service;
 
-pub use crate::app::{connect, easy, run, App};
-pub use crate::runtime::{device_id, ConnectOptions, Runtime, DEFAULT_ARKITEKT_URL};
+pub use crate::runtime::{
+    connect, connect_with, device_id, easy, run, run_with, ConnectOptions, Runtime,
+    DEFAULT_ARKITEKT_URL,
+};
 #[cfg(feature = "serve")]
 pub use crate::serve::{serve, serve_with, ServeOptions, Served};
-pub use crate::service::Service;
 
+pub use arkitekt_spec as spec;
 pub use fakts;
 pub use rath;
 pub use rekuest;
 
-pub use async_trait::async_trait;
-pub use fakts::{Alias, Fakts, Requirement};
-pub use rekuest::{
-    action, widgets, Background, Context, ContextBuilder, LogLevel, PortType, Shutdown, Startup,
-    State, StateMut, StateRef, StateType, Structure, Task,
+pub use arkitekt_spec::{
+    action, service, widgets, Action, Alias, App, Background, Context, ContextBuilder, LogLevel,
+    PortType, Registry, Service, Shutdown, Startup, State, StateMut, StateRef, StateType,
+    Structure, Task,
 };
-pub use rekuest_macros::service;
+pub use async_trait::async_trait;
+pub use fakts::{Fakts, Requirement};
 
-/// Re-exports for generated code. Not a public API.
+/// Lets the macros find the spec through arkitekt. Not a public API.
 #[doc(hidden)]
 pub mod __private {
-    pub use crate::service::Service;
-    pub use anyhow;
-    pub use async_trait::async_trait;
-    pub use fakts;
-    pub use rekuest;
+    pub use arkitekt_spec as spec;
 }

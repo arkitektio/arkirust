@@ -5,8 +5,9 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use arkitekt_spec::{action, Context, Registry};
 use futures::{SinkExt, StreamExt};
-use rekuest::{action, Agent, AgentOptions, ConnectionPolicy, Context, Registry};
+use rekuest::{Agent, AgentOptions, ConnectionPolicy};
 use rekuest_session::testing::{FakeServer, ServerOutput};
 use tokio::net::TcpListener;
 use tokio_tungstenite::tungstenite::Message;

@@ -1,7 +1,6 @@
 //! `#[service]`: a builder function whose parameters are the aliases it needs.
 
-use proc_macro2::{Span, TokenStream as TokenStream2};
-use proc_macro_crate::{crate_name, FoundCrate};
+use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
 use syn::spanned::Spanned;
 use syn::{FnArg, Ident, ItemFn, LitStr, Pat, Path, ReturnType, Type};
@@ -27,18 +26,6 @@ impl ServiceOptions {
     }
 }
 
-/// Where the arkitekt crate lives for the crate being compiled.
-fn arkitekt_path() -> TokenStream2 {
-    match crate_name("arkitekt") {
-        Ok(FoundCrate::Itself) => quote!(::arkitekt),
-        Ok(FoundCrate::Name(name)) => {
-            let ident = Ident::new(&name, Span::call_site());
-            quote!(::#ident)
-        }
-        Err(_) => quote!(::arkitekt),
-    }
-}
-
 enum ServiceParam {
     /// `#[require(service, description?)]` on `Alias` or `Option<Alias>`.
     Alias {
@@ -47,8 +34,8 @@ enum ServiceParam {
         description: Option<LitStr>,
         optional: bool,
     },
-    /// Any other parameter must be `Fakts`.
-    Fakts,
+    /// Any other parameter is provided by type by the wiring (fakts provides `Fakts`).
+    Provided(Box<Type>),
 }
 
 /// `Option<T>` → `Some(T)`.
@@ -128,7 +115,10 @@ fn parse_params(function: &mut ItemFn) -> syn::Result<Vec<ServiceParam>> {
                     None => (false, (*typed.ty).clone()),
                 };
                 if !is_named(&inner, "Alias") {
-                    return Err(syn::Error::new(typed.ty.span(), "#[require] parameters must be `Alias` or `Option<Alias>`"));
+                    return Err(syn::Error::new(
+                        typed.ty.span(),
+                        "#[require] parameters must be `Alias` or `Option<Alias>`",
+                    ));
                 }
                 ServiceParam::Alias {
                     key,
@@ -137,13 +127,7 @@ fn parse_params(function: &mut ItemFn) -> syn::Result<Vec<ServiceParam>> {
                     optional,
                 }
             }
-            None if is_named(&typed.ty, "Fakts") => ServiceParam::Fakts,
-            None => {
-                return Err(syn::Error::new(
-                    typed.ty.span(),
-                    "service parameters are `#[require(..)] Alias`, `#[require(..)] Option<Alias>` or `Fakts`",
-                ))
-            }
+            None => ServiceParam::Provided(typed.ty.clone()),
         };
         params.push(param);
     }
@@ -154,12 +138,12 @@ pub(crate) fn expand_service(
     options: ServiceOptions,
     mut function: ItemFn,
 ) -> syn::Result<TokenStream2> {
-    let ark = options
+    let spec = options
         .krate
         .as_ref()
         .map(|p| quote!(#p))
-        .unwrap_or_else(arkitekt_path);
-    let p = quote!(#ark::__private);
+        .unwrap_or_else(crate::spec_path);
+    let p = quote!(#spec::__private);
 
     if !function.sig.generics.params.is_empty() {
         return Err(syn::Error::new(
@@ -196,28 +180,35 @@ pub(crate) fn expand_service(
             return None;
         };
         let describe = description.as_ref().map(|d| quote!(.description(#d)));
-        Some(quote!(#p::fakts::Requirement::new(#key, #service).optional(#optional) #describe))
+        Some(quote!(#p::Requirement::new(#key, #service).optional(#optional) #describe))
     });
 
     // Bind to generated names so they cannot collide with anything in scope.
     let locals: Vec<Ident> = (0..params.len())
         .map(|i| format_ident!("__ark_arg{i}"))
         .collect();
-    let bindings = params.iter().zip(&locals).map(|(param, local)| match param {
-        ServiceParam::Alias { key, optional: false, .. } => quote! {
-            let #local = __ark_fakts.get_alias(#key).await?;
-        },
-        ServiceParam::Alias { key, optional: true, .. } => quote! {
-            let #local = match __ark_fakts.get_alias(#key).await {
-                ::std::result::Result::Ok(alias) => ::std::option::Option::Some(alias),
-                ::std::result::Result::Err(#p::fakts::FaktsError::MissingInstance { .. }) => ::std::option::Option::None,
-                ::std::result::Result::Err(e) => return ::std::result::Result::Err(e.into()),
-            };
-        },
-        ServiceParam::Fakts => quote! {
-            let #local = __ark_fakts.clone();
-        },
-    });
+    let bindings = params
+        .iter()
+        .zip(&locals)
+        .map(|(param, local)| match param {
+            ServiceParam::Alias {
+                key,
+                optional: false,
+                ..
+            } => quote! {
+                let #local = __ark_wiring.require_alias(#key).await?;
+            },
+            ServiceParam::Alias {
+                key,
+                optional: true,
+                ..
+            } => quote! {
+                let #local = __ark_wiring.alias(#key).await?;
+            },
+            ServiceParam::Provided(ty) => quote! {
+                let #local = __ark_wiring.provide::<#ty>()?;
+            },
+        });
     let args = locals.iter();
 
     let call = if function.sig.asyncness.is_some() {
@@ -262,19 +253,19 @@ pub(crate) fn expand_service(
                 #name
             }
 
-            fn requirements(&self) -> ::std::vec::Vec<#p::fakts::Requirement> {
-                ::std::vec![#(#requirements),*]
+            fn requirements(&self) -> #p::Vec<#p::Requirement> {
+                #p::vec![#(#requirements),*]
             }
 
             async fn build(
                 &self,
-                __ark_fakts: &#p::fakts::Fakts,
-                __ark_clients: &mut #p::rekuest::ContextBuilder,
+                __ark_wiring: &dyn #p::Wiring,
+                __ark_clients: &mut #p::ContextBuilder,
             ) -> #p::anyhow::Result<()> {
                 #(#bindings)*
                 let client = #call;
                 __ark_clients.insert(client);
-                ::std::result::Result::Ok(())
+                #p::Result::Ok(())
             }
         }
     })

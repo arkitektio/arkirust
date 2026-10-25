@@ -10,14 +10,14 @@ use alloc::boxed::Box;
 use alloc::sync::Arc;
 use core::time::Duration;
 
+use arkitekt_spec::rt::{BoxFuture, Runtime};
+use arkitekt_spec::{action, Context, Registry};
 use embassy_executor::SendSpawner;
 use embassy_futures::select::{select3, Either3};
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_time::{Instant, Timer};
 use rekuest::driver::Driver;
-use rekuest::rt::{BoxFuture, Runtime};
-use rekuest::{action, Context, Registry};
 use rekuest_session::testing::{FakeServer, ServerOutput};
 use rekuest_session::{ConnectionPolicy, Event, Outbox, SessionConfig, SessionError};
 
@@ -88,7 +88,7 @@ enum Incoming {
 
 /// The scripted scenario with the real agent: executor, journal, `#[action]`.
 pub async fn run_agent(spawner: SendSpawner, seed: u64) -> Result<FakeServer, SessionError> {
-    let _ = rekuest::rt::install(Arc::new(Embassy::new(spawner, seed)));
+    let _ = arkitekt_spec::rt::install(Arc::new(Embassy::new(spawner, seed)));
     let start = Instant::now();
     let now = || Duration::from_micros(start.elapsed().as_micros());
     let socket: Channel<NoopRawMutex, Incoming, 16> = Channel::new();

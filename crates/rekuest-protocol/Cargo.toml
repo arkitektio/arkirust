@@ -13,12 +13,12 @@ readme = "README.md"
 # no_std + alloc: the agent session core runs on wasm and on embassy too.
 # `std` (default) adds `Envelope::new`, which mints a random uuid.
 [dependencies]
+# The action language (definitions, ports), without the declaration layer.
+arkitekt-spec.workspace = true
 serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
-sha2 = { version = "0.10", default-features = false }
-hex = { version = "0.4", default-features = false, features = ["alloc"] }
 uuid = { version = "1", default-features = false, features = ["v4"], optional = true }
 
 [features]
 default = ["std"]
-std = ["dep:uuid", "uuid/std", "serde/std", "serde_json/std", "sha2/std", "hex/std"]
+std = ["dep:uuid", "uuid/std", "serde/std", "serde_json/std", "arkitekt-spec/std"]

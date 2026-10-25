@@ -11,9 +11,9 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use arkitekt_spec::{action, Context, Registry};
 use fakts::{Fakts, Grant, MandateKeyOptions, Manifest, Requirement};
 use rekuest::web::{Agent, AgentOptions};
-use rekuest::{action, Context, Registry};
 use wasm_bindgen::JsValue;
 use wasm_bindgen_test::wasm_bindgen_test;
 

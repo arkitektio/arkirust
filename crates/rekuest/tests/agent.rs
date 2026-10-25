@@ -3,8 +3,9 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use arkitekt_spec::{action, Context, Registry, Task};
 use futures::{SinkExt, StreamExt};
-use rekuest::{action, Agent, AgentError, AgentOptions, Context, Registry, Task};
+use rekuest::{Agent, AgentError, AgentOptions};
 use serde_json::{json, Value};
 use tokio::net::TcpListener;
 use tokio_tungstenite::tungstenite::Message;

@@ -16,21 +16,21 @@ use core::panic::AssertUnwindSafe;
 use core::time::Duration;
 
 use crate::collections::IndexMap;
-use crate::rt::{self, FifoMutex, TaskHandle};
+use arkitekt_spec::rt::{self, FifoMutex, TaskHandle};
 use futures::FutureExt;
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::action::{ActionError, Concurrency, Registry};
-use crate::context::Context;
 use crate::emit::Emitter;
-use crate::hooks::{Background, Startup};
-use crate::journal::TaskGate;
 use crate::locks::{HeldLocks, LockTable, LockView};
 use crate::messages::{Assign, FromAgent, STATE_PRECONDITION};
 use crate::shelf::Shelf;
 use crate::state::{Sink, StateHub};
-use crate::task::{Break, Task};
+use crate::task::{AgentTask, Break};
+use arkitekt_spec::Context;
+use arkitekt_spec::TaskGate;
+use arkitekt_spec::{ActionError, Concurrency, Registry};
+use arkitekt_spec::{Background, Startup};
 
 /// How many finished task ids are remembered to ignore duplicate assigns.
 const FINISHED_MEMORY: usize = 2048;
@@ -167,7 +167,7 @@ impl Executor {
             .collect();
         let actor_ids = registry
             .iter()
-            .map(|a| (a.interface(), crate::rt::uuid().to_string()))
+            .map(|a| (a.interface(), arkitekt_spec::rt::uuid().to_string()))
             .collect();
         // Memory structures shrink onto (and expand from) the shelf in the context.
         let shelf = Shelf::new(emitter.clone());
@@ -247,15 +247,11 @@ impl Executor {
             None => inner
                 .session_id
                 .clone()
-                .unwrap_or_else(|| crate::rt::uuid().to_string()),
+                .unwrap_or_else(|| arkitekt_spec::rt::uuid().to_string()),
         };
 
         inner.hub.apply_initial_values()?;
-        let startup = Startup {
-            ctx: self.context(),
-            hub: inner.hub.clone(),
-            contexts: Arc::default(),
-        };
+        let startup = Startup::new(self.context(), inner.hub.cells().clone());
         for hook in &inner.registry.hooks().startup {
             rt::timeout(HOOK_TIMEOUT, hook(startup.clone()))
                 .await
@@ -263,13 +259,8 @@ impl Executor {
                     anyhow::anyhow!("a startup hook took longer than {HOOK_TIMEOUT:?}")
                 })??;
         }
-        let edits = core::mem::take(&mut *startup.contexts.lock());
-        if !edits.is_empty() {
-            let mut builder = self.context().to_builder();
-            for edit in edits {
-                edit(&mut builder);
-            }
-            *inner.ctx.write() = builder.build();
+        if let Some(ctx) = startup.provided_context(&self.context()) {
+            *inner.ctx.write() = ctx;
         }
 
         inner
@@ -277,10 +268,7 @@ impl Executor {
             .start_session(session_id, inner.emitter.clone(), inner.sink.clone())
             .await?;
 
-        let background = Background {
-            ctx: self.context(),
-            hub: inner.hub.clone(),
-        };
+        let background = Background::new(self.context(), inner.hub.cells().clone());
         let mut handles = inner.background.lock();
         for hook in &inner.registry.hooks().background {
             let run = hook(background.clone());
@@ -300,10 +288,7 @@ impl Executor {
             handle.abort();
         }
         if self.is_activated() {
-            let shutdown = Background {
-                ctx: self.context(),
-                hub: self.inner.hub.clone(),
-            };
+            let shutdown = Background::new(self.context(), self.inner.hub.cells().clone());
             for hook in self.inner.registry.hooks().shutdown.iter().rev() {
                 match rt::timeout(HOOK_TIMEOUT, hook(shutdown.clone())).await {
                     Ok(Ok(())) => {}
@@ -382,12 +367,12 @@ impl Executor {
         let locks = action.locks();
         let gate = TaskGate::default();
         let held = HeldLocks::default();
-        let task = Task::new(
+        let task = AgentTask::task(
             assign.clone(),
             inner.emitter.clone(),
             key.clone(),
             brk.clone(),
-            inner.hub.clone(),
+            inner.hub.cells().clone(),
             locks.clone(),
             gate.clone(),
         );
@@ -644,11 +629,12 @@ fn panic_message(panic: &Box<dyn core::any::Any + Send>) -> String {
 mod tests {
     use super::*;
     use crate::journal::{kind_of, Journal, JournalEntry};
+    use arkitekt_spec::Task;
 
     /// Hold
     ///
     /// Holds the stage and waits forever.
-    #[crate::action(locks = ["stage"])]
+    #[arkitekt_spec::action(locks = ["stage"])]
     async fn hold(task: Task) {
         task.log("holding");
         core::future::pending::<()>().await;
@@ -657,7 +643,7 @@ mod tests {
     /// Quick
     ///
     /// Holds the stage briefly.
-    #[crate::action(locks = ["stage"])]
+    #[arkitekt_spec::action(locks = ["stage"])]
     async fn quick() {}
 
     /// (kind, task, pos) of a recorded frame.

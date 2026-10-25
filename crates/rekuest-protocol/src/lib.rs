@@ -16,9 +16,9 @@ mod prelude {
     pub use alloc::boxed::Box;
     pub use alloc::string::{String, ToString};
     pub use alloc::vec::Vec;
-    pub use alloc::{format, vec};
 }
 
-pub mod definition;
 pub mod messages;
-pub mod ports;
+
+// The action language is the spec's; these paths stay for servers.
+pub use arkitekt_spec::actions::{definition, ports};

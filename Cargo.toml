@@ -7,7 +7,8 @@ members = [
     "crates/rekuest-protocol",
     "crates/rekuest-session",
     "crates/embassy",
-    "crates/rekuest-macros",
+    "crates/macros",
+    "crates/spec",
     "crates/arkitekt",
     "crates/mikro",
     "crates/lovekit",
@@ -34,7 +35,9 @@ rekuest = { path = "crates/rekuest", version = "0.15.0", default-features = fals
 # no_std: crates that want `Envelope::new` turn on `std`.
 rekuest-protocol = { path = "crates/rekuest-protocol", version = "0.15.0", default-features = false }
 rekuest-session = { path = "crates/rekuest-session", version = "0.15.0" }
-rekuest-macros = { path = "crates/rekuest-macros", version = "0.15.0" }
+arkitekt-macros = { path = "crates/macros", version = "0.15.0" }
+# Without `std` and `declare` (both default): only the wire types.
+arkitekt-spec = { path = "crates/spec", version = "0.15.0", default-features = false }
 arkitekt = { path = "crates/arkitekt", version = "0.15.0" }
 mikro = { path = "crates/mikro", version = "0.15.0", package = "arkitekt-mikro" }
 lovekit = { path = "crates/lovekit", version = "0.15.0", package = "arkitekt-lovekit" }

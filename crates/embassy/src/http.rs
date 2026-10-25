@@ -82,11 +82,11 @@ impl Host for &'static NetHost {
     }
 
     fn now_unix(&self) -> i64 {
-        rekuest::rt::now().timestamp()
+        arkitekt_spec::rt::now().timestamp()
     }
 
     fn fill_random(&self, bytes: &mut [u8]) {
-        rekuest::rt::fill_random(bytes)
+        arkitekt_spec::rt::fill_random(bytes)
     }
 }
 

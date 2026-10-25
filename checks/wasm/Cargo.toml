@@ -25,6 +25,7 @@ js-sys = "0.3"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 serde_json = "1"
+arkitekt-spec = { path = "../../crates/spec" }
 rekuest = { path = "../../crates/rekuest", default-features = false, features = ["web", "rath"] }
 fakts = { path = "../../crates/fakts", default-features = false, features = ["std"] }
 rath = { path = "../../crates/rath", package = "arkitekt-rath" }

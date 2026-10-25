@@ -24,8 +24,8 @@ pub use rekuest::serve::{
     SubscriptionInit, Unauthorized,
 };
 
-use crate::app::App;
 use crate::runtime::{ConnectOptions, Runtime};
+use arkitekt_spec::App;
 
 /// A served app: its router (the agent routes merged into yours), the agent
 /// behind them, and the runtime holding its service clients.

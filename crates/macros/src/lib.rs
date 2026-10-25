@@ -1,4 +1,5 @@
-//! Proc-macros for rekuest / arkitekt.
+//! Proc-macros for arkitekt-spec: `#[action]`, `#[derive(State)]` and
+//! `#[service]` (re-exported by arkitekt, rekuest and arkitekt-embassy).
 //!
 //! `#[action]` turns a plain function into an Arkitekt action:
 //!
@@ -177,24 +178,29 @@ impl ActionOptions {
     }
 }
 
-/// Where the rekuest runtime lives for the crate being compiled.
-fn rekuest_path() -> TokenStream2 {
-    match crate_name("rekuest") {
-        Ok(FoundCrate::Itself) => return quote!(::rekuest),
-        Ok(FoundCrate::Name(name)) => {
-            let ident = Ident::new(&name, Span::call_site());
-            return quote!(::#ident);
-        }
-        Err(_) => {}
+/// Where `arkitekt-spec` lives for the crate being compiled: itself, or
+/// re-exported by the first of arkitekt, rekuest and arkitekt-embassy it
+/// depends on.
+pub(crate) fn spec_path() -> TokenStream2 {
+    if let Ok(found) = crate_name("arkitekt-spec") {
+        return match found {
+            FoundCrate::Itself => quote!(::arkitekt_spec),
+            FoundCrate::Name(name) => {
+                let ident = Ident::new(&name, Span::call_site());
+                quote!(::#ident)
+            }
+        };
     }
-    match crate_name("arkitekt") {
-        Ok(FoundCrate::Itself) => quote!(::arkitekt::__private::rekuest),
-        Ok(FoundCrate::Name(name)) => {
-            let ident = Ident::new(&name, Span::call_site());
-            quote!(::#ident::__private::rekuest)
+    for facade in ["arkitekt", "rekuest", "arkitekt-embassy"] {
+        if let Ok(found) = crate_name(facade) {
+            let ident = match found {
+                FoundCrate::Itself => Ident::new(&facade.replace('-', "_"), Span::call_site()),
+                FoundCrate::Name(name) => Ident::new(&name, Span::call_site()),
+            };
+            return quote!(::#ident::__private::spec);
         }
-        Err(_) => quote!(::rekuest),
     }
+    quote!(::arkitekt_spec)
 }
 
 /// The parsed doc comment.
@@ -481,7 +487,7 @@ fn expand_action(options: ActionOptions, mut function: ItemFn) -> syn::Result<To
         .krate
         .as_ref()
         .map(|p| quote!(#p))
-        .unwrap_or_else(rekuest_path);
+        .unwrap_or_else(spec_path);
     let p = quote!(#rk::__private);
 
     if !function.sig.generics.params.is_empty() {
@@ -859,10 +865,7 @@ fn expand_state(input: syn::DeriveInput) -> syn::Result<TokenStream2> {
             Ok(())
         })?;
     }
-    let rk = krate
-        .as_ref()
-        .map(|p| quote!(#p))
-        .unwrap_or_else(rekuest_path);
+    let rk = krate.as_ref().map(|p| quote!(#p)).unwrap_or_else(spec_path);
     let p = quote!(#rk::__private);
 
     let syn::Data::Struct(data) = &input.data else {

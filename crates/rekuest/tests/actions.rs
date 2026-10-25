@@ -7,8 +7,8 @@
 
 use std::collections::HashMap;
 
+use arkitekt_spec::{action, Action, ActionError, Context, PortType, Structure, Task};
 use futures::stream::{self, Stream};
-use rekuest::{action, Action, ActionError, Context, PortType, Structure, Task};
 use serde_json::{json, Map, Value};
 
 /// A stand-in for mikro's ArrayDataset.
@@ -31,7 +31,10 @@ impl Structure for ArrayDataset {
     }
 
     fn widget() -> Option<Value> {
-        Some(rekuest::widgets::search(SEARCH_ARRAY_DATASETS, "mikro"))
+        Some(arkitekt_spec::widgets::search(
+            SEARCH_ARRAY_DATASETS,
+            "mikro",
+        ))
     }
 }
 
@@ -127,7 +130,7 @@ fn declaration_matches_python() {
 #[test]
 fn generator_kind() {
     let definition = count.definition();
-    assert_eq!(definition.kind, rekuest::ActionKind::Generator);
+    assert_eq!(definition.kind, arkitekt_spec::ActionKind::Generator);
     assert_eq!(definition.args.len(), 1, "the Task parameter is not a port");
     assert_eq!(definition.returns[0].key, "return0");
 }

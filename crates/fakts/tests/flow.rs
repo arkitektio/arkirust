@@ -4,6 +4,8 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
+use fakts::AliasExt;
+
 use fakts::{
     ActiveFakts, ClientRole, DeviceCodeOptions, Fakts, FaktsError, FaktsStore, Grant,
     MandateKeyOptions, Manifest, Requirement, TokenLoader,

@@ -6,8 +6,9 @@ mod twin;
 use std::sync::Arc;
 use std::time::Duration;
 
+use arkitekt_spec::Context;
 use futures::{SinkExt, StreamExt};
-use rekuest::{Agent, AgentOptions, Context};
+use rekuest::{Agent, AgentOptions};
 use serde_json::{json, Value};
 use tokio::net::TcpListener;
 use tokio_tungstenite::tungstenite::Message;

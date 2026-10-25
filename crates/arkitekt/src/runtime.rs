@@ -4,10 +4,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Context as _;
-use fakts::{Fakts, Grant};
-use rekuest::{Agent, AgentOptions, ConnectionPolicy, Context};
-
-use crate::app::App;
+use arkitekt_spec::{Alias, App, Context, Wiring};
+use fakts::{Fakts, FaktsError, Grant};
+use rekuest::{Agent, AgentOptions, ConnectionPolicy};
 
 /// The public deployment, used unless `FAKTS_URL` (or `ARKITEKT_URL`) says otherwise.
 pub const DEFAULT_ARKITEKT_URL: &str = "https://go.arkitekt.live";
@@ -98,7 +97,7 @@ pub struct Runtime {
 impl std::fmt::Debug for Runtime {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Runtime")
-            .field("app", &self.app.identifier)
+            .field("app", &self.app.identifier())
             .field("fakts", &self.fakts)
             .finish_non_exhaustive()
     }
@@ -183,9 +182,9 @@ impl Runtime {
 
         let mut clients = Context::builder();
         clients.insert(fakts.clone());
-        for service in &app.services {
+        for service in app.services() {
             service
-                .build(&fakts, &mut clients)
+                .build(&FaktsWiring(&fakts), &mut clients)
                 .await
                 .with_context(|| format!("could not build the {} service", service.name()))?;
         }
@@ -236,13 +235,13 @@ impl Runtime {
         if let Some(proxy) = &alias.proxy {
             options.connector = Arc::new(rekuest::HttpProxy::new(proxy));
         }
-        options.name = Some(format!("{}:{}", self.app.identifier, self.app.version));
-        options.description = self.app.description.clone();
+        options.name = Some(format!("{}:{}", self.app.identifier(), self.app.version()));
+        options.description = self.app.manifest(None).description;
         options.force = self.options.force;
         // One journal per app, so two apps in one directory never re-send each other's backlog.
         let file: String = self
             .app
-            .identifier
+            .identifier()
             .chars()
             .map(|c| {
                 if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
@@ -258,7 +257,7 @@ impl Runtime {
         }
         Ok(Agent::new(
             options,
-            self.app.registry.clone(),
+            self.app.registry().clone(),
             self.context.clone(),
             Arc::new(fakts.clone()),
         ))
@@ -270,9 +269,9 @@ impl Runtime {
         let agent = self.agent().await?;
         tracing::info!(
             "serving {} action(s) as {}:{}",
-            self.app.registry.len(),
-            self.app.identifier,
-            self.app.version
+            self.app.registry().len(),
+            self.app.identifier(),
+            self.app.version()
         );
         let result = tokio::select! {
             result = agent.run() => result.map_err(anyhow::Error::from),
@@ -283,6 +282,55 @@ impl Runtime {
         };
         agent.shutdown().await;
         result
+    }
+}
+
+/// Serve an app's actions: authenticate (once, then from cache), register the
+/// actions and block until stopped. Nothing connects before this is called.
+pub async fn run(app: App) -> anyhow::Result<()> {
+    Runtime::connect(app, ConnectOptions::default())
+        .await?
+        .serve()
+        .await
+}
+
+/// [`run`], connected as `options` say.
+pub async fn run_with(app: App, options: ConnectOptions) -> anyhow::Result<()> {
+    Runtime::connect(app, options).await?.serve().await
+}
+
+/// Connect an app without serving it, e.g. to call its services from a script.
+pub async fn connect(app: App) -> anyhow::Result<Runtime> {
+    Runtime::connect(app, ConnectOptions::default()).await
+}
+
+/// [`connect`], as `options` say.
+pub async fn connect_with(app: App, options: ConnectOptions) -> anyhow::Result<Runtime> {
+    Runtime::connect(app, options).await
+}
+
+/// An app for scripts that only call services: `connect(easy("script", "0.1.0").service(..))`.
+pub fn easy(identifier: impl Into<String>, version: impl Into<String>) -> App {
+    App::new(identifier, version)
+}
+
+/// Services are built from the app's fakts: each requirement's alias, and
+/// the `Fakts` itself (the token loader) for whoever asks for it.
+struct FaktsWiring<'a>(&'a Fakts);
+
+#[async_trait::async_trait]
+impl Wiring for FaktsWiring<'_> {
+    async fn alias(&self, key: &str) -> anyhow::Result<Option<Alias>> {
+        match self.0.get_alias(key).await {
+            Ok(alias) => Ok(Some(alias)),
+            Err(FaktsError::MissingInstance { .. }) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    fn provided(&self, type_id: std::any::TypeId) -> Option<Box<dyn std::any::Any + Send>> {
+        (type_id == std::any::TypeId::of::<Fakts>())
+            .then(|| Box::new(self.0.clone()) as Box<dyn std::any::Any + Send>)
     }
 }
 

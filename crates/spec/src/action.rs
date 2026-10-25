@@ -5,8 +5,8 @@ use crate::prelude::*;
 use futures::future::BoxFuture;
 use serde_json::{Map, Value};
 
+use crate::actions::{AgentDeclaration, Definition, Implementation};
 use crate::context::Context;
-use crate::definition::{AgentDeclaration, Definition, Implementation};
 use crate::hooks::{hook_fn, Background, Hooks, Startup};
 use crate::state::{StateDeclaration, StateType};
 use crate::task::Task;
@@ -199,7 +199,7 @@ impl Registry {
         &self.states
     }
 
-    pub(crate) fn hooks(&self) -> &Hooks {
+    pub fn hooks(&self) -> &Hooks {
         &self.hooks
     }
 

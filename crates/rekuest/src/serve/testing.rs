@@ -269,7 +269,7 @@ impl AgentTestClient {
 mod tests {
     use super::*;
     use crate::serve::{configure, History, ServeOptions};
-    use crate::{action, Context, Registry};
+    use arkitekt_spec::{action, Context, Registry};
 
     /// Double
     #[action]

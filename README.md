@@ -45,9 +45,10 @@ async fn main() -> anyhow::Result<()> {
 | ------------------------------------- | ------------------- | ------------------------------------------------------------------------------------------------ |
 | [`fakts`](crates/fakts)               | `fakts`             | Discovers the server, authorizes the app once (OAuth2 device code), caches and refreshes tokens, resolves service aliases |
 | [`rath`](crates/rath)                 | `rath`              | Authenticated GraphQL client that retries on 401 and tags requests with the current task         |
-| [`rekuest`](crates/rekuest)           | `rekuest`           | Ports, structures, the `/agi` websocket agent, and `Task`                                         |
-| [`rekuest-macros`](crates/rekuest-macros) | `@register`     | `#[action]`: turns a function into an action definition                                          |
-| [`arkitekt`](crates/arkitekt)         | `arkitekt`          | `App`, `Service`, `Runtime`; re-exports everything above                                          |
+| [`arkitekt-spec`](crates/spec)       | `arkitekt-spec`     | What an app is: the action language (definitions, ports), `App`, `#[action]`, `Registry`, states, hooks, `Task`, `Service`, and `rt` (the runtime interface); no_std. Without its `declare` feature only the wire types |
+| [`arkitekt-macros`](crates/macros)    | `@register`         | `#[action]`, `#[derive(State)]`, `#[service]` (used through `arkitekt-spec`)                     |
+| [`rekuest`](crates/rekuest)           | `arkitekt-runtime` + `rekuest` | Runs the declared actions (executor, journal, state hub) and serves them: the `/agi` websocket agent |
+| [`arkitekt`](crates/arkitekt)         | `arkitekt`          | `run(app)` / `connect(app)` and `Runtime`; re-exports everything above                           |
 | [`mikro`](crates/mikro)               | `mikro`             | Mikro client: array datasets stored as zarr v3 on the S3 datalayer                                |
 | [`lovekit`](crates/lovekit)           | `lovekit`           | Lovekit client: LiveKit broadcasts and stream tokens; with `livekit`, joins rooms and publishes video, also through the mesh |
 
@@ -79,7 +80,8 @@ that offer actions also require `rekuest`.
 
 **Services.** A service is a builder function, as with Python's
 `@registry.service`. Each `#[require]` parameter is a fakts requirement keyed by
-its name, resolved to an `Alias` before the body runs:
+its name, resolved to an `Alias` before the body runs; any other parameter is
+provided by type by the login (`Fakts`, the token loader):
 
 ```rust
 /// Mikro: the user's images, files and metadata.
@@ -383,8 +385,17 @@ tokio; `checks/wasm` (wasm32, on node) and `checks/embassy` (on the host
 and built for a Cortex-M4F) drive it with a minimal driver each, and CI runs
 the same scripted scenario on all of them.
 
+**Spec and runtime.** As in Python, what an app *is* and what *runs* it are
+separate crates. `arkitekt-spec` holds the action language (definitions,
+ports: the same types a server validates) and the declaration (`App`,
+`#[action]`, `Registry`, states, hooks, `Service`), and `Task`, which an
+action reports through and a runtime implements (`TaskBackend`). rekuest is
+that runtime: its executor runs each task as an `AgentTask`, and its journal
+and state hub number what they report. A server takes `arkitekt-spec`
+without its `declare` feature: only the wire types.
+
 Above the session, rekuest names no runtime either: the executor, journal,
-states and `#[action]` code spawn, sleep and wait through `rekuest::rt`
+states and `#[action]` code spawn, sleep and wait through `arkitekt_spec::rt`
 (`Runtime`: spawn, sleep, blocking work), which is tokio with the `tokio`
 feature and whatever the app installs (`rt::install`) without it.
 `rekuest::Driver` is an agent without its socket (session + executor +
@@ -416,8 +427,8 @@ fakts and rath have the same `std` feature. Without it, fakts' login
 the app implements (HTTP exchanges, sleep, the clock, randomness; with std
 that is `fakts::http::Reqwest`), and rath sends through the same host; typed
 `graphql_client` operations stay std-only (`execute_raw` works everywhere).
-An embassy app implements `fakts::Host` and `rekuest::rt::Runtime` on one
-struct.
+An embassy app implements `fakts::Host` and `arkitekt_spec::rt::Runtime` on
+one struct.
 
 `arkitekt-embassy` (no_std) is that for embassy:
 `Embassy` (the runtime; the board's RNG and clock come in through it),

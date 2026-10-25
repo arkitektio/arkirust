@@ -28,3 +28,12 @@ pub use crate::agent::{Agent, AgentError, AgentOptions};
 pub use crate::conn::Verify;
 pub use crate::http::{serve_http, NetHost};
 pub use crate::runtime::{Embassy, Entropy};
+
+pub use arkitekt_spec as spec;
+pub use arkitekt_spec::{action, App, Context, Registry, State, StateMut, StateRef, Task};
+
+/// Lets the macros find the spec through arkitekt-embassy. Not a public API.
+#[doc(hidden)]
+pub mod __private {
+    pub use arkitekt_spec as spec;
+}

@@ -1,7 +1,7 @@
 //! The ArrayDataset port against what Python's mikro registers.
 
 use arkitekt::fakts::Manifest;
-use arkitekt::rekuest::PortType;
+use arkitekt::spec::PortType;
 use arkitekt::App;
 use mikro::ArrayDataset;
 use serde_json::Value;

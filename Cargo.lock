@@ -116,13 +116,13 @@ version = "0.15.0"
 dependencies = [
  "anyhow",
  "arkitekt-rath",
+ "arkitekt-spec",
  "async-trait",
  "axum",
  "dirs",
  "fakts",
  "futures",
  "rekuest",
- "rekuest-macros",
  "serde",
  "serde_json",
  "tokio",
@@ -134,6 +134,7 @@ dependencies = [
 name = "arkitekt-embassy"
 version = "0.15.0"
 dependencies = [
+ "arkitekt-spec",
  "async-trait",
  "base64 0.22.1",
  "embassy-executor",
@@ -189,6 +190,17 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "arkitekt-macros"
+version = "0.15.0"
+dependencies = [
+ "heck 0.5.0",
+ "proc-macro-crate",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -264,6 +276,33 @@ dependencies = [
  "tokio",
  "tracing",
  "wiremock",
+]
+
+[[package]]
+name = "arkitekt-spec"
+version = "0.15.0"
+dependencies = [
+ "anyhow",
+ "arkitekt-macros",
+ "async-trait",
+ "chrono",
+ "futures",
+ "getrandom 0.2.15",
+ "gloo-timers",
+ "hashbrown 0.15.5",
+ "hex",
+ "json-patch",
+ "rand 0.8.5",
+ "send_wrapper",
+ "serde",
+ "serde_json",
+ "sha2",
+ "spin 0.10.1",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "uuid",
+ "wasm-bindgen-futures",
 ]
 
 [[package]]
@@ -1600,6 +1639,7 @@ name = "fakts"
 version = "0.15.0"
 dependencies = [
  "arkitekt-mesh",
+ "arkitekt-spec",
  "async-lock",
  "async-trait",
  "axum",
@@ -4058,6 +4098,7 @@ version = "0.15.0"
 dependencies = [
  "anyhow",
  "arkitekt-rath",
+ "arkitekt-spec",
  "async-channel",
  "async-trait",
  "axum",
@@ -4072,7 +4113,6 @@ dependencies = [
  "js-sys",
  "json-patch",
  "rand 0.8.5",
- "rekuest-macros",
  "rekuest-protocol",
  "rekuest-session",
  "reqwest 0.12.28",
@@ -4095,24 +4135,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "rekuest-macros"
-version = "0.15.0"
-dependencies = [
- "heck 0.5.0",
- "proc-macro-crate",
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
 name = "rekuest-protocol"
 version = "0.15.0"
 dependencies = [
- "hex",
+ "arkitekt-spec",
  "serde",
  "serde_json",
- "sha2",
  "uuid",
 ]
 

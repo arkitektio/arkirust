@@ -28,12 +28,12 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 use web_sys::{CloseEvent, MessageEvent, WebSocket};
 
-use crate::action::Registry;
-use crate::context::Context;
-use crate::definition::AgentDeclaration;
 use crate::driver::Driver;
 use crate::executor::Executor;
 use crate::journal::Journal;
+use arkitekt_spec::AgentDeclaration;
+use arkitekt_spec::Context;
+use arkitekt_spec::Registry;
 
 pub use crate::agent_error::AgentError;
 pub use rekuest_session::ConnectionPolicy;

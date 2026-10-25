@@ -10,7 +10,7 @@ use serde_json::{Map, Value};
 use crate::prelude::*;
 
 /// `(op, path, value)` for each operation turning `old` into `new`.
-pub(crate) fn diff_ops(old: &Value, new: &Value) -> Vec<(String, String, Value)> {
+pub fn diff_ops(old: &Value, new: &Value) -> Vec<(String, String, Value)> {
     let mut ops = vec![];
     diff(old, new, &mut String::new(), &mut ops);
     ops
@@ -87,7 +87,7 @@ fn push_token(pointer: &mut String, token: &str) {
 
 /// Why an operation does not apply.
 #[derive(Debug, PartialEq)]
-pub(crate) struct PatchError(String);
+pub struct PatchError(String);
 
 impl core::fmt::Display for PatchError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -96,12 +96,7 @@ impl core::fmt::Display for PatchError {
 }
 
 /// Apply one `add`, `replace` or `remove` at `path` to `doc`.
-pub(crate) fn apply(
-    doc: &mut Value,
-    op: &str,
-    path: &str,
-    value: &Value,
-) -> Result<(), PatchError> {
+pub fn apply(doc: &mut Value, op: &str, path: &str, value: &Value) -> Result<(), PatchError> {
     if path.is_empty() {
         return match op {
             "add" | "replace" => {

@@ -116,9 +116,9 @@ pub async fn run() -> Result<Rc<RefCell<FakeServer>>, SessionError> {
 
 // ------------------------------------------------------- the real agent --
 
+use arkitekt_spec::rt::{BoxFuture, Runtime};
+use arkitekt_spec::{action, Context, Registry};
 use rekuest::driver::Driver;
-use rekuest::rt::{BoxFuture, Runtime};
-use rekuest::{action, Context, Registry};
 use rekuest_session::Outbox;
 
 /// rekuest's runtime on the JS event loop. Its futures are not `Send`; wasm
@@ -144,7 +144,7 @@ fn echo(x: i64) -> i64 {
 
 /// The scripted scenario with the real agent: executor, journal, `#[action]`.
 pub async fn run_agent() -> Result<Rc<RefCell<FakeServer>>, SessionError> {
-    let _ = rekuest::rt::install(std::sync::Arc::new(JsRuntime));
+    let _ = arkitekt_spec::rt::install(std::sync::Arc::new(JsRuntime));
     let start = js_sys::Date::now();
     let server = Rc::new(RefCell::new(FakeServer::scripted()));
     let seed = (js_sys::Math::random() * u64::MAX as f64) as u64;

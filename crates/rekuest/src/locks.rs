@@ -12,9 +12,9 @@ use crate::collections::IndexMap;
 use serde::Serialize;
 
 use crate::emit::Emitter;
-use crate::journal::TaskGate;
 use crate::messages::FromAgent;
-use crate::rt::{FifoGuard, FifoMutex};
+use arkitekt_spec::rt::{FifoGuard, FifoMutex};
+use arkitekt_spec::TaskGate;
 
 struct Slot {
     mutex: Arc<FifoMutex>,

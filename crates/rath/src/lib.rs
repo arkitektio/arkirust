@@ -175,6 +175,7 @@ impl Rath {
         append: impl AsRef<str>,
         token_loader: Arc<dyn TokenLoader>,
     ) -> Result<Self> {
+        use fakts::AliasExt;
         fakts::install_crypto_provider();
         let http = alias
             .http_client_builder()

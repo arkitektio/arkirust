@@ -8,9 +8,9 @@
 use alloc::boxed::Box;
 use core::time::Duration;
 
+use arkitekt_spec::rt::{BoxFuture, Runtime};
 use embassy_executor::SendSpawner;
 use embassy_time::{Instant, Timer};
-use rekuest::rt::{BoxFuture, Runtime};
 
 /// rekuest's tasks: assignments, activation, the journal writer. Each spawn
 /// takes one; a full pool panics, so size it for the concurrent tasks.
@@ -24,7 +24,7 @@ pub trait Entropy: Send + Sync {
     fn fill(&self, bytes: &mut [u8]);
 }
 
-/// See the module docs. Install it with `rekuest::rt::install` before
+/// See the module docs. Install it with `arkitekt_spec::rt::install` before
 /// building an agent.
 pub struct Embassy {
     spawner: SendSpawner,

@@ -2,8 +2,8 @@
 
 #![allow(dead_code)]
 
+use arkitekt_spec::{action, Registry, State, StateMut, Task};
 use futures::stream::{self, Stream};
-use rekuest::{action, Registry, State, StateMut, Task};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, State)]

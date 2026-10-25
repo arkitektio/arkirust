@@ -15,9 +15,10 @@ use core::future::Future;
 use futures::future::BoxFuture;
 
 use crate::context::{Context, ContextBuilder, MissingClient};
-use crate::state::{Mutation, StateError, StateHub, StateMut, StateRef, StateType};
+use crate::state::{Mutation, StateCells, StateError, StateMut, StateRef, StateType};
 
-pub(crate) type HookFn<H> = Arc<dyn Fn(H) -> BoxFuture<'static, anyhow::Result<()>> + Send + Sync>;
+/// A declared hook.
+pub type HookFn<H> = Arc<dyn Fn(H) -> BoxFuture<'static, anyhow::Result<()>> + Send + Sync>;
 
 pub(crate) fn hook_fn<H, F, Fut>(f: F) -> HookFn<H>
 where
@@ -31,9 +32,9 @@ where
 /// The hooks an app declares.
 #[derive(Clone, Default)]
 pub struct Hooks {
-    pub(crate) startup: Vec<HookFn<Startup>>,
-    pub(crate) background: Vec<HookFn<Background>>,
-    pub(crate) shutdown: Vec<HookFn<Background>>,
+    pub startup: Vec<HookFn<Startup>>,
+    pub background: Vec<HookFn<Background>>,
+    pub shutdown: Vec<HookFn<Background>>,
 }
 
 impl core::fmt::Debug for Hooks {
@@ -51,12 +52,21 @@ type ContextEdit = Box<dyn FnOnce(&mut ContextBuilder) + Send>;
 /// What a startup hook gets.
 #[derive(Clone)]
 pub struct Startup {
-    pub(crate) ctx: Context,
-    pub(crate) hub: Arc<StateHub>,
-    pub(crate) contexts: Arc<Mutex<Vec<ContextEdit>>>,
+    ctx: Context,
+    states: Arc<StateCells>,
+    contexts: Arc<Mutex<Vec<ContextEdit>>>,
 }
 
 impl Startup {
+    /// For the runtime that runs the hooks.
+    pub fn new(ctx: Context, states: Arc<StateCells>) -> Self {
+        Self {
+            ctx,
+            states,
+            contexts: Arc::default(),
+        }
+    }
+
     /// A service client.
     pub fn client<T: Clone + Send + Sync + 'static>(&self) -> Option<T> {
         self.ctx.get::<T>()
@@ -68,7 +78,7 @@ impl Startup {
 
     /// Give a declared state its value for this session.
     pub fn set_state<T: StateType>(&self, value: T) -> Result<(), StateError> {
-        self.hub.init(value)
+        self.states.init(value)
     }
 
     /// Provide a context (any shared value, e.g. a device handle) that actions
@@ -80,19 +90,37 @@ impl Startup {
                 builder.insert(value);
             }));
     }
+
+    /// The contexts the hooks provided, if any, on top of `ctx`. For the runtime.
+    pub fn provided_context(&self, ctx: &Context) -> Option<Context> {
+        let edits = core::mem::take(&mut *self.contexts.lock());
+        if edits.is_empty() {
+            return None;
+        }
+        let mut builder = ctx.to_builder();
+        for edit in edits {
+            edit(&mut builder);
+        }
+        Some(builder.build())
+    }
 }
 
 /// What background and shutdown hooks get.
 #[derive(Clone)]
 pub struct Background {
-    pub(crate) ctx: Context,
-    pub(crate) hub: Arc<StateHub>,
+    ctx: Context,
+    states: Arc<StateCells>,
 }
 
 /// Shutdown hooks get the same handle as background hooks.
 pub type Shutdown = Background;
 
 impl Background {
+    /// For the runtime that runs the hooks.
+    pub fn new(ctx: Context, states: Arc<StateCells>) -> Self {
+        Self { ctx, states }
+    }
+
     /// A service client or context.
     pub fn client<T: Clone + Send + Sync + 'static>(&self) -> Option<T> {
         self.ctx.get::<T>()
@@ -105,10 +133,10 @@ impl Background {
     /// A state to change outside of any task. Changes are not attributed to a
     /// task, and states that require locks refuse them.
     pub fn state<T: StateType>(&self) -> Result<StateMut<T>, StateError> {
-        self.hub.state_mut::<T>(Mutation::unlocked())
+        self.states.state_mut::<T>(Mutation::unlocked())
     }
 
     pub fn state_ref<T: StateType>(&self) -> Result<StateRef<T>, StateError> {
-        self.hub.state_ref::<T>()
+        self.states.state_ref::<T>()
     }
 }

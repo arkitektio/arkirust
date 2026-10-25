@@ -16,7 +16,11 @@ name = "arkitekt-rath"
 version_group = "arkitekt"
 
 [[package]]
-name = "rekuest-macros"
+name = "arkitekt-macros"
+version_group = "arkitekt"
+
+[[package]]
+name = "arkitekt-spec"
 version_group = "arkitekt"
 
 [[package]]

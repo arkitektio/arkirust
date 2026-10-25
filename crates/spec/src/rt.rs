@@ -7,7 +7,7 @@
 //! builds an agent:
 //!
 //! ```ignore
-//! rekuest::rt::install(Arc::new(MyRuntime)).ok();
+//! arkitekt_spec::rt::install(Arc::new(MyRuntime)).ok();
 //! ```
 //!
 //! The primitives here ([`FifoMutex`], [`Latch`], [`Watch`]) need nothing
@@ -88,7 +88,7 @@ pub fn current() -> &'static dyn Runtime {
     match RUNTIME.get() {
         Some(runtime) => runtime.as_ref(),
         None => fallback()
-            .expect("no async runtime: call rekuest::rt::install before building an agent"),
+            .expect("no async runtime: call arkitekt_spec::rt::install (or a platform's setup) before building an agent"),
     }
 }
 
@@ -102,7 +102,7 @@ pub fn available() -> bool {
 
 #[allow(unreachable_code)]
 fn fallback() -> Option<&'static dyn Runtime> {
-    #[cfg(all(feature = "web", target_arch = "wasm32"))]
+    #[cfg(all(feature = "js", target_arch = "wasm32"))]
     return Some(&Js);
     #[cfg(feature = "tokio")]
     return Some(&Tokio);
@@ -111,11 +111,11 @@ fn fallback() -> Option<&'static dyn Runtime> {
 
 /// The JS event loop (wasm32 with `web`): `spawn_local` and `setTimeout`.
 /// Its futures are not `Send`; wasm has one thread, so wrapping them is sound.
-#[cfg(all(feature = "web", target_arch = "wasm32"))]
+#[cfg(all(feature = "js", target_arch = "wasm32"))]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Js;
 
-#[cfg(all(feature = "web", target_arch = "wasm32"))]
+#[cfg(all(feature = "js", target_arch = "wasm32"))]
 impl Runtime for Js {
     fn spawn(&self, future: BoxFuture) {
         wasm_bindgen_futures::spawn_local(future);
@@ -236,7 +236,8 @@ pub async fn spawn_blocking<R: Send + 'static>(
 }
 
 #[cfg(feature = "std")]
-pub(crate) fn panic_message(panic: &(dyn core::any::Any + Send)) -> String {
+#[doc(hidden)]
+pub fn panic_message(panic: &(dyn core::any::Any + Send)) -> String {
     panic
         .downcast_ref::<&str>()
         .map(|s| s.to_string())
@@ -522,23 +523,28 @@ fn register(wakers: &Mutex<Vec<Waker>>, waker: &Waker) {
 ///
 /// With std it lives in a thread local; without std (one executor thread, as
 /// embassy runs) in a global slot.
-pub(crate) struct TaskLocal<T: 'static> {
+pub struct TaskLocal<T: 'static> {
     #[cfg(feature = "std")]
     slot: &'static std::thread::LocalKey<core::cell::RefCell<Option<T>>>,
     #[cfg(not(feature = "std"))]
     slot: spin::Mutex<Option<T>>,
 }
 
+#[cfg(not(feature = "std"))]
+impl<T: Clone + 'static> Default for TaskLocal<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T: Clone + 'static> TaskLocal<T> {
     #[cfg(feature = "std")]
-    pub(crate) const fn new(
-        slot: &'static std::thread::LocalKey<core::cell::RefCell<Option<T>>>,
-    ) -> Self {
+    pub const fn new(slot: &'static std::thread::LocalKey<core::cell::RefCell<Option<T>>>) -> Self {
         Self { slot }
     }
 
     #[cfg(not(feature = "std"))]
-    pub(crate) const fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             slot: spin::Mutex::new(None),
         }
@@ -552,7 +558,7 @@ impl<T: Clone + 'static> TaskLocal<T> {
     }
 
     /// Run `future` with `value` set.
-    pub(crate) async fn scope<F: Future>(&'static self, value: T, future: F) -> F::Output {
+    pub async fn scope<F: Future>(&'static self, value: T, future: F) -> F::Output {
         let mut future = core::pin::pin!(future);
         core::future::poll_fn(move |cx| {
             let previous = self.replace(Some(value.clone()));
@@ -564,7 +570,7 @@ impl<T: Clone + 'static> TaskLocal<T> {
     }
 
     /// The value of the scope being polled, if any.
-    pub(crate) fn get(&'static self) -> Option<T> {
+    pub fn get(&'static self) -> Option<T> {
         #[cfg(feature = "std")]
         return self.slot.with(|s| s.borrow().clone());
         #[cfg(not(feature = "std"))]
@@ -576,8 +582,33 @@ impl<T: Clone + 'static> TaskLocal<T> {
 mod tests {
     use super::*;
 
+    /// tokio, installed for these tests (the crate's own `Tokio` needs its feature).
+    struct TestTokio;
+
+    impl Runtime for TestTokio {
+        fn spawn(&self, future: BoxFuture) {
+            tokio::spawn(future);
+        }
+
+        fn sleep(&self, duration: Duration) -> BoxFuture {
+            Box::pin(tokio::time::sleep(duration))
+        }
+
+        fn spawn_blocking(&self, work: Box<dyn FnOnce() + Send>) -> BoxFuture {
+            let handle = tokio::task::spawn_blocking(work);
+            Box::pin(async move {
+                let _ = handle.await;
+            })
+        }
+    }
+
+    fn tokio_runtime() {
+        let _ = install(Arc::new(TestTokio));
+    }
+
     #[tokio::test]
     async fn the_fifo_mutex_serves_in_arrival_order() {
+        tokio_runtime();
         let mutex = Arc::new(FifoMutex::new());
         let order = Arc::new(Mutex::new(vec![]));
         let first = mutex.clone().lock_owned().await;
@@ -601,6 +632,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_waiter_that_gives_up_lets_the_next_one_through() {
+        tokio_runtime();
         let mutex = Arc::new(FifoMutex::new());
         let held = mutex.clone().lock_owned().await;
         assert!(
@@ -622,6 +654,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_latch_opened_before_the_wait_lets_it_pass() {
+        tokio_runtime();
         let latch = Latch::new();
         latch.open();
         timeout(Duration::from_secs(1), latch.wait()).await.unwrap();
@@ -629,6 +662,7 @@ mod tests {
 
     #[tokio::test]
     async fn blocking_work_reports_its_panic() {
+        tokio_runtime();
         assert_eq!(spawn_blocking(|| 2 + 2).await, Ok(4));
         let err = spawn_blocking(|| -> i32 { panic!("boom") })
             .await
@@ -638,6 +672,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_aborted_task_stops() {
+        tokio_runtime();
         let latch = Arc::new(Latch::new());
         let handle = spawn({
             let latch = latch.clone();

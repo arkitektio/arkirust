@@ -140,13 +140,13 @@ jobs:
       - uses: cargo-bins/cargo-binstall@main
       - run: cargo binstall -y --locked wasm-pack
       # The core itself, without std.
-      - run: cargo build -p rekuest-session -p rekuest-protocol --no-default-features --target thumbv7em-none-eabihf
-      - run: cargo build -p rekuest-session -p rekuest-protocol --no-default-features --target wasm32-unknown-unknown
+      - run: cargo build -p rekuest-session -p rekuest-protocol -p arkitekt-spec --no-default-features --target thumbv7em-none-eabihf
+      - run: cargo build -p rekuest-session -p rekuest-protocol -p arkitekt-spec --no-default-features --target wasm32-unknown-unknown
       # The agent itself (executor, journal, states, #[action]) without tokio,
       # and the browser agent with its login (fakts) and GraphQL client (rath).
       - run: cargo clippy -p rekuest --no-default-features --target wasm32-unknown-unknown -- -D warnings
       # ... and without std, for a microcontroller (embassy).
-      - run: cargo clippy -p rekuest -p fakts -p arkitekt-rath --no-default-features --features rekuest/rath --target thumbv7em-none-eabihf -- -D warnings
+      - run: cargo clippy -p rekuest -p fakts -p arkitekt-rath -p arkitekt-spec --no-default-features --features rekuest/rath,arkitekt-spec/declare --target thumbv7em-none-eabihf -- -D warnings
       - run: cargo clippy -p arkitekt-embassy --target thumbv7em-none-eabihf -- -D warnings
       - run: cargo clippy -p rekuest -p fakts -p arkitekt-rath --no-default-features --features rekuest/web,rekuest/rath,fakts/std,arkitekt-rath/std --target wasm32-unknown-unknown -- -D warnings
       - run: wasm-pack test --node

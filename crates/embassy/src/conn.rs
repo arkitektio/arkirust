@@ -169,7 +169,7 @@ struct Clock;
 
 impl TlsClock for Clock {
     fn now() -> Option<u64> {
-        u64::try_from(rekuest::rt::now().timestamp()).ok()
+        u64::try_from(arkitekt_spec::rt::now().timestamp()).ok()
     }
 }
 
@@ -179,22 +179,22 @@ struct Rng;
 impl rand_core::RngCore for Rng {
     fn next_u32(&mut self) -> u32 {
         let mut bytes = [0u8; 4];
-        rekuest::rt::fill_random(&mut bytes);
+        arkitekt_spec::rt::fill_random(&mut bytes);
         u32::from_le_bytes(bytes)
     }
 
     fn next_u64(&mut self) -> u64 {
         let mut bytes = [0u8; 8];
-        rekuest::rt::fill_random(&mut bytes);
+        arkitekt_spec::rt::fill_random(&mut bytes);
         u64::from_le_bytes(bytes)
     }
 
     fn fill_bytes(&mut self, dest: &mut [u8]) {
-        rekuest::rt::fill_random(dest)
+        arkitekt_spec::rt::fill_random(dest)
     }
 
     fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), rand_core::Error> {
-        rekuest::rt::fill_random(dest);
+        arkitekt_spec::rt::fill_random(dest);
         Ok(())
     }
 }

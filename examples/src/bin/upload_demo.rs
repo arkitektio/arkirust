@@ -107,7 +107,7 @@ async fn main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arkitekt::rekuest::{Action, PortKind};
+    use arkitekt::spec::{Action, PortKind};
 
     #[test]
     fn declares_ports_like_python() {

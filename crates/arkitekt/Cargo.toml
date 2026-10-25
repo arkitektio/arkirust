@@ -15,7 +15,7 @@ fakts = { workspace = true, features = ["std"] }
 rath = { workspace = true, features = ["std"] }
 # The tokio Agent, and task tokens on the GraphQL clients (rath).
 rekuest = { workspace = true, features = ["tokio", "rath"] }
-rekuest-macros.workspace = true
+arkitekt-spec = { workspace = true, features = ["std", "declare"] }
 anyhow.workspace = true
 async-trait.workspace = true
 futures.workspace = true

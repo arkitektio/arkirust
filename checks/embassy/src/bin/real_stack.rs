@@ -13,9 +13,9 @@ use std::time::Duration;
 
 use arkitekt_embassy::conn::TlsBuffers;
 use arkitekt_embassy::{serve_http, Agent, AgentOptions, Embassy, NetHost, Verify};
+use arkitekt_spec::{action, Context, Registry};
 use embassy_executor::Spawner;
 use fakts::{Fakts, Grant, MandateKeyOptions, Manifest, Requirement};
-use rekuest::{action, Context, Registry};
 
 #[path = "../host_net.rs"]
 mod host_net;
@@ -69,7 +69,7 @@ async fn main(spawner: Spawner) {
         .try_init();
     let runtime = Embassy::new(spawner.make_send(), HostEntropy);
     runtime.set_wall_clock(chrono_now_micros());
-    let _ = rekuest::rt::install(Arc::new(runtime));
+    let _ = arkitekt_spec::rt::install(Arc::new(runtime));
     // With the gateway's https port and CA, rekuest is reached over TLS.
     let tls = match (
         std::env::var("ARKIRUST_E2E_TLS_PORT"),

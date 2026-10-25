@@ -13,7 +13,7 @@
 //!     Ok(mikro.create_array_dataset(&name, &data, mikro::axes_for(&["y", "x"])).await?)
 //! }
 //!
-//! App::new("my-app", "0.1.0").service(mikro::service).action(create_image).run().await
+//! arkitekt::run(App::new("my-app", "0.1.0").service(mikro::service).action(create_image)).await
 //! ```
 //!
 //! An [`ArrayDataset`] is a [`Structure`](arkitekt::Structure): it travels as

@@ -16,8 +16,8 @@ use core::future::Future;
 
 use serde_json::{json, Value};
 
+use crate::actions::{Port, PortKind};
 use crate::context::Context;
-use crate::ports::{Port, PortKind};
 
 /// Why a value could not be converted.
 #[derive(Debug, thiserror::Error)]

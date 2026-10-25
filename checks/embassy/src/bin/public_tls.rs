@@ -34,7 +34,7 @@ async fn main(spawner: Spawner) {
             .map(|d| d.as_micros() as i64)
             .unwrap_or(0),
     );
-    let _ = rekuest::rt::install(Arc::new(runtime));
+    let _ = arkitekt_spec::rt::install(Arc::new(runtime));
 
     let pem = std::fs::read_to_string(ca).expect("the CA file");
     let ca = der(&pem);

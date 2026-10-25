@@ -16,12 +16,12 @@ use core::ops::Deref;
 
 use serde_json::{json, Value};
 
-use crate::context::Context;
 use crate::emit::Emitter;
-use crate::journal::TaskGate;
 use crate::messages::FromAgent;
-use crate::port_type::{unwrap_reference, PortError, PortType};
-use crate::ports::{Port, PortKind};
+use arkitekt_spec::Context;
+use arkitekt_spec::TaskGate;
+use arkitekt_spec::{unwrap_reference, PortError, PortType};
+use arkitekt_spec::{Port, PortKind};
 
 type Stored = Arc<dyn Any + Send + Sync>;
 
@@ -33,10 +33,11 @@ std::thread_local! {
 
 /// The task whose action is running (set by the executor around it).
 #[cfg(feature = "std")]
-static SHELVING: crate::rt::TaskLocal<(String, TaskGate)> =
-    crate::rt::TaskLocal::new(&SHELVING_SLOT);
+static SHELVING: arkitekt_spec::rt::TaskLocal<(String, TaskGate)> =
+    arkitekt_spec::rt::TaskLocal::new(&SHELVING_SLOT);
 #[cfg(not(feature = "std"))]
-static SHELVING: crate::rt::TaskLocal<(String, TaskGate)> = crate::rt::TaskLocal::new();
+static SHELVING: arkitekt_spec::rt::TaskLocal<(String, TaskGate)> =
+    arkitekt_spec::rt::TaskLocal::new();
 
 /// Run `fut` (an action of `task`) so that what it shelves is attributed to
 /// `task`, and nothing is shelved once the task's gate is closed.
@@ -87,7 +88,7 @@ impl Shelf {
         value: Arc<T>,
         label: Option<String>,
     ) -> String {
-        let id = crate::rt::uuid().simple().to_string();
+        let id = arkitekt_spec::rt::uuid().simple().to_string();
         let owner = SHELVING.get();
         let _pass = match &owner {
             Some((task, gate)) => match gate.enter() {

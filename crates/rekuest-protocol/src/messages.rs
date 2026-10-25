@@ -8,7 +8,8 @@ use crate::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use crate::definition::AgentDeclaration;
+use arkitekt_spec::actions::AgentDeclaration;
+pub use arkitekt_spec::actions::LogLevel;
 
 /// A task the server asks about after (re)connecting.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -388,17 +389,6 @@ pub enum ToAgent {
     /// Anything this agent does not handle (yet).
     #[serde(other)]
     Unknown,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum LogLevel {
-    Debug,
-    #[default]
-    Info,
-    Warn,
-    Error,
-    Critical,
 }
 
 /// Agent → server.
@@ -825,6 +815,7 @@ pub fn parse_to_agent(text: &str) -> Result<ToAgent, (Option<Value>, serde_json:
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::vec;
     use serde_json::json;
 
     #[test]

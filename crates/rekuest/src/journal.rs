@@ -15,8 +15,8 @@
 //! before its `YIELD`, its `COMPLETED` before its `UNLOCK`.
 //!
 //! Nothing is recorded for a task after its end: a [`TaskGate`] is closed
-//! when the end is reported, and the task's handles ([`Task`](crate::Task)
-//! reports, [`StateMut`](crate::StateMut) changes) refuse to act on a
+//! when the end is reported, and the task's handles ([`Task`](arkitekt_spec::Task)
+//! reports, [`StateMut`](arkitekt_spec::StateMut) changes) refuse to act on a
 //! closed gate *before* they change anything.
 //!
 //! Not numbered: `REGISTER`, `HEARTBEAT_ANSWER`, requests (`ASSIGN_REQUEST`)
@@ -26,14 +26,12 @@
 #[allow(unused_imports)]
 use crate::prelude::*;
 use alloc::collections::VecDeque;
-#[cfg(feature = "std")]
-use std::sync::Condvar;
 
 use crate::sync::Mutex;
 use core::time::Duration;
 
 use crate::collections::IndexMap;
-use crate::rt::{self, Watch};
+use arkitekt_spec::rt::{self, Watch};
 use async_trait::async_trait;
 use serde::Serialize;
 use serde_json::Value;
@@ -41,6 +39,7 @@ use serde_json::Value;
 use crate::emit::Emitter;
 use crate::messages::FromAgent;
 use crate::state::apply_op;
+pub use arkitekt_spec::task::{GatePass, TaskGate};
 
 /// Entries kept in memory for resuming subscribers.
 pub const RING_CAPACITY: usize = 4096;
@@ -51,7 +50,7 @@ const WRITE_BATCH: usize = 256;
 
 /// Milliseconds since the epoch.
 pub(crate) fn now_ms() -> i64 {
-    crate::rt::now().timestamp_millis()
+    arkitekt_spec::rt::now().timestamp_millis()
 }
 
 /// ISO 8601 with `Z`, microseconds only when non-zero (pydantic's format).
@@ -228,90 +227,6 @@ impl Fold {
 
 // ------------------------------------------------------------------- gate --
 
-#[derive(Default)]
-struct GateState {
-    closed: bool,
-    active: usize,
-}
-
-/// Closes a task: after [`TaskGate::close`] returns, nothing more is done
-/// for the task. Reports and state changes [`enter`](TaskGate::enter) the
-/// gate for their (synchronous) duration; closing refuses new entries and
-/// waits for the ones in flight. Entering twice on one thread is fine.
-#[derive(Clone, Default)]
-pub struct TaskGate {
-    inner: Arc<Gate>,
-}
-
-#[derive(Default)]
-struct Gate {
-    state: Mutex<GateState>,
-    /// Woken when the last pass is dropped (with std; without it, `close`
-    /// spins: one executor thread finishes its passes synchronously).
-    #[cfg(feature = "std")]
-    done: Condvar,
-}
-
-impl core::fmt::Debug for TaskGate {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("TaskGate")
-            .field("closed", &self.is_closed())
-            .finish()
-    }
-}
-
-/// Held while acting for an open task.
-pub struct GatePass<'a> {
-    gate: &'a TaskGate,
-}
-
-impl Drop for GatePass<'_> {
-    fn drop(&mut self) {
-        let mut state = self.gate.inner.state.lock();
-        state.active -= 1;
-        #[cfg(feature = "std")]
-        if state.active == 0 {
-            self.gate.inner.done.notify_all();
-        }
-    }
-}
-
-impl TaskGate {
-    /// `None` once the gate is closed (or closing).
-    pub fn enter(&self) -> Option<GatePass<'_>> {
-        let mut state = self.inner.state.lock();
-        if state.closed {
-            return None;
-        }
-        state.active += 1;
-        Some(GatePass { gate: self })
-    }
-
-    /// Refuse new entries, then wait until those in flight are done.
-    pub fn close(&self) {
-        let mut state = self.inner.state.lock();
-        state.closed = true;
-        #[cfg(feature = "std")]
-        while state.active > 0 {
-            state = self
-                .inner
-                .done
-                .wait(state)
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-        }
-        #[cfg(not(feature = "std"))]
-        while state.active > 0 {
-            drop(state);
-            core::hint::spin_loop();
-            state = self.inner.state.lock();
-        }
-    }
-
-    pub fn is_closed(&self) -> bool {
-        self.inner.state.lock().closed
-    }
-}
-
 // ---------------------------------------------------------------- journal --
 
 /// Where entries are persisted (the served app keeps them in SQLite).
@@ -479,7 +394,7 @@ impl Journal {
             *step += 1;
             *step
         });
-        let message_id = crate::rt::uuid().to_string();
+        let message_id = arkitekt_spec::rt::uuid().to_string();
         if let Value::Object(map) = &mut payload {
             map.insert("id".into(), Value::String(message_id.clone()));
         }
@@ -843,7 +758,7 @@ mod tests {
         impl StateType for Tags {
             const NAME: &'static str = "Tags";
             const REQUIRED_LOCKS: &'static [&'static str] = &[];
-            fn ports() -> Vec<crate::Port> {
+            fn ports() -> Vec<arkitekt_spec::Port> {
                 vec![]
             }
         }

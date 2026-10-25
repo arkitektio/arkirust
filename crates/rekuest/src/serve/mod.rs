@@ -57,12 +57,12 @@ use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 
-use crate::action::Registry;
-use crate::context::Context;
 use crate::executor::{Executor, FLUSH_TIMEOUT};
 use crate::journal::{Fold, Journal, JournalEntry, JournalSink};
 use crate::messages::Assign;
 use crate::state::Sink;
+use arkitekt_spec::Context;
+use arkitekt_spec::Registry;
 
 pub use crate::store::{
     EntryQuery, HistoryStore, PatchEvent, SessionBoundary, Snapshot, StateAt, TaskBoundary,

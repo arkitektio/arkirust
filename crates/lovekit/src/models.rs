@@ -1,6 +1,6 @@
 //! Owned models of what lovekit returns, and their structure identities.
 
-use arkitekt::rekuest::{widgets, Context};
+use arkitekt::spec::{widgets, Context};
 use arkitekt::Structure;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

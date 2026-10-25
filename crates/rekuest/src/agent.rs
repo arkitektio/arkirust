@@ -26,13 +26,13 @@ use rekuest_session::{Event, SessionConfig};
 use tokio::time::Instant;
 use tokio_tungstenite::tungstenite::Message;
 
-use crate::action::Registry;
-use crate::context::Context;
-use crate::definition::AgentDeclaration;
 use crate::driver::Driver;
 use crate::executor::Executor;
 use crate::journal::{Journal, JournalEntry};
 use crate::transport::{Connector, Direct, Ws};
+use arkitekt_spec::AgentDeclaration;
+use arkitekt_spec::Context;
+use arkitekt_spec::Registry;
 
 pub use crate::agent_error::AgentError;
 pub use rekuest_session::ConnectionPolicy;

@@ -1,0 +1,63 @@
+[package]
+name = "arkitekt-spec"
+description = "What an Arkitekt app is: the action language, the app's declaration (actions, states, hooks, services) and the runtime interface it runs on"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "README.md"
+
+# no_std + alloc unless `std` (default). Without `declare` (default) only the
+# wire types: the action language (`actions`), the manifest and aliases, what
+# a server needs.
+[dependencies]
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+sha2 = { version = "0.10", default-features = false }
+hex = { version = "0.4", default-features = false, features = ["alloc"] }
+arkitekt-macros = { workspace = true, optional = true }
+anyhow = { version = "1", default-features = false, optional = true }
+async-trait = { workspace = true, optional = true }
+chrono = { version = "0.4", default-features = false, features = ["alloc", "serde"], optional = true }
+futures = { version = "0.3", default-features = false, features = ["alloc", "async-await"], optional = true }
+hashbrown = { version = "0.15", optional = true }
+spin = { version = "0.10", default-features = false, features = ["mutex", "spin_mutex", "rwlock", "once"], optional = true }
+rand = { workspace = true, optional = true }
+thiserror = { version = "2", default-features = false, optional = true }
+tracing = { version = "0.1", default-features = false, optional = true }
+uuid = { version = "1", default-features = false, optional = true }
+# rt::Tokio and rt::Js, the runtimes the platform crates install.
+tokio = { workspace = true, features = ["rt", "time"], optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }
+gloo-timers = { version = "0.3", features = ["futures"], optional = true }
+send_wrapper = { version = "0.6", features = ["futures"], optional = true }
+
+# wasm32-unknown-unknown: the clock and random bytes come from JS.
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }
+chrono = { version = "0.4", default-features = false, features = ["wasmbind"], optional = true }
+
+[features]
+default = ["std", "declare"]
+std = [
+    "serde/std", "serde_json/std", "sha2/std", "hex/std", "anyhow?/std", "chrono?/std",
+    "chrono?/clock", "futures?/std", "dep:rand", "thiserror?/std",
+    "tracing?/std", "uuid?/std",
+]
+# The app's declaration: `#[action]`, Registry, states, hooks, Task, Service,
+# App, and `rt` (the runtime interface).
+declare = [
+    "dep:arkitekt-macros", "dep:anyhow", "dep:async-trait", "dep:chrono", "dep:futures",
+    "dep:hashbrown", "dep:spin", "dep:thiserror", "dep:tracing", "dep:uuid",
+]
+# `rt::Tokio`: tokio as the runtime.
+tokio = ["std", "declare", "dep:tokio"]
+# `rt::Js`: the JS event loop (wasm32).
+js = ["std", "declare", "dep:wasm-bindgen-futures", "dep:gloo-timers", "dep:send_wrapper"]
+
+[dev-dependencies]
+json-patch.workspace = true
+tokio = { workspace = true, features = ["rt", "macros", "time"] }

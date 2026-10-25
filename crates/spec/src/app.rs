@@ -1,42 +1,42 @@
 //! The app declaration.
 
-use std::future::Future;
-use std::sync::Arc;
+use core::future::Future;
 
-use fakts::{Manifest, PublicSource};
+#[allow(unused_imports)]
+use crate::prelude::*;
 
-use rekuest::{Action, Background, Registry, Startup, StateType};
-
-use crate::runtime::{ConnectOptions, Runtime};
-use crate::service::{rekuest_requirement, Service};
+use crate::action::{Action, Registry};
+use crate::hooks::{Background, Startup};
+use crate::manifest::{Manifest, PublicSource, Requirement};
+use crate::service::Service;
+use crate::state::StateType;
 
 /// What an app is: its identity, the services it uses and the actions it offers.
 ///
-/// An `App` holds no connection state; [`App::connect`] or [`App::run`]
-/// turn it into a [`Runtime`].
+/// An `App` does no I/O and holds no connection: a runtime runs it
+/// (`arkitekt::run(app)`), as often as wanted.
 ///
 /// ```ignore
-/// App::new("hello", "0.1.0")
+/// let app = App::new("hello", "0.1.0")
 ///     .description("Says hello")
 ///     .service(mikro::service)
-///     .action(greet)
-///     .run()
-///     .await
+///     .action(greet);
+/// arkitekt::run(app).await
 /// ```
 #[derive(Clone)]
 pub struct App {
-    pub(crate) identifier: String,
-    pub(crate) version: String,
-    pub(crate) description: Option<String>,
-    pub(crate) logo: Option<String>,
-    pub(crate) scopes: Vec<String>,
-    pub(crate) public_sources: Vec<PublicSource>,
-    pub(crate) services: Vec<Arc<dyn Service>>,
-    pub(crate) registry: Registry,
+    identifier: String,
+    version: String,
+    description: Option<String>,
+    logo: Option<String>,
+    scopes: Vec<String>,
+    public_sources: Vec<PublicSource>,
+    services: Vec<Arc<dyn Service>>,
+    registry: Registry,
 }
 
-impl std::fmt::Debug for App {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Debug for App {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("App")
             .field("identifier", &self.identifier)
             .field("version", &self.version)
@@ -155,6 +155,11 @@ impl App {
         &self.registry
     }
 
+    /// The services the app uses, in the order they were added.
+    pub fn services(&self) -> &[Arc<dyn Service>] {
+        &self.services
+    }
+
     /// Whether this app serves actions (and so needs the rekuest agent).
     pub fn provides(&self) -> bool {
         !self.registry.is_empty()
@@ -177,7 +182,7 @@ impl App {
             for requirement in service.requirements() {
                 if !requirements
                     .iter()
-                    .any(|r: &fakts::Requirement| r.key == requirement.key)
+                    .any(|r: &Requirement| r.key == requirement.key)
                 {
                     requirements.push(requirement);
                 }
@@ -192,34 +197,9 @@ impl App {
         manifest.device_id = device_id;
         manifest
     }
-
-    /// Authorize (once, then from cache) and build every service client.
-    pub async fn connect(self) -> anyhow::Result<Runtime> {
-        Runtime::connect(self, ConnectOptions::default()).await
-    }
-
-    pub async fn connect_with(self, options: ConnectOptions) -> anyhow::Result<Runtime> {
-        Runtime::connect(self, options).await
-    }
-
-    /// Connect and serve the app's actions until the agent stops.
-    pub async fn run(self) -> anyhow::Result<()> {
-        self.connect().await?.serve().await
-    }
 }
 
-/// Serve an app's actions: authenticate (once, then from cache), register the
-/// actions and block until stopped. Nothing connects before this is called.
-pub async fn run(app: App) -> anyhow::Result<()> {
-    app.run().await
-}
-
-/// Connect an app without serving it, e.g. to call its services from a script.
-pub async fn connect(app: App) -> anyhow::Result<Runtime> {
-    app.connect().await
-}
-
-/// An app for scripts that only call services: `easy("script", "0.1.0").service(..).connect()`.
-pub fn easy(identifier: impl Into<String>, version: impl Into<String>) -> App {
-    App::new(identifier, version)
+/// The requirement the rekuest agent needs to serve actions.
+pub fn rekuest_requirement() -> Requirement {
+    Requirement::new("rekuest", "live.arkitekt.rekuest").description("Where actions are assigned")
 }

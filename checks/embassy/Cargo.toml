@@ -26,6 +26,7 @@ embassy-sync = "0.8"
 embassy-futures = "0.1"
 embassy-executor = "0.10"
 spin = { version = "0.10", default-features = false, features = ["spin_mutex", "mutex"] }
+arkitekt-spec = { path = "../../crates/spec", default-features = false, features = ["declare"] }
 rekuest = { path = "../../crates/rekuest", default-features = false, features = ["rath"] }
 fakts = { path = "../../crates/fakts", default-features = false }
 rath = { path = "../../crates/rath", package = "arkitekt-rath", default-features = false }

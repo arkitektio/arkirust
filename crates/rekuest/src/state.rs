@@ -1,278 +1,29 @@
-//! Agent state: typed values that every change of is published as JSON patches.
+//! The state hub: numbers every state change and publishes it.
 //!
-//! A state is a plain struct (`#[derive(State)]`). Actions take a
-//! [`StateMut<T>`] to change it or a [`StateRef<T>`] to read it; every change
-//! made through [`StateMut::update`] is diffed into RFC 6902 operations,
-//! numbered with an agent-wide `global_rev`, and published as `STATE_PATCH`.
-//!
-//! Anyone observing the agent (the rekuest server, or subscribers of a served
-//! app) therefore always knows every state. Reading state is not what actions
-//! are for: do not write "getter" actions that only return a state.
+//! States themselves are the declaration's ([`arkitekt_spec::state`]):
+//! typed cells, changed through [`StateMut`]. The hub gives each change an
+//! agent-wide `global_rev`, emits it as `STATE_PATCH` (with a full
+//! `STATE_SNAPSHOT` every [`SNAPSHOT_INTERVAL`] revisions) and persists the
+//! history to a [`Sink`] in the background.
 
-use crate::collections::HashMap;
 #[allow(unused_imports)]
 use crate::prelude::*;
 use crate::sync::Mutex;
-use core::any::Any;
 
 use crate::collections::IndexMap;
 use async_trait::async_trait;
-use serde::de::DeserializeOwned;
-use serde::Serialize;
 use serde_json::{Map, Value};
 
+pub use arkitekt_spec::state::{
+    Mutation, StateCells, StateDeclaration, StateError, StateMut, StatePatch, StatePublisher,
+    StateRef, StateType,
+};
+
 use crate::emit::Emitter;
-use crate::journal::TaskGate;
 use crate::messages::FromAgent;
-use crate::ports::Port;
 
 /// Publish a full snapshot of every state every this many revisions.
 pub const SNAPSHOT_INTERVAL: u64 = 60;
-
-/// A type that can be an agent state. Implemented by `#[derive(State)]`.
-pub trait StateType: Serialize + DeserializeOwned + Clone + Send + Sync + 'static {
-    /// The state's interface, e.g. `CameraState`.
-    const NAME: &'static str;
-    /// Locks an action must hold to change this state.
-    const REQUIRED_LOCKS: &'static [&'static str];
-    /// One (return) port per field.
-    fn ports() -> Vec<Port>;
-}
-
-#[derive(Debug, Clone, PartialEq, thiserror::Error)]
-pub enum StateError {
-    #[error("Cannot modify state '{state}' without required locks: {locks:?}")]
-    MissingLocks { state: String, locks: Vec<String> },
-    #[error("state '{0}' is not declared on this app")]
-    Undeclared(String),
-    #[error("state '{0}' has no value yet")]
-    Uninitialized(String),
-    #[error("state '{0}' is read-only here")]
-    ReadOnly(String),
-    #[error("state '{state}' could not be serialized: {message}")]
-    Serialize { state: String, message: String },
-    #[error("this task is not running on an agent, so it has no states")]
-    NoAgent,
-    #[error("the task has ended; its state changes are no longer accepted")]
-    TaskClosed,
-}
-
-/// Who changes a state: which task (if any) and which locks it holds.
-/// `locks: None` means unrestricted (initialization). With a `gate`, changes
-/// are refused once the task has ended (see [`crate::journal`]).
-#[derive(Debug, Clone, Default)]
-pub struct Mutation {
-    pub task_id: Option<String>,
-    pub locks: Option<Vec<String>>,
-    pub gate: Option<TaskGate>,
-}
-
-impl Mutation {
-    /// A change made outside a task (background workers, hooks): no locks.
-    pub fn unlocked() -> Self {
-        Self {
-            task_id: None,
-            locks: Some(vec![]),
-            gate: None,
-        }
-    }
-}
-
-/// A state's declaration, as registered.
-#[derive(Clone)]
-pub struct StateDeclaration {
-    pub name: String,
-    pub ports: Vec<Port>,
-    pub required_locks: Vec<String>,
-    make_cell: Arc<dyn Fn() -> Arc<dyn AnyCell> + Send + Sync>,
-    initial: Option<Arc<dyn Fn() -> Box<dyn Any + Send> + Send + Sync>>,
-}
-
-impl core::fmt::Debug for StateDeclaration {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("StateDeclaration")
-            .field("name", &self.name)
-            .field("required_locks", &self.required_locks)
-            .finish_non_exhaustive()
-    }
-}
-
-impl StateDeclaration {
-    pub fn of<T: StateType>(initial: Option<T>) -> Self {
-        Self {
-            name: T::NAME.to_owned(),
-            ports: T::ports().into_iter().map(Port::into_return).collect(),
-            required_locks: T::REQUIRED_LOCKS.iter().map(|s| s.to_string()).collect(),
-            make_cell: Arc::new(|| Arc::new(StateCell::<T>::new()) as Arc<dyn AnyCell>),
-            initial: initial.map(|value| {
-                Arc::new(move || Box::new(value.clone()) as Box<dyn Any + Send>)
-                    as Arc<dyn Fn() -> Box<dyn Any + Send> + Send + Sync>
-            }),
-        }
-    }
-
-    /// The `StateImplementationInput` sent in REGISTER.
-    pub fn to_declaration_json(&self) -> Value {
-        serde_json::json!({
-            "interface": self.name,
-            "definition": { "ports": self.ports, "name": self.name },
-        })
-    }
-}
-
-/// Type-erased access to a state cell.
-pub(crate) trait AnyCell: Send + Sync + 'static {
-    fn as_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync>;
-    fn set_boxed(&self, value: Box<dyn Any + Send>) -> Result<(), StateError>;
-    fn value_json(&self) -> Option<Value>;
-    fn bind(&self, hub: Arc<HubInner>);
-}
-
-pub(crate) struct StateCell<T> {
-    value: Mutex<Option<T>>,
-    /// The JSON of `value` as of the last published change.
-    json: Mutex<Value>,
-    hub: Mutex<Option<Arc<HubInner>>>,
-}
-
-impl<T: StateType> StateCell<T> {
-    fn new() -> Self {
-        Self {
-            value: Mutex::new(None),
-            json: Mutex::new(Value::Null),
-            hub: Mutex::new(None),
-        }
-    }
-
-    fn to_json(value: &T) -> Result<Value, StateError> {
-        serde_json::to_value(value).map_err(|e| StateError::Serialize {
-            state: T::NAME.to_owned(),
-            message: e.to_string(),
-        })
-    }
-
-    /// Replace the value without publishing (initialization).
-    fn set(&self, value: T) -> Result<(), StateError> {
-        let json = Self::to_json(&value)?;
-        *self.value.lock() = Some(value);
-        *self.json.lock() = json;
-        Ok(())
-    }
-
-    fn get(&self) -> Result<T, StateError> {
-        self.value
-            .lock()
-            .clone()
-            .ok_or_else(|| StateError::Uninitialized(T::NAME.to_owned()))
-    }
-
-    fn read<R>(&self, f: impl FnOnce(&T) -> R) -> Result<R, StateError> {
-        let guard = self.value.lock();
-        let value = guard
-            .as_ref()
-            .ok_or_else(|| StateError::Uninitialized(T::NAME.to_owned()))?;
-        Ok(f(value))
-    }
-
-    fn update<R>(&self, mutation: &Mutation, f: impl FnOnce(&mut T) -> R) -> Result<R, StateError> {
-        // Checked before anything changes, and held until the change is
-        // published: a task's end is never followed by one of its changes.
-        let _pass = match &mutation.gate {
-            Some(gate) => Some(gate.enter().ok_or(StateError::TaskClosed)?),
-            None => None,
-        };
-        if let Some(held) = &mutation.locks {
-            let missing: Vec<String> = T::REQUIRED_LOCKS
-                .iter()
-                .filter(|l| !held.iter().any(|h| h == *l))
-                .map(|l| l.to_string())
-                .collect();
-            if !missing.is_empty() {
-                return Err(StateError::MissingLocks {
-                    state: T::NAME.to_owned(),
-                    locks: T::REQUIRED_LOCKS.iter().map(|s| s.to_string()).collect(),
-                });
-            }
-        }
-
-        // The value lock is held until the operations are queued, so changes
-        // to one state are published in the order they were made.
-        let mut guard = self.value.lock();
-        let value = guard
-            .as_mut()
-            .ok_or_else(|| StateError::Uninitialized(T::NAME.to_owned()))?;
-        let result = f(value);
-        let new_json = Self::to_json(value)?;
-
-        let mut json = self.json.lock();
-        let ops = diff_ops(&json, &new_json);
-        *json = new_json;
-        drop(json);
-
-        if !ops.is_empty() {
-            if let Some(hub) = self.hub.lock().as_ref() {
-                let ts = now_ts();
-                for (op, path, value) in ops {
-                    hub.queue(QueuedPatch {
-                        state: T::NAME.to_owned(),
-                        op,
-                        path,
-                        value,
-                        task_id: mutation.task_id.clone(),
-                        ts,
-                    });
-                }
-            }
-        }
-        drop(guard);
-        Ok(result)
-    }
-}
-
-impl<T: StateType> AnyCell for StateCell<T> {
-    fn as_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync> {
-        self
-    }
-
-    fn set_boxed(&self, value: Box<dyn Any + Send>) -> Result<(), StateError> {
-        let value = value
-            .downcast::<T>()
-            .map_err(|_| StateError::Undeclared(T::NAME.to_owned()))?;
-        self.set(*value)
-    }
-
-    fn value_json(&self) -> Option<Value> {
-        self.value
-            .lock()
-            .is_some()
-            .then(|| self.json.lock().clone())
-    }
-
-    fn bind(&self, hub: Arc<HubInner>) {
-        *self.hub.lock() = Some(hub);
-    }
-}
-
-/// `(op, path, value)` for each RFC 6902 operation turning `old` into `new`.
-fn diff_ops(old: &Value, new: &Value) -> Vec<(String, String, Value)> {
-    crate::patch::diff_ops(old, new)
-}
-
-fn now_ts() -> f64 {
-    let now = crate::rt::now();
-    now.timestamp() as f64 + f64::from(now.timestamp_subsec_micros()) / 1e6
-}
-
-/// A change waiting for its revision number.
-#[derive(Debug, Clone)]
-pub(crate) struct QueuedPatch {
-    state: String,
-    op: String,
-    path: String,
-    value: Value,
-    task_id: Option<String>,
-    ts: f64,
-}
 
 /// A published patch, as handed to a [`Sink`].
 #[derive(Debug, Clone, PartialEq)]
@@ -329,11 +80,11 @@ pub(crate) struct HubInner {
     /// Sink writes queued but not yet done.
     pending: core::sync::atomic::AtomicUsize,
     /// Set whenever `pending` drops to zero.
-    drained: crate::rt::Watch<()>,
+    drained: arkitekt_spec::rt::Watch<()>,
 }
 
-impl HubInner {
-    fn queue(&self, patch: QueuedPatch) {
+impl StatePublisher for HubInner {
+    fn publish(&self, patch: StatePatch) {
         let mut state = self.state.lock();
         let Some(emitter) = state.emitter.clone() else {
             return;
@@ -394,7 +145,9 @@ impl HubInner {
         );
         self.persist(&state, SinkWrite::Patch(published));
     }
+}
 
+impl HubInner {
     fn persist(&self, state: &HubState, write: SinkWrite) {
         if let Some(tx) = &state.sink {
             self.pending
@@ -418,8 +171,7 @@ impl HubInner {
 
 /// All states of an agent.
 pub struct StateHub {
-    declarations: Vec<StateDeclaration>,
-    cells: HashMap<String, Arc<dyn AnyCell>>,
+    cells: Arc<StateCells>,
     inner: Arc<HubInner>,
 }
 
@@ -429,7 +181,8 @@ impl core::fmt::Debug for StateHub {
             .field(
                 "states",
                 &self
-                    .declarations
+                    .cells
+                    .declarations()
                     .iter()
                     .map(|d| &d.name)
                     .collect::<Vec<_>>(),
@@ -440,13 +193,8 @@ impl core::fmt::Debug for StateHub {
 
 impl StateHub {
     pub fn new(declarations: Vec<StateDeclaration>) -> Self {
-        let cells: HashMap<String, Arc<dyn AnyCell>> = declarations
-            .iter()
-            .map(|d| (d.name.clone(), (d.make_cell)()))
-            .collect();
         Self {
-            declarations,
-            cells,
+            cells: Arc::new(StateCells::new(declarations)),
             inner: Arc::new(HubInner {
                 state: Mutex::new(HubState {
                     session_id: String::new(),
@@ -456,56 +204,40 @@ impl StateHub {
                     sink: None,
                 }),
                 pending: Default::default(),
-                drained: crate::rt::Watch::new(()),
+                drained: arkitekt_spec::rt::Watch::new(()),
             }),
         }
     }
 
+    /// The states' values, typed (what hooks and tasks change).
+    pub fn cells(&self) -> &Arc<StateCells> {
+        &self.cells
+    }
+
     pub fn declarations(&self) -> &[StateDeclaration] {
-        &self.declarations
+        self.cells.declarations()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.declarations.is_empty()
-    }
-
-    fn cell<T: StateType>(&self) -> Result<Arc<StateCell<T>>, StateError> {
-        let cell = self
-            .cells
-            .get(T::NAME)
-            .ok_or_else(|| StateError::Undeclared(T::NAME.to_owned()))?;
-        cell.clone()
-            .as_any()
-            .downcast::<StateCell<T>>()
-            .map_err(|_| StateError::Undeclared(T::NAME.to_owned()))
+        self.cells.is_empty()
     }
 
     /// Set a state's value without publishing (startup).
     pub fn init<T: StateType>(&self, value: T) -> Result<(), StateError> {
-        self.cell::<T>()?.set(value)
+        self.cells.init(value)
     }
 
     pub fn state_mut<T: StateType>(&self, mutation: Mutation) -> Result<StateMut<T>, StateError> {
-        Ok(StateMut {
-            cell: self.cell::<T>()?,
-            mutation,
-        })
+        self.cells.state_mut(mutation)
     }
 
     pub fn state_ref<T: StateType>(&self) -> Result<StateRef<T>, StateError> {
-        Ok(StateRef {
-            cell: self.cell::<T>()?,
-        })
+        self.cells.state_ref()
     }
 
     /// Apply the declared initial values.
     pub(crate) fn apply_initial_values(&self) -> Result<(), StateError> {
-        for declaration in &self.declarations {
-            if let Some(initial) = &declaration.initial {
-                self.cells[&declaration.name].set_boxed(initial())?;
-            }
-        }
-        Ok(())
+        self.cells.apply_initial_values()
     }
 
     /// The current session id and revision.
@@ -527,12 +259,7 @@ impl StateHub {
         emitter: Arc<dyn Emitter>,
         sink: Option<Arc<dyn Sink>>,
     ) -> Result<(), StateError> {
-        let missing: Vec<&str> = self
-            .declarations
-            .iter()
-            .filter(|d| self.cells[&d.name].value_json().is_none())
-            .map(|d| d.name.as_str())
-            .collect();
+        let missing = self.cells.uninitialized();
         if !missing.is_empty() {
             return Err(StateError::Uninitialized(format!(
                 "Registered states are missing initialization values from startup hooks: {}",
@@ -540,16 +267,7 @@ impl StateHub {
             )));
         }
 
-        let baseline: Map<String, Value> = self
-            .declarations
-            .iter()
-            .map(|d| {
-                (
-                    d.name.clone(),
-                    self.cells[&d.name].value_json().unwrap_or(Value::Null),
-                )
-            })
-            .collect();
+        let baseline: Map<String, Value> = self.cells.values();
 
         // Sent even without states (`states: {}`), as in Python: it opens the session.
         emitter.emit(
@@ -568,7 +286,7 @@ impl StateHub {
         let sink_tx = sink.map(|sink| {
             let (tx, rx) = async_channel::unbounded::<SinkWrite>();
             let inner = self.inner.clone();
-            crate::rt::spawn(async move {
+            arkitekt_spec::rt::spawn(async move {
                 while let Ok(write) = rx.recv().await {
                     let result = match &write {
                         SinkWrite::Snapshot {
@@ -595,9 +313,7 @@ impl StateHub {
             state.emitter = Some(emitter);
             state.sink = sink_tx;
         }
-        for cell in self.cells.values() {
-            cell.bind(self.inner.clone());
-        }
+        self.cells.bind(self.inner.clone());
         Ok(())
     }
 
@@ -609,7 +325,7 @@ impl StateHub {
                 .load(core::sync::atomic::Ordering::SeqCst)
                 == 0
         });
-        if crate::rt::timeout(timeout, wait).await.is_err() {
+        if arkitekt_spec::rt::timeout(timeout, wait).await.is_err() {
             tracing::warn!("state history was still being persisted after {timeout:?}");
         }
     }
@@ -618,90 +334,8 @@ impl StateHub {
 /// Apply one RFC 6902 operation to `doc`, ignoring failures (the cache is
 /// rebuilt from the cells at the next session).
 pub(crate) fn apply_op(doc: &mut Value, op: &str, path: &str, value: &Value) {
-    if let Err(e) = crate::patch::apply(doc, op, path, value) {
+    if let Err(e) = arkitekt_spec::patch::apply(doc, op, path, value) {
         tracing::warn!("could not apply {op} {path}: {e}");
-    }
-}
-
-/// A handle that changes a state. Take it as an action parameter:
-/// `camera: StateMut<CameraState>`.
-pub struct StateMut<T: StateType> {
-    cell: Arc<StateCell<T>>,
-    mutation: Mutation,
-}
-
-impl<T: StateType> Clone for StateMut<T> {
-    fn clone(&self) -> Self {
-        Self {
-            cell: self.cell.clone(),
-            mutation: self.mutation.clone(),
-        }
-    }
-}
-
-impl<T: StateType> core::fmt::Debug for StateMut<T> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("StateMut").field("state", &T::NAME).finish()
-    }
-}
-
-impl<T: StateType> StateMut<T> {
-    /// A copy of the current value.
-    pub fn get(&self) -> T {
-        self.cell
-            .get()
-            .expect("states are initialized before actions run")
-    }
-
-    /// Read without copying.
-    pub fn read<R>(&self, f: impl FnOnce(&T) -> R) -> R {
-        self.cell
-            .read(f)
-            .expect("states are initialized before actions run")
-    }
-
-    /// Change the state. The difference is published as `STATE_PATCH`es,
-    /// attributed to the task this handle belongs to.
-    pub fn update<R>(&self, f: impl FnOnce(&mut T) -> R) -> Result<R, StateError> {
-        self.cell.update(&self.mutation, f)
-    }
-
-    /// Replace the whole value.
-    pub fn set(&self, value: T) -> Result<(), StateError> {
-        self.update(|current| *current = value)
-    }
-}
-
-/// A read-only handle: `camera: StateRef<CameraState>`.
-pub struct StateRef<T: StateType> {
-    cell: Arc<StateCell<T>>,
-}
-
-impl<T: StateType> Clone for StateRef<T> {
-    fn clone(&self) -> Self {
-        Self {
-            cell: self.cell.clone(),
-        }
-    }
-}
-
-impl<T: StateType> core::fmt::Debug for StateRef<T> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("StateRef").field("state", &T::NAME).finish()
-    }
-}
-
-impl<T: StateType> StateRef<T> {
-    pub fn get(&self) -> T {
-        self.cell
-            .get()
-            .expect("states are initialized before actions run")
-    }
-
-    pub fn read<R>(&self, f: impl FnOnce(&T) -> R) -> R {
-        self.cell
-            .read(f)
-            .expect("states are initialized before actions run")
     }
 }
 
@@ -709,7 +343,9 @@ impl<T: StateType> StateRef<T> {
 mod tests {
     use super::*;
     use crate::emit::Emitter;
-    use serde::Deserialize;
+    use arkitekt_spec::actions::Port;
+    use arkitekt_spec::TaskGate;
+    use serde::{Deserialize, Serialize};
     use std::sync::Mutex as StdMutex;
 
     #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]

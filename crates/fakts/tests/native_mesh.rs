@@ -8,6 +8,8 @@ mod common;
 use std::sync::Arc;
 use std::time::Duration;
 
+use fakts::AliasExt;
+
 use fakts::mesh::{MeshBackend, MeshOptions};
 use fakts::{DeviceCodeOptions, Fakts, Grant, Manifest, Requirement};
 use serde_json::json;

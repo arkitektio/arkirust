@@ -5,8 +5,8 @@
 #[path = "../tests/twin/mod.rs"]
 mod twin;
 
+use arkitekt_spec::Context;
 use rekuest::serve::{configure, AuthRequest, History, ServeOptions, Unauthorized};
-use rekuest::Context;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

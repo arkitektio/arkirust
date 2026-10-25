@@ -174,3 +174,31 @@ fn portable<F: Future + Send>(future: F) -> F {
 fn portable<F: Future>(future: F) -> send_wrapper::SendWrapper<F> {
     send_wrapper::SendWrapper::new(future)
 }
+
+/// reqwest clients for an [`Alias`](crate::Alias).
+pub trait AliasExt {
+    /// A client for this alias: proxied through the mesh sidecar when needed.
+    fn http_client_builder(&self) -> reqwest::Result<reqwest::ClientBuilder>;
+
+    /// See [`AliasExt::http_client_builder`].
+    fn http_client(&self) -> reqwest::Result<reqwest::Client>;
+}
+
+impl AliasExt for crate::Alias {
+    fn http_client_builder(&self) -> reqwest::Result<reqwest::ClientBuilder> {
+        let builder = reqwest::Client::builder();
+        #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+        return Ok(match &self.proxy {
+            Some(proxy) => builder.proxy(reqwest::Proxy::all(proxy)?),
+            None => builder,
+        });
+        // A browser has no proxy, and no mesh to reach.
+        #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+        Ok(builder)
+    }
+
+    fn http_client(&self) -> reqwest::Result<reqwest::Client> {
+        crate::install_crypto_provider();
+        self.http_client_builder()?.build()
+    }
+}

@@ -1,7 +1,7 @@
 //! The lovekit service and structures against what Python's lovekit declares.
 
 use arkitekt::fakts::Manifest;
-use arkitekt::rekuest::PortType;
+use arkitekt::spec::PortType;
 use arkitekt::App;
 use lovekit::{SoloBroadcast, Stream};
 

@@ -1,5 +1,5 @@
 //! An agent without its socket: the session, the executor and the journal,
-//! wired together, on whatever [`rt::Runtime`](crate::rt::Runtime) the
+//! wired together, on whatever [`rt::Runtime`](arkitekt_spec::rt::Runtime) the
 //! process runs.
 //!
 //! A driver owns the I/O. It feeds the session what the socket brings
@@ -19,14 +19,14 @@ use core::time::Duration;
 
 use rekuest_session::{to_text, Event, Outbox, Session, SessionConfig};
 
-use crate::action::Registry;
-use crate::context::Context;
-use crate::definition::AgentDeclaration;
 use crate::emit::Emitter;
 use crate::executor::Executor;
 use crate::journal::{Journal, JournalEntry, JournalSink};
 use crate::messages::{FromAgent, ToAgent};
-use crate::rt::{self, Signal};
+use arkitekt_spec::rt::{self, Signal};
+use arkitekt_spec::AgentDeclaration;
+use arkitekt_spec::Context;
+use arkitekt_spec::Registry;
 
 /// The session, shared by the driver and every task that reports into it.
 ///

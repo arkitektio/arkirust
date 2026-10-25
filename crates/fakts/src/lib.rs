@@ -67,6 +67,8 @@ pub use crate::grants::{
     ClientKind, ClientRole, DeviceCodeHook, DeviceCodeOptions, MandateKeyOptions,
 };
 pub use crate::host::Host;
+#[cfg(feature = "std")]
+pub use crate::http::AliasExt;
 #[cfg(feature = "mesh")]
 pub use crate::mesh::{MeshBackend, MeshOptions};
 pub use crate::mesh_join::{MeshJoin, MeshJoiner};

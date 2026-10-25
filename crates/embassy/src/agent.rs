@@ -7,6 +7,7 @@ use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use core::time::Duration;
 
+use arkitekt_spec::{AgentDeclaration, Context, Registry};
 use embassy_futures::select::{select, select3, Either3};
 use embassy_time::{Instant, Timer};
 use embedded_io_async::{Read, Write};
@@ -15,7 +16,6 @@ use fakts::TokenLoader;
 use rekuest::driver::Driver;
 use rekuest::executor::Executor;
 use rekuest::journal::Journal;
-use rekuest::{AgentDeclaration, Context, Registry};
 use rekuest_session::{ConnectionPolicy, Event, Outbox, SessionConfig, SessionError};
 
 use crate::conn::{TlsBuffers, Verify};
@@ -82,11 +82,14 @@ impl Agent {
         tokens: Arc<dyn TokenLoader>,
     ) -> Self {
         let mut seed = [0u8; 8];
-        rekuest::rt::fill_random(&mut seed);
+        arkitekt_spec::rt::fill_random(&mut seed);
         let config = SessionConfig {
             force: options.force,
             policy: options.policy.clone(),
-            ..SessionConfig::new(rekuest::rt::uuid().to_string(), u64::from_le_bytes(seed))
+            ..SessionConfig::new(
+                arkitekt_spec::rt::uuid().to_string(),
+                u64::from_le_bytes(seed),
+            )
         };
         Self {
             driver: Driver::new(registry, ctx, config, Outbox::new(), None),
@@ -180,7 +183,7 @@ impl Agent {
         let transport =
             crate::conn::open(tcp, dns, secure, &host, port, &self.options.verify, buffers).await?;
         let authority = crate::http::authority(&host, port, secure);
-        WebSocket::connect(transport, &authority, &path, rekuest::rt::fill_random)
+        WebSocket::connect(transport, &authority, &path, arkitekt_spec::rt::fill_random)
             .await
             .map_err(|e| format!("{e}"))
     }
