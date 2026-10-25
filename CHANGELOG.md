@@ -1,6 +1,44 @@
 # CHANGELOG
 
 
+## v0.15.0 (2026-10-25)
+
+### Features
+
+- **embassy**: Publish arkitekt-embassy with the other crates
+  ([`7dbffa2`](https://github.com/arkitektio/arkirust/commit/7dbffa260f3149bb7939e851437aba957f0e3f5d))
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+- **embassy**: Tls 1.3 on embassy: https and wss, verified against a CA
+  ([`b456cf8`](https://github.com/arkitektio/arkirust/commit/b456cf88135dfb2ca5004eec9acd788adf665753))
+
+arkitekt-embassy drops reqwless (its embedded-tls 0.18 does not build against a released der) for a
+  small HTTP/1.1 client of its own (src/http1.rs: one exchange per connection; Content-Length,
+  chunked and until-close bodies) over a transport that is plain TCP or embedded-tls 0.19
+  (src/conn.rs). The server's chain and name are checked against the CA given as Verify::Ca (the
+  root, DER; RSA and ECDSA chains); Verify::Unverified skips both and logs it. The agent's websocket
+  runs over the same transport (wss://); it now serves each connection in a scope of its own, so the
+  TLS record buffers are borrowed only while one is open.
+
+The test stack's gateway also serves https for localhost with Caddy's internal CA (Stack::tls_root
+  hands out its root). The embassy real-stack run calls rath over https and runs the agent over wss,
+  both verified against it, and checks that the right CA with the wrong name is refused.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+### Testing
+
+- **rekuest**: Wait for the lock on time, not on a count of yields
+  ([`f147e70`](https://github.com/arkitektio/arkirust/commit/f147e704ef49c66b90fe95419c8ac6e535959fd4))
+
+unlock_always_follows_the_cancelled_report gave each even round 1000 yields to take the lock; a
+  loaded CI runner took longer and the test failed (t48 never locked). It now waits up to 5 s and
+  fails loudly if not.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+
 ## v0.14.0 (2026-10-24)
 
 ### Bug Fixes
