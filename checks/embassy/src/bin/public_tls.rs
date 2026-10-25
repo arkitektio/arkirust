@@ -23,7 +23,7 @@ async fn main(spawner: Spawner) {
         std::process::exit(2);
     };
     let _ = tracing_subscriber::fmt()
-        .with_env_filter("arkitekt_embassy=debug,embedded_tls=info")
+        .with_env_filter("arkitekt_embassy=debug,rustls=info")
         .with_writer(std::io::stderr)
         .try_init();
     let runtime = Embassy::new(spawner.make_send(), HostEntropy);

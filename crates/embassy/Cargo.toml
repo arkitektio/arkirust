@@ -27,10 +27,17 @@ embassy-sync = "0.8"
 embassy-time = "0.5"
 embedded-io-async = "0.7"
 embedded-nal-async = "0.9"
-rand_core = "0.6"
-# TLS 1.3, certificates checked against a given CA (RSA and ECDSA chains).
-embedded-tls = { version = "0.19", default-features = false, features = ["rustpki", "p384", "rsa", "alloc"] }
+# TLS 1.3 and 1.2: rustls's unbuffered client (sans-IO: cancel-safe reads)
+# with the RustCrypto provider, without std; certificates checked by webpki
+# against a given CA.
+rustls = { version = "0.23", default-features = false, features = ["tls12"] }
+rustls-rustcrypto = { version = "0.0.2-alpha", default-features = false, features = ["alloc", "tls12"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 sha1 = { version = "0.10", default-features = false }
 spin = { version = "0.10", default-features = false, features = ["mutex", "spin_mutex"] }
 tracing = { version = "0.1", default-features = false }
+
+# The RustCrypto provider draws randomness from getrandom: on a board it is
+# the runtime's (src/tls.rs registers it).
+[target.'cfg(target_os = "none")'.dependencies]
+getrandom = { version = "0.2", default-features = false, features = ["custom"] }

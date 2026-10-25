@@ -10,8 +10,9 @@
 //!
 //! `checks/embassy` runs it on the host against the real stack.
 //!
-//! `https://` and `wss://` are TLS 1.3 (embedded-tls), the server checked
-//! against a CA you give ([`conn::Verify`]).
+//! `https://` and `wss://` are TLS 1.3 or 1.2 (rustls's unbuffered client,
+//! RustCrypto, cancel-safe reads: [`tls`]), the server checked against a CA
+//! you give ([`conn::Verify`]).
 
 #![no_std]
 
@@ -23,6 +24,7 @@ pub mod http;
 pub mod http1;
 pub mod platform;
 pub mod runtime;
+pub mod tls;
 pub mod ws;
 
 pub use crate::agent::{Agent, AgentError, AgentOptions};

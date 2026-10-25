@@ -1,4 +1,5 @@
-//! One connection to a host: plain TCP, or TLS 1.3 over it (embedded-tls).
+//! One connection to a host: plain TCP, or TLS over it (rustls's
+//! unbuffered client with the RustCrypto provider: [`crate::tls`]).
 //!
 //! The server's certificate is checked against the CA given in
 //! [`Verify::Ca`] (the root of its chain, DER), and its name against the
@@ -8,22 +9,16 @@
 use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::String;
-use alloc::vec;
 use alloc::vec::Vec;
 use core::net::SocketAddr;
 
 use embedded_io_async::{ErrorKind, ErrorType, Read, Write};
 use embedded_nal_async::{AddrType, Dns, TcpConnect};
-use embedded_tls::pki::CertVerifier;
-use embedded_tls::{
-    Aes128GcmSha256, Certificate, CryptoProvider, TlsClock, TlsConfig, TlsConnection, TlsContext,
-    TlsError, TlsVerifier,
-};
+
+use crate::tls::TlsStream;
 
 /// The largest TLS record a server may send.
 pub const TLS_RECORD: usize = 16_640;
-/// The server's certificate, as the verifier keeps it (DER).
-const CERT_SIZE: usize = 8 * 1024;
 
 /// How to check a TLS server.
 #[derive(Debug, Clone)]
@@ -35,7 +30,8 @@ pub enum Verify {
     Unverified,
 }
 
-/// The two TLS record buffers a connection borrows.
+/// The two TLS record buffers a connection borrows: ciphertext received
+/// and records to send (each grows to a record as it needs).
 pub struct TlsBuffers {
     read: Vec<u8>,
     write: Vec<u8>,
@@ -44,8 +40,8 @@ pub struct TlsBuffers {
 impl Default for TlsBuffers {
     fn default() -> Self {
         Self {
-            read: vec![0; TLS_RECORD],
-            write: vec![0; TLS_RECORD],
+            read: Vec::with_capacity(TLS_RECORD),
+            write: Vec::with_capacity(TLS_RECORD),
         }
     }
 }
@@ -54,7 +50,7 @@ impl Default for TlsBuffers {
 pub enum Transport<'b, C: Read + Write + 'b> {
     Plain(C),
     /// Boxed: the TLS state is large.
-    Tls(Box<TlsConnection<'b, C, Aes128GcmSha256>>),
+    Tls(Box<TlsStream<'b, C>>),
 }
 
 /// An I/O error of either.
@@ -79,13 +75,6 @@ impl<C: Read + Write> ErrorType for Transport<'_, C> {
     type Error = ConnError;
 }
 
-fn tls_kind(e: TlsError) -> ConnError {
-    match e {
-        TlsError::Io(kind) => ConnError(kind),
-        _ => ConnError(ErrorKind::Other),
-    }
-}
-
 impl<C: Read + Write> Read for Transport<'_, C> {
     async fn read(&mut self, buf: &mut [u8]) -> Result<usize, ConnError> {
         match self {
@@ -93,7 +82,7 @@ impl<C: Read + Write> Read for Transport<'_, C> {
                 .read(buf)
                 .await
                 .map_err(|e| ConnError(embedded_io_async::Error::kind(&e))),
-            Self::Tls(c) => c.read(buf).await.map_err(tls_kind),
+            Self::Tls(c) => c.read(buf).await,
         }
     }
 }
@@ -105,7 +94,7 @@ impl<C: Read + Write> Write for Transport<'_, C> {
                 .write(buf)
                 .await
                 .map_err(|e| ConnError(embedded_io_async::Error::kind(&e))),
-            Self::Tls(c) => c.write(buf).await.map_err(tls_kind),
+            Self::Tls(c) => c.write(buf).await,
         }
     }
 
@@ -115,7 +104,7 @@ impl<C: Read + Write> Write for Transport<'_, C> {
                 .flush()
                 .await
                 .map_err(|e| ConnError(embedded_io_async::Error::kind(&e))),
-            Self::Tls(c) => c.flush().await.map_err(tls_kind),
+            Self::Tls(c) => c.flush().await,
         }
     }
 }
@@ -147,73 +136,17 @@ where
     if !secure {
         return Ok(Transport::Plain(socket));
     }
-    let mut tls = TlsConnection::new(socket, &mut buffers.read, &mut buffers.write);
-    let config = TlsConfig::new().with_server_name(host);
-    let mut provider = Provider {
-        verifier: match verify {
-            Verify::Ca(der) => Some(CertVerifier::new(Certificate::X509(der.as_slice()))),
-            Verify::Unverified => {
-                tracing::warn!("TLS to {} without verifying the server", host);
-                None
-            }
-        },
-    };
-    tls.open(TlsContext::new(&config, &mut provider))
-        .await
-        .map_err(|e| format!("TLS with {host}:{port}: {e:?}"))?;
+    if matches!(verify, Verify::Unverified) {
+        tracing::warn!("TLS to {} without verifying the server", host);
+    }
+    let config = crate::tls::config(verify).map_err(|e| format!("TLS with {host}:{port}: {e}"))?;
+    let tls = TlsStream::connect(
+        socket,
+        host,
+        config,
+        (&mut buffers.read, &mut buffers.write),
+    )
+    .await
+    .map_err(|e| format!("TLS with {host}:{port}: {e:?}"))?;
     Ok(Transport::Tls(Box::new(tls)))
-}
-
-/// The wall clock, for certificate validity.
-struct Clock;
-
-impl TlsClock for Clock {
-    fn now() -> Option<u64> {
-        u64::try_from(arkitekt_spec::rt::now().timestamp()).ok()
-    }
-}
-
-/// Randomness for the handshake: the runtime's (the board's RNG).
-struct Rng;
-
-impl rand_core::RngCore for Rng {
-    fn next_u32(&mut self) -> u32 {
-        let mut bytes = [0u8; 4];
-        arkitekt_spec::rt::fill_random(&mut bytes);
-        u32::from_le_bytes(bytes)
-    }
-
-    fn next_u64(&mut self) -> u64 {
-        let mut bytes = [0u8; 8];
-        arkitekt_spec::rt::fill_random(&mut bytes);
-        u64::from_le_bytes(bytes)
-    }
-
-    fn fill_bytes(&mut self, dest: &mut [u8]) {
-        arkitekt_spec::rt::fill_random(dest)
-    }
-
-    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), rand_core::Error> {
-        arkitekt_spec::rt::fill_random(dest);
-        Ok(())
-    }
-}
-
-impl rand_core::CryptoRng for Rng {}
-
-struct Provider<'c> {
-    verifier: Option<CertVerifier<'c, Aes128GcmSha256, Clock, CERT_SIZE>>,
-}
-
-impl CryptoProvider for Provider<'_> {
-    type CipherSuite = Aes128GcmSha256;
-    type Signature = Vec<u8>;
-
-    fn rng(&mut self) -> impl embedded_tls::CryptoRngCore {
-        Rng
-    }
-
-    fn verifier(&mut self) -> Result<&mut impl TlsVerifier<Self::CipherSuite>, TlsError> {
-        self.verifier.as_mut().ok_or(TlsError::Unimplemented)
-    }
 }
