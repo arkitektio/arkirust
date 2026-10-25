@@ -18,7 +18,7 @@ use crate::collections::HashMap;
 use crate::error::{FaktsError, Result};
 use crate::grants::{self, DeviceCodeOptions, MandateKeyOptions};
 use crate::host::{Host, Request};
-use crate::mesh_join::{MeshJoin, MeshJoiner};
+use crate::mesh_join::{MeshJoin, MeshJoiner, MeshRoute};
 use crate::models::{ActiveFakts, Alias, Instance, Manifest, WellKnown};
 use crate::prelude::*;
 
@@ -163,7 +163,7 @@ impl FaktsBuilder {
 
     /// Join the deployment's mesh with a node the app runs itself: ask for a
     /// mesh key when authorizing, hand it to `joiner`, and reach mesh aliases
-    /// through the proxy it returns. Ignored when
+    /// as it says ([`MeshRoute`]: its proxy, or directly). Ignored when
     /// [`mesh_proxy`](Self::mesh_proxy) is set; wins over [`mesh`](Self::mesh).
     pub fn mesh_joiner(mut self, joiner: Arc<dyn MeshJoiner>) -> Self {
         self.mesh_joiner = Some(joiner);
@@ -274,6 +274,12 @@ impl FaktsBuilder {
             }
             _ => None,
         };
+        // The platform reaches the mesh itself, or through a proxy.
+        let direct = joined == Some(MeshRoute::Direct);
+        let joined = match joined {
+            Some(MeshRoute::Proxy(proxy)) => Some(proxy),
+            _ => None,
+        };
         #[cfg(feature = "mesh")]
         let mesh_proxy = self
             .mesh_proxy
@@ -282,15 +288,17 @@ impl FaktsBuilder {
         #[cfg(not(feature = "mesh"))]
         let mesh_proxy = self.mesh_proxy.or(joined);
         // Mesh aliases are challenged through the proxy (with std; without
-        // it there is no proxy client, and mesh aliases are skipped).
+        // it there is no proxy client), or through the ordinary host when
+        // the platform routes the mesh itself; else they are skipped.
         #[cfg(feature = "std")]
-        let mesh_host = mesh_proxy
-            .as_deref()
-            .map(crate::http::Reqwest::with_proxy)
-            .transpose()?
-            .map(|host| Arc::new(host) as Arc<dyn Host>);
+        let mesh_host = match mesh_proxy.as_deref() {
+            Some(proxy) => {
+                Some(Arc::new(crate::http::Reqwest::with_proxy(proxy)?) as Arc<dyn Host>)
+            }
+            None => direct.then(|| host.clone()),
+        };
         #[cfg(not(feature = "std"))]
-        let mesh_host: Option<Arc<dyn Host>> = None;
+        let mesh_host: Option<Arc<dyn Host>> = direct.then(|| host.clone());
 
         Ok(Fakts {
             inner: Arc::new(Inner {
@@ -651,9 +659,11 @@ impl Fakts {
             // The first request to a mesh peer sets up its tunnel (a WireGuard
             // handshake, through a DERP relay at first): seconds, on a board.
             let (host, proxy, timeout) = if alias.is_mesh() {
-                match (&self.inner.mesh_host, self.mesh_proxy()) {
-                    (Some(host), Some(proxy)) => (host, Some(proxy), MESH_CHALLENGE_TIMEOUT),
-                    _ => {
+                // Through the proxy, or (the platform routing the mesh
+                // itself) directly.
+                match &self.inner.mesh_host {
+                    Some(host) => (host, self.mesh_proxy(), MESH_CHALLENGE_TIMEOUT),
+                    None => {
                         skipped_mesh = true;
                         tracing::debug!(
                             "skipping alias {} of {}: it needs the mesh, which is off",

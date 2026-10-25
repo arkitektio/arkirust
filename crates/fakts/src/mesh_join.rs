@@ -29,15 +29,29 @@ impl core::fmt::Debug for MeshJoin {
     }
 }
 
+/// How mesh aliases are reached, once a [`MeshJoiner`] joined.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MeshRoute {
+    /// Through this local HTTP proxy into the mesh
+    /// (`http://127.0.0.1:<port>`): a sidecar's or a native node's.
+    Proxy(String),
+    /// The platform reaches mesh addresses itself: its TCP sends tailnet
+    /// addresses and names over the mesh (on embassy, arkitekt-embassy's
+    /// `route::Routed`). Mesh aliases go through the ordinary [`Host`],
+    /// without a proxy.
+    ///
+    /// [`Host`]: crate::Host
+    Direct,
+}
+
 /// Runs the app's mesh node. With one set, fakts asks for a mesh key at login
-/// and reaches mesh aliases through the proxy the joiner returns.
+/// and reaches mesh aliases the way the joiner says.
 #[async_trait::async_trait]
 pub trait MeshJoiner: Send + Sync {
-    /// Join (or rejoin) the mesh and return the local HTTP proxy into it
-    /// (`http://127.0.0.1:<port>`), or `None` to stay off the mesh, e.g.
-    /// with no key and no node that joined before. Mesh aliases are then
-    /// skipped.
-    async fn join(&self, join: MeshJoin) -> Result<Option<String>>;
+    /// Join (or rejoin) the mesh and say how it is reached, or `None` to
+    /// stay off the mesh, e.g. with no key and no node that joined before.
+    /// Mesh aliases are then skipped.
+    async fn join(&self, join: MeshJoin) -> Result<Option<MeshRoute>>;
 }
 
 /// A DNS label: lowercase alphanumerics and dashes, at most 63 characters.

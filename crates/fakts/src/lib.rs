@@ -71,7 +71,7 @@ pub use crate::host::Host;
 pub use crate::http::AliasExt;
 #[cfg(feature = "mesh")]
 pub use crate::mesh::{MeshBackend, MeshOptions};
-pub use crate::mesh_join::{MeshJoin, MeshJoiner};
+pub use crate::mesh_join::{MeshJoin, MeshJoiner, MeshRoute};
 pub use crate::models::*;
 
 /// Select the process-wide TLS provider (ring), once.

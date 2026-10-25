@@ -33,7 +33,9 @@ rath = { path = "../../crates/rath", package = "arkitekt-rath", default-features
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 arkitekt-embassy = { path = "../../crates/embassy" }
 anyhow = { version = "1", default-features = false }
-embassy-net = { version = "0.9", features = ["tcp", "dns", "proto-ipv4", "medium-ethernet"] }
+# proto-ipv6 too: the mesh's netstack turns on smoltcp's IPv6, and
+# embassy-net 0.9 does not build with it unless it has it as well.
+embassy-net = { version = "0.9", features = ["tcp", "dns", "proto-ipv4", "proto-ipv6", "medium-ethernet"] }
 
 [target.'cfg(not(target_os = "none"))'.dependencies]
 embassy-time = { version = "0.5", features = ["std"] }
@@ -47,3 +49,6 @@ critical-section = { version = "1", features = ["std"] }
 rand = "0.8"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 base64 = "0.22"
+# src/bin/mesh_route.rs: the mesh node on the host (std: its randomness and clock).
+arkitekt-mesh-embassy = "0.8"
+arkitekt-mesh-core = { version = "0.8", features = ["std"] }

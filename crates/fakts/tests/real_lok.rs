@@ -44,7 +44,7 @@ struct Recorder(Mutex<Vec<MeshJoin>>);
 
 #[async_trait::async_trait]
 impl MeshJoiner for Recorder {
-    async fn join(&self, join: MeshJoin) -> fakts::Result<Option<String>> {
+    async fn join(&self, join: MeshJoin) -> fakts::Result<Option<fakts::MeshRoute>> {
         self.0.lock().unwrap().push(join);
         Ok(None)
     }

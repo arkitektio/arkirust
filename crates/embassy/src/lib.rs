@@ -23,6 +23,7 @@ pub mod conn;
 pub mod http;
 pub mod http1;
 pub mod platform;
+pub mod route;
 pub mod runtime;
 pub mod tls;
 pub mod ws;
