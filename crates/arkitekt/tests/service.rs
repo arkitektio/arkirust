@@ -52,3 +52,14 @@ fn manifest_collects_service_requirements() {
         .collect();
     assert_eq!(keys, ["api", "files", "endpoint"]);
 }
+
+/// Desktop apps spawn these: they must stay `Send` through the platform.
+#[test]
+fn the_tokio_platforms_futures_are_send() {
+    fn is_send<T: Send>(_: T) {}
+    is_send(arkitekt::run(App::new("a", "1")));
+    is_send(arkitekt::connect_with(
+        App::new("a", "1"),
+        arkitekt::ConnectOptions::default(),
+    ));
+}

@@ -354,8 +354,11 @@ dependencies = [
  "dirs",
  "fakts",
  "rekuest",
+ "reqwest 0.12.28",
+ "tempfile",
  "tokio",
  "tracing",
+ "tracing-subscriber",
  "uuid",
 ]
 

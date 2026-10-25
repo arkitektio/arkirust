@@ -92,6 +92,7 @@ jobs:
       # natively, from wasm under node (fakts over fetch, the JS WebSocket),
       # and on embassy (arkitekt-embassy over the host's TCP, no std below).
       - run: cargo test -p rekuest --test real_rekuest -- --ignored --nocapture
+      - run: cargo test -p arkitekt-tokio --test real_stack -- --ignored --nocapture
 
   # The agent stack on the ESP32-S3 (checks/esp32s3): no ring, no signals,
   # no SQLite.

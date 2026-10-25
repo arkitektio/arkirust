@@ -43,3 +43,12 @@ mesh-native = ["mesh", "fakts/mesh-native"]
 # The native node's TURN relay and TCP forwards (`Fakts::mesh_turn`/`mesh_forward`),
 # for WebRTC media such as LiveKit (see the `lovekit` crate).
 mesh-relay = ["mesh-native", "fakts/mesh-relay"]
+
+[dev-dependencies]
+# The tests are an application: they pick ring as the TLS provider.
+fakts = { workspace = true, features = ["ring"] }
+reqwest.workspace = true
+tempfile = "3"
+tokio = { workspace = true, features = ["rt-multi-thread", "process"] }
+tracing-subscriber.workspace = true
+
