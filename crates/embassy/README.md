@@ -13,10 +13,17 @@ agent, fakts' login and rath's GraphQL over embedded-nal-async TCP and TLS
 
 `https://` and `wss://` are TLS 1.3 (embedded-tls 0.19, AES-128-GCM): the
 server's certificate chain and name are checked against the CA given as
-`Verify::Ca` (the root, DER, e.g. ISRG Root X1 for Let's Encrypt);
-`Verify::Unverified` skips that and logs it. HTTP is a small HTTP/1.1 client
-of its own (one exchange per connection).
+`Verify::Ca`; `Verify::Unverified` skips that and logs it. HTTP is a small
+HTTP/1.1 client of its own (one exchange per connection).
+
+`Verify::Ca` is one certificate (DER): the root that signed the *last*
+certificate the server sends. Only that one is trusted, so it is not
+enough that some root of the chain is in a store. For Let's Encrypt it is
+ISRG Root X1 (RSA): its chains end in a certificate it signed, ECDSA
+(YE1 → Root YE → ISRG Root X2) or RSA (R10, R11, …). The server must speak TLS 1.3
+with AES-128-GCM-SHA256.
 
 `checks/embassy` runs it on the host against the real stack (`real_stack`,
-over https and wss, verified)
-and builds the board wiring for a Cortex-M4F (`board.rs`).
+over https and wss, verified), against any public server (`public_tls <url>
+<CA PEM>`: tried with Let's Encrypt, GlobalSign and Sectigo chains, ECDSA
+and RSA), and builds the board wiring for a Cortex-M4F (`board.rs`).

@@ -28,7 +28,8 @@ const CERT_SIZE: usize = 8 * 1024;
 /// How to check a TLS server.
 #[derive(Debug, Clone)]
 pub enum Verify {
-    /// Against this CA certificate (DER): the root of the server's chain.
+    /// Against this CA certificate (DER): the one that signed the last
+    /// certificate the server sends (ISRG Root X1 for Let's Encrypt).
     Ca(Vec<u8>),
     /// Not at all: anyone in the path can pose as the server.
     Unverified,

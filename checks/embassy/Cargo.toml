@@ -7,6 +7,8 @@
 # proves they build for a microcontroller (with `board`: arkitekt-embassy over
 # a real embassy-net stack). `cargo run --bin real_stack` logs in at a real
 # lok and registers with a real takt (rekuest's real_rekuest test runs it).
+# `cargo run --release --bin public_tls <https url> <CA PEM>` fetches a page
+# from a public server with its certificate checked (by hand, not in CI).
 # Not a workspace member.
 [package]
 name = "embassy-control"
