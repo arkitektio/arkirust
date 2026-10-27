@@ -448,10 +448,10 @@ over embedded-nal-async, one network task, so the futures are `Send` although
 embassy-net's sockets are not) and `Agent` (the driver over its own websocket
 client), and `Board`, the platform: `Runtime::connect(Board { host, tcp, dns,
 verify }, app, options)` connects the same `App` as on the desktop, and
-`serve()` runs the agent. `https://` and `wss://` are TLS 1.3 (embedded-tls), the server's
-chain and name checked against a CA the app gives (`Verify::Ca`, the root,
-DER). The e2e job runs it on the host against the real stack
-(`checks/embassy`'s `real_stack`, over async-io TCP): the app connected on
+`serve()` runs the agent. `https://` and `wss://` are TLS 1.3 or 1.2
+(rustls's unbuffered client, RustCrypto), the server's chain and name checked
+against a CA the app gives (`Verify::Ca`, the root, DER). The e2e job runs it on
+the host against the real stack (`checks/embassy`'s `real_stack`, over async-io TCP): the app connected on
 `Board`, rath (over
 https) and the agent (over wss), verified against the test gateway's internal
 CA, and a wrong name refused; the board wiring over embassy-net builds for a

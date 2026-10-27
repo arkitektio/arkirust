@@ -25,19 +25,10 @@ use arkitekt_spec::{Port, PortKind};
 
 type Stored = Arc<dyn Any + Send + Sync>;
 
-#[cfg(feature = "std")]
-std::thread_local! {
-    static SHELVING_SLOT: core::cell::RefCell<Option<(String, TaskGate)>> =
-        const { core::cell::RefCell::new(None) };
+arkitekt_spec::task_local! {
+    /// The task whose action is running (set by the executor around it).
+    static SHELVING: (String, TaskGate);
 }
-
-/// The task whose action is running (set by the executor around it).
-#[cfg(feature = "std")]
-static SHELVING: arkitekt_spec::rt::TaskLocal<(String, TaskGate)> =
-    arkitekt_spec::rt::TaskLocal::new(&SHELVING_SLOT);
-#[cfg(not(feature = "std"))]
-static SHELVING: arkitekt_spec::rt::TaskLocal<(String, TaskGate)> =
-    arkitekt_spec::rt::TaskLocal::new();
 
 /// Run `fut` (an action of `task`) so that what it shelves is attributed to
 /// `task`, and nothing is shelved once the task's gate is closed.

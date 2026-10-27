@@ -522,12 +522,53 @@ fn register(wakers: &Mutex<Vec<Waker>>, waker: &Waker) {
 /// polled, so blocking work it hands to another thread does not see it.
 ///
 /// With std it lives in a thread local; without std (one executor thread, as
-/// embassy runs) in a global slot.
+/// embassy runs) in a global slot. Which one is this crate's `std` feature, not
+/// the caller's, so declare it with [`task_local!`](crate::task_local), never
+/// with `new` behind a `cfg` of your own: feature unification can turn this
+/// crate's `std` on under a crate built without it.
 pub struct TaskLocal<T: 'static> {
     #[cfg(feature = "std")]
     slot: &'static std::thread::LocalKey<core::cell::RefCell<Option<T>>>,
     #[cfg(not(feature = "std"))]
     slot: spin::Mutex<Option<T>>,
+}
+
+/// The thread local behind a std [`TaskLocal`], for [`task_local!`](crate::task_local).
+#[cfg(feature = "std")]
+#[doc(hidden)]
+pub use std::thread_local as __thread_local;
+
+/// Declare a [`TaskLocal`] static, its storage as this crate is built:
+///
+/// ```
+/// arkitekt_spec::task_local! {
+///     /// The task being polled.
+///     static RUNNING: u32;
+/// }
+/// ```
+#[cfg(feature = "std")]
+#[macro_export]
+macro_rules! task_local {
+    ($(#[$attr:meta])* $vis:vis static $name:ident: $t:ty;) => {
+        $(#[$attr])*
+        $vis static $name: $crate::rt::TaskLocal<$t> = {
+            $crate::rt::__thread_local! {
+                static SLOT: ::core::cell::RefCell<::core::option::Option<$t>> =
+                    const { ::core::cell::RefCell::new(::core::option::Option::None) };
+            }
+            $crate::rt::TaskLocal::new(&SLOT)
+        };
+    };
+}
+
+/// Declare a [`TaskLocal`] static, its storage as this crate is built.
+#[cfg(not(feature = "std"))]
+#[macro_export]
+macro_rules! task_local {
+    ($(#[$attr:meta])* $vis:vis static $name:ident: $t:ty;) => {
+        $(#[$attr])*
+        $vis static $name: $crate::rt::TaskLocal<$t> = $crate::rt::TaskLocal::new();
+    };
 }
 
 #[cfg(not(feature = "std"))]

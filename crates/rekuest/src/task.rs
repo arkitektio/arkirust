@@ -140,6 +140,10 @@ impl TaskBackend for AgentTask {
         Some(&self.assignment.user)
     }
 
+    fn assigner(&self) -> Option<&str> {
+        Some(self.assignment.assigner.as_deref().unwrap_or(&self.assignment.user))
+    }
+
     fn org(&self) -> Option<&str> {
         Some(&self.assignment.org)
     }

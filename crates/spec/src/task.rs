@@ -27,6 +27,11 @@ pub trait TaskBackend: Send + Sync + 'static {
         None
     }
 
+    /// The human at the root of the task tree, who assigned it.
+    fn assigner(&self) -> Option<&str> {
+        None
+    }
+
     fn org(&self) -> Option<&str> {
         None
     }
@@ -119,6 +124,13 @@ impl Task {
         self.backend.user()
     }
 
+    /// The human at the root of the task tree, who assigned it: the same for every task
+    /// it delegated to, however deep.
+    pub fn assigner(&self) -> Option<&str> {
+        self.backend.assigner()
+    }
+
+    /// The organization the task runs in, `"<iss>#<org>"`.
     pub fn org(&self) -> Option<&str> {
         self.backend.org()
     }

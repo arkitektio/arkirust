@@ -40,7 +40,7 @@ pub struct AssignPrompt {
 /// `returns`, or on its own (`INFORM`), to show something while it carries on.
 ///
 /// Exactly one of `key` (a blok the agent's app declares), `id` (any blok of the organization)
-/// or `source` (BSX, which the server parses into a blok the task owns) names it. The server
+/// or `source` (v2 BSX, which the server parses into a blok the task owns) names it. The server
 /// makes it for the task alone: it is never listed and goes when the task goes. A blok it
 /// cannot make (unparsable BSX, a component the catalog lacks, args or bindings that do not
 /// fit) is answered with `BLOK_REFUSED` and nothing of the frame is kept.
@@ -55,7 +55,7 @@ pub struct TaskBlok {
     /// A title for whoever sees it; the blok's own name when left out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    /// What it is opened on, read by its tree under `@args.<key>`.
+    /// What it is opened on, read by its tree under `args.<key>`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub args: Option<Map<String, Value>>,
     /// What an answer holds (return ports, as a definition declares them). A `source` blok
@@ -70,16 +70,53 @@ pub struct TaskBlok {
     /// bound to it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_mappings: Option<Map<String, Value>>,
+    /// The blok language version a `source` blok is written in; 2, the only one, when left out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub demo_state: Option<Value>,
-    /// The UI catalog a `source` blok renders against; the server's default when left out.
+    pub vocab: Option<u32>,
+    /// The catalogs a `source` blok needs, as `name@version` (`ui@1`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub catalog: Option<String>,
-    /// The backend services a `source` blok's `query` components read
-    /// (`{key, service, version, schema_hash}`), each frozen at the version it was written
-    /// against. A query on a service it does not name is refused.
+    pub catalogs: Option<Vec<String>>,
+    /// A `source` blok's locals, each a port (`{key, kind?, default?, ...}`; a missing kind is
+    /// inferred server-side, ANY only when nothing tells) plus `persist`: form state that feeds a
+    /// call, written only through `bind`, read bare.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub services: Option<Vec<Value>>,
+    pub locals: Option<Vec<Value>>,
+    /// What a preview renders a `source` blok with.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub demo: Option<BlokDemo>,
+    /// A `source` blok's declared reads (`{key, service, document, variables?, poll?, more?}`),
+    /// read as `queries.<key>`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queries: Option<Vec<Value>>,
+    /// A `source` blok's declared streams (`{key, service, document, variables?, keep?,
+    /// history?}`), read as `subscriptions.<key>`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subscriptions: Option<Vec<Value>>,
+    /// The module (an app's own unversioned extras) a `source` blok renders against besides its
+    /// catalogs; the server's default when left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module: Option<String>,
+}
+
+/// What a preview renders a blok with, mirroring the roots it reads. Never what it shows live.
+/// Every field is the author's JSON.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct BlokDemo {
+    /// Per dependency key (`self` included), its states and tasks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deps: Option<Value>,
+    /// What it is opened on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub args: Option<Value>,
+    /// The task record it is about.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task: Option<Value>,
+    /// Per declared query, the value it answers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queries: Option<Value>,
+    /// Per declared subscription, its value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subscriptions: Option<Value>,
 }
 
 /// A condition on the running agent's state that must hold for a task to run.
@@ -133,7 +170,13 @@ pub struct Assign {
     pub args: Map<String, Value>,
     #[serde(default)]
     pub message: Option<String>,
+    /// Who caused this hop: the human for a top-level task, the parent's agent user for a child.
     pub user: String,
+    /// The human at the root of the task tree, who assigned it (the provenance `rcb`);
+    /// None from a server that does not send it, where `user` is the best there is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assigner: Option<String>,
+    /// The organization the task runs in, `"<iss>#<org>"`: unique across issuers.
     pub org: String,
     pub action: String,
     pub implementation: String,
@@ -840,6 +883,20 @@ mod tests {
         };
         assert_eq!(assign.task, "t1");
         assert_eq!(assign.args["image"]["object"], "5");
+        assert_eq!(assign.assigner, None, "an older server sends no assigner");
+
+        let delegated = parse_to_agent(
+            &json!({
+                "type": "ASSIGN", "interface": "greet", "task": "t2", "parent": "t1", "root": "t1",
+                "user": "agent-user", "assigner": "human", "org": "lok#7", "action": "a", "implementation": "i"
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let ToAgent::Assign(delegated) = delegated else {
+            panic!()
+        };
+        assert_eq!((delegated.user.as_str(), delegated.assigner.as_deref(), delegated.org.as_str()), ("agent-user", Some("human"), "lok#7"));
 
         assert!(matches!(
             parse_to_agent(r#"{"type":"HEARTBEAT","id":"3"}"#).unwrap(),

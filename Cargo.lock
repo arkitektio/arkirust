@@ -112,7 +112,7 @@ dependencies = [
 
 [[package]]
 name = "arkitekt"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "anyhow",
  "arkitekt-core",
@@ -132,7 +132,7 @@ dependencies = [
 
 [[package]]
 name = "arkitekt-core"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "anyhow",
  "arkitekt-spec",
@@ -144,7 +144,7 @@ dependencies = [
 
 [[package]]
 name = "arkitekt-embassy"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "anyhow",
  "arkitekt-core",
@@ -157,11 +157,12 @@ dependencies = [
  "embassy-time",
  "embedded-io-async",
  "embedded-nal-async",
- "embedded-tls",
  "fakts",
- "rand_core 0.6.4",
+ "getrandom 0.2.15",
  "rekuest",
  "rekuest-session",
+ "rustls",
+ "rustls-rustcrypto",
  "serde_json",
  "sha1",
  "spin 0.10.1",
@@ -170,7 +171,7 @@ dependencies = [
 
 [[package]]
 name = "arkitekt-examples"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "anyhow",
  "arkitekt",
@@ -187,7 +188,7 @@ dependencies = [
 
 [[package]]
 name = "arkitekt-lovekit"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "anyhow",
  "arkitekt",
@@ -208,7 +209,7 @@ dependencies = [
 
 [[package]]
 name = "arkitekt-macros"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "heck 0.5.0",
  "proc-macro-crate",
@@ -258,7 +259,7 @@ dependencies = [
 
 [[package]]
 name = "arkitekt-mikro"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "anyhow",
  "arkitekt",
@@ -277,7 +278,7 @@ dependencies = [
 
 [[package]]
 name = "arkitekt-rath"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "async-trait",
  "fakts",
@@ -294,7 +295,7 @@ dependencies = [
 
 [[package]]
 name = "arkitekt-serve"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "anyhow",
  "arkitekt-core",
@@ -319,7 +320,7 @@ dependencies = [
 
 [[package]]
 name = "arkitekt-spec"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "anyhow",
  "arkitekt-macros",
@@ -346,7 +347,7 @@ dependencies = [
 
 [[package]]
 name = "arkitekt-tokio"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "anyhow",
  "arkitekt-core",
@@ -364,7 +365,7 @@ dependencies = [
 
 [[package]]
 name = "arkitekt-web"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "anyhow",
  "arkitekt-core",
@@ -846,12 +847,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2459377285ad874054d797f3ccebf984978aa39129f6eafde5cdc8315b612f8"
 
 [[package]]
-name = "const-oid"
-version = "0.10.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6ef517f0926dd24a1582492c791b6a4818a4d94e789a334894aa15b0d12f55c"
-
-[[package]]
 name = "convert_case"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1292,38 +1287,10 @@ version = "0.7.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e7c1832837b905bbfb5101e07cc24c8deddf52f93225eee6ead5f4d63d53ddcb"
 dependencies = [
- "const-oid 0.9.6",
+ "const-oid",
+ "pem-rfc7468",
  "zeroize",
 ]
-
-[[package]]
-name = "der"
-version = "0.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a878c850e9e421b20262e9b41f9c860e4785fa07541c266b62ff9d1ef998a80a"
-dependencies = [
- "const-oid 0.10.2",
- "der_derive",
- "heapless",
- "time",
-]
-
-[[package]]
-name = "der_derive"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "59600e2c2d636fde9b65e99cc6445ac770c63d3628195ff39932b8d6d7409903"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
-name = "deranged"
-version = "0.5.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e9de72ce2ad1f90dc62fa25f0f430ef85eb4b0d8fa0be4f30373bc40a21d28e"
 
 [[package]]
 name = "derive_more"
@@ -1370,7 +1337,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9ed9a281f7bc9b7576e61468ba615a66a5c8cfdff42420a70aa82701a3b1e292"
 dependencies = [
  "block-buffer 0.10.4",
- "const-oid 0.9.6",
+ "const-oid",
  "crypto-common 0.1.6",
  "subtle",
 ]
@@ -1448,11 +1415,12 @@ version = "0.16.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ee27f32b5c5292967d2d4a9d7f1e0b0aed2c15daded5a60300e4abb9d8020bca"
 dependencies = [
- "der 0.7.10",
+ "der",
  "digest 0.10.7",
  "elliptic-curve",
  "rfc6979",
  "signature",
+ "spki",
 ]
 
 [[package]]
@@ -1498,6 +1466,8 @@ dependencies = [
  "generic-array",
  "group",
  "hkdf",
+ "pem-rfc7468",
+ "pkcs8",
  "rand_core 0.6.4",
  "sec1",
  "subtle",
@@ -1640,33 +1610,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "embedded-tls"
-version = "0.19.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ff3c16c9cedcab3ef5c79fd46349152adbb98f997b937cb1ead7655f5c07e43"
-dependencies = [
- "aes-gcm",
- "const-oid 0.10.2",
- "der 0.8.2",
- "digest 0.10.7",
- "ecdsa",
- "embedded-io",
- "embedded-io-async",
- "generic-array",
- "heapless",
- "hkdf",
- "hmac",
- "p256",
- "p384",
- "portable-atomic",
- "rand_core 0.6.4",
- "rsa",
- "sha2",
- "signature",
- "typenum",
-]
-
-[[package]]
 name = "equivalent"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1704,7 +1647,7 @@ dependencies = [
 
 [[package]]
 name = "fakts"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "arkitekt-mesh",
  "arkitekt-spec",
@@ -3280,12 +3223,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "num-conv"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "521739c6d2bac4aa25192232afe6841231376b2b26d4d9fae5ecf8ca5772e441"
-
-[[package]]
 name = "num-integer"
 version = "0.1.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3685,6 +3622,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "pem-rfc7468"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "88b39c9bfcfc231068454382784bb460aae594343fb030d46e9f50a645418412"
+dependencies = [
+ "base64ct",
+]
+
+[[package]]
 name = "percent-encoding"
 version = "2.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3719,8 +3665,18 @@ version = "0.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8ffb9f10fa047879315e6625af03c164b16962a5368d724ed16323b68ace47f"
 dependencies = [
- "der 0.7.10",
+ "der",
  "pkcs8",
+ "spki",
+]
+
+[[package]]
+name = "pkcs5"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e847e2c91a18bfa887dd028ec33f2fe6f25db77db3619024764914affe8b69a6"
+dependencies = [
+ "der",
  "spki",
 ]
 
@@ -3730,7 +3686,8 @@ version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f950b2377845cebe5cf8b5165cb3cc1a5e0fa5cfa3e1f7f55707d8fd82e0a7b7"
 dependencies = [
- "der 0.7.10",
+ "der",
+ "pkcs5",
  "spki",
 ]
 
@@ -3777,12 +3734,6 @@ checksum = "d8a2f0d8d040d7848a709caf78912debcc3f33ee4b3cac47d73d1e1069e83507"
 dependencies = [
  "portable-atomic",
 ]
-
-[[package]]
-name = "powerfmt"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a6394b9e965e73d0a289ee54f589087e2c676aedf60885baf52c76b771e4958"
 
 [[package]]
 name = "ppv-lite86"
@@ -4162,7 +4113,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "rekuest"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "anyhow",
  "arkitekt-rath",
@@ -4203,7 +4154,7 @@ dependencies = [
 
 [[package]]
 name = "rekuest-protocol"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "arkitekt-spec",
  "serde",
@@ -4213,7 +4164,7 @@ dependencies = [
 
 [[package]]
 name = "rekuest-session"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "rekuest-protocol",
  "serde",
@@ -4332,7 +4283,7 @@ version = "0.9.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8573f03f5883dcaebdfcf4725caa1ecb9c15b2ef50c43a07b816e06799bb12d"
 dependencies = [
- "const-oid 0.9.6",
+ "const-oid",
  "digest 0.10.7",
  "num-bigint-dig",
  "num-integer",
@@ -4417,7 +4368,7 @@ dependencies = [
  "once_cell",
  "ring",
  "rustls-pki-types",
- "rustls-webpki",
+ "rustls-webpki 0.103.15",
  "subtle",
  "zeroize",
 ]
@@ -4458,7 +4409,7 @@ dependencies = [
  "rustls",
  "rustls-native-certs",
  "rustls-platform-verifier-android",
- "rustls-webpki",
+ "rustls-webpki 0.103.15",
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
@@ -4470,6 +4421,47 @@ name = "rustls-platform-verifier-android"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eec689c0bc40ff2458a5977b6619cb718087084a18e02a131c599b62d05e1a5f"
+
+[[package]]
+name = "rustls-rustcrypto"
+version = "0.0.2-alpha"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f12052947763ab8515f753315357599e9b0b4dab3b8ba15f30f725fe6d025557"
+dependencies = [
+ "aead",
+ "aes-gcm",
+ "chacha20poly1305",
+ "crypto-common 0.1.6",
+ "der",
+ "digest 0.10.7",
+ "ecdsa",
+ "ed25519-dalek",
+ "hmac",
+ "p256",
+ "p384",
+ "paste",
+ "pkcs8",
+ "rand_core 0.6.4",
+ "rsa",
+ "rustls",
+ "rustls-pki-types",
+ "rustls-webpki 0.102.8",
+ "sec1",
+ "sha2",
+ "signature",
+ "x25519-dalek",
+]
+
+[[package]]
+name = "rustls-webpki"
+version = "0.102.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "64ca1bc8749bd4cf37b5ce386cc146580777b4e8572c7b97baf22c83f444bee9"
+dependencies = [
+ "ring",
+ "rustls-pki-types",
+ "untrusted",
+]
 
 [[package]]
 name = "rustls-webpki"
@@ -4547,8 +4539,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d3e97a565f76233a6003f9f5c54be1d9c5bdfa3eccfb189469f11ec4901c47dc"
 dependencies = [
  "base16ct",
- "der 0.7.10",
+ "der",
  "generic-array",
+ "pkcs8",
  "subtle",
  "zeroize",
 ]
@@ -4816,7 +4809,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d91ed6c858b01f942cd56b37a94b3e0a1798290327d1236e4d9cf4eaca44d29d"
 dependencies = [
  "base64ct",
- "der 0.7.10",
+ "der",
 ]
 
 [[package]]
@@ -5015,24 +5008,6 @@ dependencies = [
  "cfg-if",
  "once_cell",
 ]
-
-[[package]]
-name = "time"
-version = "0.3.55"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cdb87b95ec50ddfa440816d227a17b2ccbdda963a316a727fda0fc4334f7d134"
-dependencies = [
- "deranged",
- "num-conv",
- "powerfmt",
- "time-core",
-]
-
-[[package]]
-name = "time-core"
-version = "0.1.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e1c906769ad99c88eaa54e728060edef082f8e358ff32030cb7c7d315e81109"
 
 [[package]]
 name = "tinystr"

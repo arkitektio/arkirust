@@ -575,6 +575,7 @@ fn build_assign(
         args,
         message: None,
         user,
+        assigner: None,
         org: "fastapi".into(),
         action: "api_call".into(),
         implementation: implementation.unwrap_or_else(|| "fastapi".into()),

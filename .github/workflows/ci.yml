@@ -149,6 +149,9 @@ jobs:
       # ... and without std, for a microcontroller (embassy).
       - run: cargo clippy -p rekuest -p fakts -p arkitekt-rath -p arkitekt-spec --no-default-features --features rekuest/rath,arkitekt-spec/declare --target thumbv7em-none-eabihf -- -D warnings
       - run: cargo clippy -p arkitekt-embassy -p arkitekt-core --target thumbv7em-none-eabihf -- -D warnings
+      # An app on embassy that also depends on arkitekt-spec with its defaults: feature
+      # unification turns spec's std on under rekuest built without it.
+      - run: cargo check -p arkitekt-embassy -p arkitekt-spec
       - run: cargo clippy -p rekuest -p fakts -p arkitekt-rath --no-default-features --features rekuest/web,rekuest/rath,fakts/std,arkitekt-rath/std --target wasm32-unknown-unknown -- -D warnings
       - run: cargo clippy -p arkitekt-web --target wasm32-unknown-unknown -- -D warnings
       - run: wasm-pack test --node

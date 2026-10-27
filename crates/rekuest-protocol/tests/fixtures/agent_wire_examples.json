@@ -158,23 +158,49 @@
         "agent_mappings": {
           "key": "agent-1"
         },
-        "demo_state": {
-          "key": {
-            "any": [
-              1,
-              "two"
-            ]
+        "vocab": 2,
+        "catalogs": [
+          "ui@1"
+        ],
+        "locals": [
+          {
+            "key": "key-1",
+            "kind": "INT",
+            "default": 1,
+            "persist": true
+          }
+        ],
+        "demo": {
+          "args": {
+            "key": {
+              "any": [
+                1,
+                "two"
+              ]
+            }
           }
         },
-        "catalog": "catalog-1",
-        "services": [
+        "queries": [
           {
             "key": "key-1",
             "service": "service-1",
-            "version": "version-1",
-            "schema_hash": "schema_hash-1"
+            "document": "query Q { q }",
+            "variables": [],
+            "poll": 1.5,
+            "more": "items"
           }
-        ]
+        ],
+        "subscriptions": [
+          {
+            "key": "key-1",
+            "service": "service-1",
+            "document": "subscription S { s }",
+            "variables": [],
+            "keep": 7,
+            "history": "key-1"
+          }
+        ],
+        "module": "module-1"
       }
     },
     "INTERRUPTED": {
@@ -462,23 +488,49 @@
         "agent_mappings": {
           "key": "agent-1"
         },
-        "demo_state": {
-          "key": {
-            "any": [
-              1,
-              "two"
-            ]
+        "vocab": 2,
+        "catalogs": [
+          "ui@1"
+        ],
+        "locals": [
+          {
+            "key": "key-1",
+            "kind": "INT",
+            "default": 1,
+            "persist": true
+          }
+        ],
+        "demo": {
+          "args": {
+            "key": {
+              "any": [
+                1,
+                "two"
+              ]
+            }
           }
         },
-        "catalog": "catalog-1",
-        "services": [
+        "queries": [
           {
             "key": "key-1",
             "service": "service-1",
-            "version": "version-1",
-            "schema_hash": "schema_hash-1"
+            "document": "query Q { q }",
+            "variables": [],
+            "poll": 1.5,
+            "more": "items"
           }
-        ]
+        ],
+        "subscriptions": [
+          {
+            "key": "key-1",
+            "service": "service-1",
+            "document": "subscription S { s }",
+            "variables": [],
+            "keep": 7,
+            "history": "key-1"
+          }
+        ],
+        "module": "module-1"
       }
     }
   },
@@ -500,6 +552,7 @@
       },
       "message": "message-1",
       "user": "user-1",
+      "assigner": "assigner-1",
       "org": "org-1",
       "action": "action-1",
       "implementation": "implementation-1",
