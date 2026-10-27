@@ -896,7 +896,14 @@ mod tests {
         let ToAgent::Assign(delegated) = delegated else {
             panic!()
         };
-        assert_eq!((delegated.user.as_str(), delegated.assigner.as_deref(), delegated.org.as_str()), ("agent-user", Some("human"), "lok#7"));
+        assert_eq!(
+            (
+                delegated.user.as_str(),
+                delegated.assigner.as_deref(),
+                delegated.org.as_str()
+            ),
+            ("agent-user", Some("human"), "lok#7")
+        );
 
         assert!(matches!(
             parse_to_agent(r#"{"type":"HEARTBEAT","id":"3"}"#).unwrap(),
