@@ -1,6 +1,115 @@
 # CHANGELOG
 
 
+## v0.17.0 (2026-10-27)
+
+### Bug Fixes
+
+- **embassy**: Meshhandoff answers later logins at once
+  ([`534323c`](https://github.com/arkitektio/arkirust/commit/534323ca6758e062ad70775220e53c30ea78236e))
+
+A board logs in again after an agent or Wi-Fi failure; fakts then asks its joiner again, and the
+  mesh task, busy running the node, never answered: the login hung until a reboot. MeshHandoff
+  remembers that the node joined and answers Direct at once (until stay_off or failed). mesh_route
+  checks a second join is answered within 100 ms.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+- **embassy**: Tls on rustls's unbuffered client, cancel-safe reads
+  ([`b0f73b3`](https://github.com/arkitektio/arkirust/commit/b0f73b3c4320cafab2b3a51931325b85bc2ad02e))
+
+embedded-tls 0.19 reads each record header into its stack: a read dropped by a select (the agent's
+  websocket, the mesh's DERP and control loops) lost those bytes, and the stream broke under load.
+  Over DERP a 256 KiB echo stalled every time; 64 KiB passed.
+
+conn::open now speaks TLS 1.3 or 1.2 through rustls's unbuffered client with the RustCrypto
+  provider, without std (tls.rs): every buffer is the stream's, bytes count as consumed only once an
+  await returned, so reads are cancel-safe. Certificates are checked by webpki against Verify::Ca,
+  with the runtime's clock. On a board (target_os = "none") the crate registers the runtime's RNG
+  for getrandom, which the provider draws from. conn::open, Transport and TlsBuffers keep their
+  signatures.
+
+Checked: arkitekt-mesh's checks/embassy through it, 1 MiB over DERP (4.4 s; two regions; direct),
+  the lab's ionskale with DERP verified against its CA; public_tls with letsencrypt.org verified and
+  crates.io refused (another issuer); the scripted scenarios; builds for thumbv7em-none-eabihf and
+  xtensa-esp32s3-none-elf.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+### Code Style
+
+- Rustfmt the assigner hunks
+  ([`b2f1f5d`](https://github.com/arkitektio/arkirust/commit/b2f1f5d6976bd11f6f037fce22838bde429e9be0))
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+### Features
+
+- Blok v2 task bloks, task_local!, and the assigner on every Assign
+  ([`4a280f7`](https://github.com/arkitektio/arkirust/commit/4a280f73ab91d647c9938e8a97513906c20f0a33))
+
+- rekuest-protocol: TaskBlok speaks blok v2 (vocab, catalogs, locals, demo, queries, subscriptions,
+  module; demo_state, catalog and services are gone). - spec: `task_local!` declares a TaskLocal as
+  the spec crate is built, so feature unification cannot pick the wrong storage; rekuest's shelf
+  uses it. - Assign carries `assigner`, the human at the root of the task tree (the provenance
+  `rcb`), the same however deep the task was delegated; `Task::assigner()` falls back to `user` for
+  a server that does not send it. `org` is the organization's identifier, "<iss>#<org>".
+
+BREAKING CHANGE: TaskBlok's v1 fields (demo_state, catalog, services) are removed.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+- **embassy**: Conn::open_owned, a connection with its own record buffers
+  ([`5364388`](https://github.com/arkitektio/arkirust/commit/53643882180454b5feadde0d214848fea4845fbf))
+
+conn::open borrows the caller's TlsBuffers for a connection's life, which suits one connection at a
+  time (serve_http, the agent). A mesh node opens control and two DERP connections at once, again on
+  every reconnect: open_owned gives each its own buffers, freed with it. The
+
+TLS stream holds either (tls::Buf). checks/embassy's mesh_route uses it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+- **fakts,embassy**: A mesh the platform routes itself (RFC-9 phase 7b)
+  ([`706e170`](https://github.com/arkitektio/arkirust/commit/706e170fd6825038c47d8d8d7fd1706d023a8ef7))
+
+fakts: MeshJoiner::join returns a MeshRoute: Proxy(url), as before, or Direct, the platform's own
+  TCP reaching mesh addresses (a board, where no local proxy exists). With Direct, mesh aliases are
+  challenged and used through the ordinary Host, without a proxy, with std or without; before,
+  without std they were skipped.
+
+arkitekt-embassy: route::Routed, a TcpConnect and Dns over the mesh for
+
+the tailnet (100.64.0.0/10, fd7a:115c:a1e0::/48, and the names the mesh resolves there) and over the
+  network for the rest, given to serve_http and Board; route::MeshHandoff, the (Send) MeshJoiner
+  that hands the login's MeshJoin to the task running the mesh node (not Send) and answers Direct
+  once it joined. No dependency on a mesh crate.
+
+checks/embassy's mesh_route runs it on the host against arkitekt-mesh's lab: an
+  arkitekt-mesh-embassy node dialing through this crate's TLS, the handoff answering Direct, a
+  tailnet name fetched over the mesh and the lab's /key over the network, both through NetHost and
+  serve_http. Its embassy-net needs proto-ipv6 beside the mesh (smoltcp's IPv6 unifies on).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+### Performance Improvements
+
+- **embassy**: Tls buffers grow in 4 KiB steps; tls_memory measures them
+  ([`a572413`](https://github.com/arkitektio/arkirust/commit/a57241385e7d6546e77aea5ab80b90d196d53e15))
+
+Doubling grew the ciphertext buffer to 32 KiB around a 16 KiB record and the plaintext one with it.
+  Both now grow to what is needed, in 4 KiB steps. checks/embassy's tls_memory counts one
+  connection's heap on the host (the reactor warmed up first): about 39-43 KiB at the handshake peak
+  (ISRG Root X1, RSA), 21 KiB held open, 38 KiB reading a small response, 79 KiB streaming a 92 KB
+  page (embedded-tls held its two 16.6 KiB record buffers, 33 KiB, from the start).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+### Breaking Changes
+
+- Taskblok's v1 fields (demo_state, catalog, services) are removed.
+
+
 ## v0.16.0 (2026-10-25)
 
 ### Features
