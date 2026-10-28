@@ -75,6 +75,8 @@ mod service;
 /// * The return value (`T` or `Result<T, E>`) is inserted into the context,
 ///   so actions can `#[inject]` it.
 /// * `name = "…"` names the service (default: the function name).
+/// * `scopes = ["…"]` are what the client's operations need (the Python
+///   client's `__scopes__`); they go into the app's manifest.
 #[proc_macro_attribute]
 pub fn service(attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut options = service::ServiceOptions::default();

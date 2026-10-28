@@ -6,7 +6,7 @@ use arkitekt::{Alias, App, Fakts, Requirement, Service};
 pub struct Client;
 
 /// A client for testing.
-#[arkitekt::service(name = "thing")]
+#[arkitekt::service(name = "thing", scopes = ["thing_write", "thing_read"])]
 pub async fn thing(
     #[require("live.arkitekt.thing", "Where things live")] api: Alias,
     #[require("live.arkitekt.s3")] files: Option<Alias>,
@@ -51,6 +51,45 @@ fn manifest_collects_service_requirements() {
         .map(|r| r.key.as_str())
         .collect();
     assert_eq!(keys, ["api", "files", "endpoint"]);
+}
+
+/// As the Python client's: `openid`, the app's own, and its services'.
+#[test]
+fn manifest_scopes_are_openid_the_apps_and_its_services() {
+    assert_eq!(thing.scopes(), ["thing_write", "thing_read"]);
+    assert!(plain.scopes().is_empty());
+    let manifest = arkitekt::manifest(
+        &App::new("app", "0.1.0")
+            .scopes(["thing_read", "own"])
+            .service(thing)
+            .service(plain),
+        None,
+    );
+    assert_eq!(
+        manifest.scopes,
+        ["openid", "own", "thing_read", "thing_write"]
+    );
+}
+
+/// A rekuest agent asks for rekuest's scopes, as `run(app)` does in Python.
+#[test]
+fn an_agent_asks_for_rekuests_scopes() {
+    #[arkitekt::action]
+    async fn noop() {}
+
+    let agent = arkitekt::manifest(&App::new("app", "0.1.0").action(noop), None);
+    assert_eq!(
+        agent.scopes,
+        [
+            "openid",
+            "rekuest_agent",
+            "rekuest_call",
+            "rekuest_read",
+            "rekuest_write"
+        ]
+    );
+    let no_actions = arkitekt::manifest(&App::new("app", "0.1.0"), None);
+    assert_eq!(no_actions.scopes, ["openid"]);
 }
 
 /// Desktop apps spawn these: they must stay `Send` through the platform.

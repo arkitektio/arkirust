@@ -56,7 +56,7 @@ impl App {
             version: version.into(),
             description: None,
             logo: None,
-            scopes: vec!["openid".into()],
+            scopes: vec![],
             public_sources: vec![],
             services: vec![],
             registry: Registry::new(),
@@ -73,6 +73,8 @@ impl App {
         self
     }
 
+    /// Scopes the app asks for itself, beside `openid` and what its
+    /// services' clients need.
     pub fn scopes<I: IntoIterator<Item = S>, S: Into<String>>(mut self, scopes: I) -> Self {
         self.scopes = scopes.into_iter().map(Into::into).collect();
         self
@@ -167,7 +169,8 @@ impl App {
 
     /// The manifest, derived from the declaration: the requirements are
     /// exactly what whoever serves the app (`provider`: a rekuest agent
-    /// needs rekuest, an app served over HTTP nothing) and the services need.
+    /// needs rekuest, an app served over HTTP nothing) and the services need;
+    /// the scopes are `openid`, the app's own and its services'.
     pub fn manifest(&self, device_id: Option<String>, provider: &[Requirement]) -> Manifest {
         let mut requirements = provider.to_vec();
         for service in &self.services {
@@ -181,7 +184,12 @@ impl App {
             }
         }
         let mut manifest = Manifest::new(&self.identifier, &self.version);
-        manifest.scopes = self.scopes.clone();
+        let mut scopes = Vec::from([String::from("openid")]);
+        scopes.extend(self.scopes.iter().cloned());
+        scopes.extend(self.services.iter().flat_map(|s| s.scopes()));
+        scopes.sort();
+        scopes.dedup();
+        manifest.scopes = scopes;
         manifest.logo = self.logo.clone();
         manifest.description = self.description.clone();
         manifest.public_sources = self.public_sources.clone();

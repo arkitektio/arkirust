@@ -34,6 +34,13 @@ pub trait Service: Send + Sync + 'static {
     /// The instances this service needs, keyed by requirement key.
     fn requirements(&self) -> Vec<Requirement>;
 
+    /// What an app using this service has to be allowed to do there: the
+    /// scopes its client's operations need, as the service names them
+    /// (`mikro_write`). They go into the app's manifest beside its own.
+    fn scopes(&self) -> Vec<String> {
+        Vec::new()
+    }
+
     /// Build the client(s) and insert them into `clients`.
     async fn build(&self, wiring: &dyn Wiring, clients: &mut ContextBuilder) -> anyhow::Result<()>;
 }

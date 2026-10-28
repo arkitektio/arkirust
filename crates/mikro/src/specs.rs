@@ -10,7 +10,7 @@ use crate::Mikro;
 ///
 /// Use it with `App::service(mikro::service)`; actions then `#[inject]` a
 /// [`Mikro`] client.
-#[arkitekt::service(name = "mikro")]
+#[arkitekt::service(name = "mikro", scopes = ["mikro_annotate", "mikro_read", "mikro_write"])]
 pub fn service(
     #[require(
         "live.arkitekt.mikro",

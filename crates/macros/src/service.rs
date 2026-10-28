@@ -10,6 +10,7 @@ use crate::{generic_types, last_segment, result_inner};
 #[derive(Default)]
 pub(crate) struct ServiceOptions {
     name: Option<LitStr>,
+    scopes: Vec<LitStr>,
     krate: Option<Path>,
 }
 
@@ -17,10 +18,23 @@ impl ServiceOptions {
     pub(crate) fn parse(&mut self, meta: syn::meta::ParseNestedMeta) -> syn::Result<()> {
         if meta.path.is_ident("name") {
             self.name = Some(meta.value()?.parse()?);
+        } else if meta.path.is_ident("scopes") {
+            let scopes: syn::ExprArray = meta.value()?.parse()?;
+            for scope in scopes.elems {
+                match scope {
+                    syn::Expr::Lit(syn::ExprLit {
+                        lit: syn::Lit::Str(scope),
+                        ..
+                    }) => self.scopes.push(scope),
+                    other => {
+                        return Err(syn::Error::new(other.span(), "a scope is a string literal"))
+                    }
+                }
+            }
         } else if meta.path.is_ident("crate") {
             self.krate = Some(meta.value()?.parse()?);
         } else {
-            return Err(meta.error("unknown service option; expected name or crate"));
+            return Err(meta.error("unknown service option; expected name, scopes or crate"));
         }
         Ok(())
     }
@@ -156,6 +170,7 @@ pub(crate) fn expand_service(
     let fn_ident = function.sig.ident.clone();
     let fn_name = fn_ident.to_string().trim_start_matches("r#").to_owned();
     let name = options.name.as_ref().map(LitStr::value).unwrap_or(fn_name);
+    let scopes = &options.scopes;
     let vis = function.vis.clone();
 
     let returns_result = match &function.sig.output {
@@ -255,6 +270,10 @@ pub(crate) fn expand_service(
 
             fn requirements(&self) -> #p::Vec<#p::Requirement> {
                 #p::vec![#(#requirements),*]
+            }
+
+            fn scopes(&self) -> #p::Vec<#p::String> {
+                #p::vec![#(#p::String::from(#scopes)),*]
             }
 
             async fn build(

@@ -12,7 +12,7 @@ use crate::Lovekit;
 /// `livekit` is not dialled here: rooms are joined with a token lovekit hands
 /// out, by the LiveKit SDK (`Lovekit::connect_room`, feature `livekit`). The
 /// client keeps it, and `fakts` for a media server that is only on the mesh.
-#[arkitekt::service(name = "lovekit")]
+#[arkitekt::service(name = "lovekit", scopes = ["lovekit_publish", "lovekit_watch"])]
 pub fn service(
     #[require("live.arkitekt.lovekit", "Where rooms and their tokens are managed")] lovekit: Alias,
     #[require("io.livekit.livekit", "The media server rooms are hosted on")] livekit: Alias,

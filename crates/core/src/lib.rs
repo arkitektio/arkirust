@@ -286,14 +286,18 @@ impl<P> Runtime<P> {
 }
 
 /// The manifest of `app` served by a rekuest agent: its services'
-/// requirements, and rekuest's when it offers actions.
+/// requirements and scopes, and rekuest's when it offers actions.
 pub fn manifest(app: &App, device_id: Option<String>) -> arkitekt_spec::Manifest {
-    let agent = if app.provides() {
-        alloc::vec![rekuest::requirement()]
-    } else {
-        alloc::vec![]
-    };
-    app.manifest(device_id, &agent)
+    if !app.provides() {
+        return app.manifest(device_id, &[]);
+    }
+    let mut manifest = app.manifest(device_id, &[rekuest::requirement()]);
+    manifest
+        .scopes
+        .extend(rekuest::SCOPES.iter().map(|s| String::from(*s)));
+    manifest.scopes.sort();
+    manifest.scopes.dedup();
+    manifest
 }
 
 /// Services are built from the app's fakts: each requirement's alias, and
