@@ -50,8 +50,12 @@ pub enum Grant {
 
 /// How long an alias may take to answer its challenge.
 const CHALLENGE_TIMEOUT: Duration = Duration::from_secs(3);
-/// The same through the mesh proxy.
-const MESH_CHALLENGE_TIMEOUT: Duration = Duration::from_secs(20);
+/// The same through the mesh: the first request to a peer waits for its
+/// tunnel. On a board just provisioned that is a new node control has to
+/// announce, and DERP connections with full TLS handshakes of ~3 s each;
+/// 20 s was not always enough. A failed attempt costs this and the retry
+/// after it, so a wide limit is never slower for a mesh-only alias.
+const MESH_CHALLENGE_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Configures and loads a [`Fakts`] handle.
 pub struct FaktsBuilder {
