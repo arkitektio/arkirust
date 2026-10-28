@@ -1,6 +1,22 @@
 # CHANGELOG
 
 
+## v0.18.0 (2026-10-28)
+
+### Features
+
+- Apps ask for the scopes their services and rekuest need, as Python's do
+  ([`e334260`](https://github.com/arkitektio/arkirust/commit/e3342602c00d52318a5897924601f74401353336))
+
+A Service says what its client's operations need (Service::scopes, the #[service(scopes = [...])]
+  option); mikro and lovekit say what their Python clients' __scopes__ are. A manifest's scopes are
+  openid, the app's own and its services'; a rekuest agent's add rekuest::SCOPES (rekuest_agent,
+  _call, _read, _write), as run(app) does in Python. App::scopes adds to openid instead of replacing
+  it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+
 ## v0.17.1 (2026-10-28)
 
 ### Bug Fixes
