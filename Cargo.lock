@@ -112,7 +112,7 @@ dependencies = [
 
 [[package]]
 name = "arkitekt"
-version = "0.17.0"
+version = "0.17.1"
 dependencies = [
  "anyhow",
  "arkitekt-core",
@@ -132,7 +132,7 @@ dependencies = [
 
 [[package]]
 name = "arkitekt-core"
-version = "0.17.0"
+version = "0.17.1"
 dependencies = [
  "anyhow",
  "arkitekt-spec",
@@ -144,7 +144,7 @@ dependencies = [
 
 [[package]]
 name = "arkitekt-embassy"
-version = "0.17.0"
+version = "0.17.1"
 dependencies = [
  "anyhow",
  "arkitekt-core",
@@ -171,7 +171,7 @@ dependencies = [
 
 [[package]]
 name = "arkitekt-examples"
-version = "0.17.0"
+version = "0.17.1"
 dependencies = [
  "anyhow",
  "arkitekt",
@@ -188,7 +188,7 @@ dependencies = [
 
 [[package]]
 name = "arkitekt-lovekit"
-version = "0.17.0"
+version = "0.17.1"
 dependencies = [
  "anyhow",
  "arkitekt",
@@ -209,7 +209,7 @@ dependencies = [
 
 [[package]]
 name = "arkitekt-macros"
-version = "0.17.0"
+version = "0.17.1"
 dependencies = [
  "heck 0.5.0",
  "proc-macro-crate",
@@ -259,7 +259,7 @@ dependencies = [
 
 [[package]]
 name = "arkitekt-mikro"
-version = "0.17.0"
+version = "0.17.1"
 dependencies = [
  "anyhow",
  "arkitekt",
@@ -278,7 +278,7 @@ dependencies = [
 
 [[package]]
 name = "arkitekt-rath"
-version = "0.17.0"
+version = "0.17.1"
 dependencies = [
  "async-trait",
  "fakts",
@@ -295,7 +295,7 @@ dependencies = [
 
 [[package]]
 name = "arkitekt-serve"
-version = "0.17.0"
+version = "0.17.1"
 dependencies = [
  "anyhow",
  "arkitekt-core",
@@ -320,7 +320,7 @@ dependencies = [
 
 [[package]]
 name = "arkitekt-spec"
-version = "0.17.0"
+version = "0.17.1"
 dependencies = [
  "anyhow",
  "arkitekt-macros",
@@ -347,7 +347,7 @@ dependencies = [
 
 [[package]]
 name = "arkitekt-tokio"
-version = "0.17.0"
+version = "0.17.1"
 dependencies = [
  "anyhow",
  "arkitekt-core",
@@ -365,7 +365,7 @@ dependencies = [
 
 [[package]]
 name = "arkitekt-web"
-version = "0.17.0"
+version = "0.17.1"
 dependencies = [
  "anyhow",
  "arkitekt-core",
@@ -1647,7 +1647,7 @@ dependencies = [
 
 [[package]]
 name = "fakts"
-version = "0.17.0"
+version = "0.17.1"
 dependencies = [
  "arkitekt-mesh",
  "arkitekt-spec",
@@ -4113,7 +4113,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "rekuest"
-version = "0.17.0"
+version = "0.17.1"
 dependencies = [
  "anyhow",
  "arkitekt-rath",
@@ -4154,7 +4154,7 @@ dependencies = [
 
 [[package]]
 name = "rekuest-protocol"
-version = "0.17.0"
+version = "0.17.1"
 dependencies = [
  "arkitekt-spec",
  "serde",
@@ -4164,7 +4164,7 @@ dependencies = [
 
 [[package]]
 name = "rekuest-session"
-version = "0.17.0"
+version = "0.17.1"
 dependencies = [
  "rekuest-protocol",
  "serde",

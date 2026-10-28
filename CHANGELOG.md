@@ -1,6 +1,50 @@
 # CHANGELOG
 
 
+## v0.17.1 (2026-10-28)
+
+### Bug Fixes
+
+- **embassy**: Its own TLS session store, with or without rustls's std
+  ([`db5019a`](https://github.com/arkitektio/arkirust/commit/db5019a16d142d90787802dc23fc28eac373f85a))
+
+rustls's ClientSessionMemoryCache is made with a MakeMutex only without its std feature; a build
+  where another crate turns it on (the workspace's) did not compile. A small ClientSessionStore on a
+  spin lock works either way. A handshake's kind (full or resumed) is logged at debug.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+### Performance Improvements
+
+- **embassy**: Tls sessions resumed, more roots, kept HTTP connections
+  ([`d616179`](https://github.com/arkitektio/arkirust/commit/d616179634f90ff745dd5cef7d1ebf4b1130b288))
+
+A board checked the hub's whole certificate chain on every connection (about 4.4 s on an ESP32-S3),
+  and fakts' HTTP opened one per request:
+
+- tls::config makes one config per Verify and hands it out again, with a session cache (rustls'
+  ClientSessionMemoryCache without std, on spin locks): rustls resumes only under the verifier a
+  session was made with, so a new config per connection never resumed. A resumed handshake takes 0.4
+  s on the board, not 3.3 s. - Verify::Roots: several CAs; the chain stops at the first one it
+  reaches. With Let's Encrypt's Root YE beside X1, the ECDSA chain costs two signatures, not four
+  (4.4 s -> 3.3 s for a full handshake). - serve_http keeps the last connection open for the next
+  request to its host (http1::exchange_kept: chunked trailers read to their end, the connection kept
+  only if the response's end was its own and the server did not say close); a kept connection that
+  closed before answering is tried once more on a new one.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+### Testing
+
+- **stack**: The demo organization pinned by id, as lok now requires
+  ([`d43e717`](https://github.com/arkitektio/arkirust/commit/d43e7174597f4faa8f95cc615b7fd72ddbf5b419))
+
+lok's ensureorganizations needs organizations[].id since 79e4555; the e2e stack's lok-migrate failed
+  on the latest image without it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+
 ## v0.17.0 (2026-10-27)
 
 ### Bug Fixes
