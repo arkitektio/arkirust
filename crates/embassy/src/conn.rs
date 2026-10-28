@@ -183,5 +183,6 @@ where
     let tls = TlsStream::connect(socket, host, config, buffers)
         .await
         .map_err(|e| format!("TLS with {host}:{port}: {e:?}"))?;
+    tracing::debug!("TLS with {host}:{port}: {:?}", tls.handshake_kind());
     Ok(Transport::Tls(Box::new(tls)))
 }

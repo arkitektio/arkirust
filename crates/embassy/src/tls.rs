@@ -23,13 +23,15 @@ use alloc::vec::Vec;
 
 use embedded_io_async::{ErrorKind, Read, Write};
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
-use rustls::client::{ClientSessionMemoryCache, Resumption, UnbufferedClientConnection};
+use rustls::client::{
+    ClientSessionStore, Resumption, Tls12ClientSessionValue, Tls13ClientSessionValue,
+    UnbufferedClientConnection,
+};
 use rustls::crypto::CryptoProvider;
-use rustls::lock::{Lock, MakeMutex, MutexGuard, Poisoned};
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::time_provider::TimeProvider;
 use rustls::unbuffered::{ConnectionState, EncodeError, EncryptError, UnbufferedStatus};
-use rustls::{ClientConfig, DigitallySignedStruct, RootCertStore, SignatureScheme};
+use rustls::{ClientConfig, DigitallySignedStruct, NamedGroup, RootCertStore, SignatureScheme};
 
 use crate::conn::{ConnError, Verify};
 
@@ -126,34 +128,94 @@ impl ServerCertVerifier for Unverified {
     }
 }
 
-/// rustls's locks without std: spin mutexes.
-struct SpinLocks;
-
-struct SpinLock<T>(spin::Mutex<T>);
-
-impl<T> core::fmt::Debug for SpinLock<T> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_str("SpinLock")
-    }
-}
-
-impl<T: Send> Lock<T> for SpinLock<T> {
-    fn lock(&self) -> Result<MutexGuard<'_, T>, Poisoned> {
-        Ok(Box::new(self.0.lock()))
-    }
-}
-
-impl MakeMutex for SpinLocks {
-    fn make_mutex<T>(value: T) -> Arc<dyn Lock<T>>
-    where
-        T: Send + 'static,
-    {
-        Arc::new(SpinLock(spin::Mutex::new(value)))
-    }
-}
-
-/// Servers whose sessions a config keeps: 8 tickets each.
+/// Servers whose sessions a config keeps.
 const SESSION_SERVERS: usize = 8;
+/// TLS 1.3 tickets kept per server (rustls's own cache keeps as many).
+const TICKETS_PER_SERVER: usize = 8;
+
+/// What a config remembers of one server.
+struct Server {
+    name: ServerName<'static>,
+    kx_hint: Option<NamedGroup>,
+    tls12: Option<Tls12ClientSessionValue>,
+    /// Oldest first.
+    tls13: VecDeque<Tls13ClientSessionValue>,
+}
+
+/// The sessions to resume, on a spin lock: rustls's `ClientSessionMemoryCache`
+/// is made differently with and without its `std` feature, which another
+/// crate in the build may turn on. Least recently stored server goes first.
+#[derive(Default)]
+struct Sessions(spin::Mutex<VecDeque<Server>>);
+
+impl core::fmt::Debug for Sessions {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("Sessions")
+    }
+}
+
+impl Sessions {
+    /// Changes the server's entry, made if new (the oldest dropped for it),
+    /// moved to the back.
+    fn store(&self, name: ServerName<'static>, change: impl FnOnce(&mut Server)) {
+        let mut servers = self.0.lock();
+        let mut server = match servers.iter().position(|s| s.name == name) {
+            Some(i) => servers.remove(i).expect("a found index"),
+            None => {
+                if servers.len() == SESSION_SERVERS {
+                    servers.pop_front();
+                }
+                Server {
+                    name,
+                    kx_hint: None,
+                    tls12: None,
+                    tls13: VecDeque::new(),
+                }
+            }
+        };
+        change(&mut server);
+        servers.push_back(server);
+    }
+
+    fn read<R>(&self, name: &ServerName<'_>, read: impl FnOnce(&mut Server) -> R) -> Option<R> {
+        self.0.lock().iter_mut().find(|s| s.name == *name).map(read)
+    }
+}
+
+impl ClientSessionStore for Sessions {
+    fn set_kx_hint(&self, name: ServerName<'static>, group: NamedGroup) {
+        self.store(name, |s| s.kx_hint = Some(group));
+    }
+
+    fn kx_hint(&self, name: &ServerName<'_>) -> Option<NamedGroup> {
+        self.read(name, |s| s.kx_hint).flatten()
+    }
+
+    fn set_tls12_session(&self, name: ServerName<'static>, value: Tls12ClientSessionValue) {
+        self.store(name, |s| s.tls12 = Some(value));
+    }
+
+    fn tls12_session(&self, name: &ServerName<'_>) -> Option<Tls12ClientSessionValue> {
+        self.read(name, |s| s.tls12.clone()).flatten()
+    }
+
+    fn remove_tls12_session(&self, name: &ServerName<'static>) {
+        self.read(name, |s| s.tls12 = None);
+    }
+
+    fn insert_tls13_ticket(&self, name: ServerName<'static>, value: Tls13ClientSessionValue) {
+        self.store(name, |s| {
+            if s.tls13.len() == TICKETS_PER_SERVER {
+                s.tls13.pop_front();
+            }
+            s.tls13.push_back(value);
+        });
+    }
+
+    fn take_tls13_ticket(&self, name: &ServerName<'static>) -> Option<Tls13ClientSessionValue> {
+        self.read(name, |s| s.tls13.pop_back()).flatten()
+    }
+}
 
 /// The configs made, one per [`Verify`] (a firmware has one or two).
 static CONFIGS: spin::Mutex<Vec<(Verify, Arc<ClientConfig>)>> = spin::Mutex::new(Vec::new());
@@ -192,9 +254,7 @@ fn make_config(verify: &Verify) -> Result<Arc<ClientConfig>, rustls::Error> {
             .with_custom_certificate_verifier(Arc::new(Unverified(provider)))
             .with_no_client_auth(),
     };
-    config.resumption = Resumption::store(Arc::new(ClientSessionMemoryCache::new::<SpinLocks>(
-        SESSION_SERVERS * 8,
-    )));
+    config.resumption = Resumption::store(Arc::new(Sessions::default()));
     Ok(Arc::new(config))
 }
 
@@ -472,6 +532,24 @@ pub type BoxedTls<'b, C> = Box<TlsStream<'b, C>>;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sessions_keep_the_servers_last_stored() {
+        let sessions = Sessions::default();
+        let name = |i: usize| ServerName::try_from(alloc::format!("s{i}.example")).unwrap();
+        for i in 0..=SESSION_SERVERS {
+            sessions.set_kx_hint(name(i), NamedGroup::X25519);
+        }
+        // The first went for the one over.
+        assert_eq!(sessions.kx_hint(&name(0)), None);
+        assert_eq!(sessions.kx_hint(&name(1)), Some(NamedGroup::X25519));
+        // Storing again moves a server to the back: s2 goes next, not s1.
+        sessions.set_kx_hint(name(1), NamedGroup::secp256r1);
+        sessions.set_kx_hint(name(SESSION_SERVERS + 1), NamedGroup::X25519);
+        assert_eq!(sessions.kx_hint(&name(1)), Some(NamedGroup::secp256r1));
+        assert_eq!(sessions.kx_hint(&name(2)), None);
+        assert_eq!(sessions.0.lock().len(), SESSION_SERVERS);
+    }
 
     #[test]
     fn one_config_per_verify_so_sessions_resume() {
