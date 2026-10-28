@@ -107,7 +107,8 @@ datalayer:
 
 
 organizations:
-  - name: demo
+  - id: 1
+    name: demo
     identifier: demo
     owner: demo
     auto_configure: true
