@@ -17,15 +17,22 @@ agent, fakts' login and rath's GraphQL over embedded-nal-async TCP and TLS
 the RustCrypto provider, without std (`tls`). Its reads are cancel-safe
 (every buffer is the stream's), which the agent's and the mesh's
 `select`s over a read need. The server's certificate chain and name are
-checked (webpki) against the CA given as `Verify::Ca`;
-`Verify::Unverified` skips that and logs it. HTTP is a small
-HTTP/1.1 client of its own (one exchange per connection).
+checked (webpki) against the CA given as `Verify::Ca`, or any of those in
+`Verify::Roots`; `Verify::Unverified` skips that and logs it. HTTP is a
+small HTTP/1.1 client of its own; `serve_http` keeps the last connection
+open for the next request to its host.
 
-`Verify::Ca` is one certificate (DER): the root that signed the *last*
-certificate the server sends. Only that one is trusted, so it is not
-enough that some root of the chain is in a store. For Let's Encrypt it is
-ISRG Root X1 (RSA): its chains end in a certificate it signed, ECDSA
-(YE1 → Root YE → ISRG Root X2) or RSA (R10, R11, …).
+A CA (DER) is trusted wherever the chain reaches it: webpki stops at the
+first certificate a trusted root signed. For Let's Encrypt, ISRG Root X1
+(RSA) signs the end of every chain, ECDSA (YE1 → Root YE → ISRG Root X2 →
+X1) or RSA (R10, R11, …); with Root YE trusted as well, the ECDSA chain
+stops after YE1: two signatures to check, not four (one of them RSA-4096).
+On a board each one costs a second or so.
+
+Sessions are resumed (TLS 1.3 tickets): `tls::config` makes one config per
+`Verify` and hands it out again, since rustls resumes a session only under
+the verifier it was made with. A server shaken hands with before costs a
+key exchange, not its chain again (about 0.4 s on an ESP32-S3, not 3.3 s).
 
 The RustCrypto provider takes its randomness from getrandom; on a board
 (`target_os = "none"`) this crate registers the runtime's RNG for it.

@@ -6,6 +6,10 @@
 //! [`NetHost::send`] only hands it a request and waits for the reply, over
 //! embassy-sync channels (critical-section mutexes, so `Send`).
 //!
+//! The last connection stays open for the next request to its host (HTTP
+//! keep-alive): a TLS handshake costs a board seconds, a request on an open
+//! connection milliseconds.
+//!
 //! ```ignore
 //! static HOST: NetHost = NetHost::new();
 //! spawner.spawn(http_task(stack))?; // calls serve_http(&HOST, &TcpClient, &DnsSocket)
@@ -26,7 +30,7 @@ use embassy_sync::mutex::Mutex;
 use embedded_nal_async::{Dns, TcpConnect};
 use fakts::host::{Host, HostError, Method, Reply, Request};
 
-use crate::conn::{TlsBuffers, Verify};
+use crate::conn::{Transport, Verify};
 
 pub use crate::http1::{MAX_BODY, MAX_HEADERS};
 
@@ -98,59 +102,107 @@ pub async fn serve_http<T: TcpConnect, D: Dns>(
     dns: &D,
     verify: Verify,
 ) -> ! {
-    let mut buffers = TlsBuffers::default();
+    let mut kept: Option<Kept<'_, T>> = None;
     loop {
         let (id, request) = host.requests.receive().await;
         let timeout = request.timeout.unwrap_or(DEFAULT_TIMEOUT);
+        // The kept connection goes into the exchange and comes back if it
+        // can carry the next one; a timeout drops it with the exchange.
         let reply = match embassy_time::with_timeout(
             embassy_time::Duration::from_micros(timeout.as_micros() as u64),
-            exchange(tcp, dns, &verify, &mut buffers, &request),
+            exchange(tcp, dns, &verify, kept.take(), &request),
         )
         .await
         {
-            Ok(reply) => reply,
+            Ok((reply, again)) => {
+                kept = again;
+                reply
+            }
             Err(_) => Err(HostError(format!("{} did not answer in time", request.url))),
         };
         host.replies.send((id, reply)).await;
     }
 }
 
-/// One request on a connection of its own. Redirects are never followed:
+/// A connection left open, and where to.
+struct Kept<'a, T: TcpConnect + 'a> {
+    secure: bool,
+    name: String,
+    port: u16,
+    connection: Transport<'a, T::Connection<'a>>,
+}
+
+/// One request: on the kept connection if it goes to the same place (once
+/// more on a new one if that had closed before answering), else on a new
+/// one. Returns the connection to keep. Redirects are never followed:
 /// alias challenges need that, and the fakts server does not redirect.
-async fn exchange<T: TcpConnect, D: Dns>(
-    tcp: &T,
+async fn exchange<'a, T: TcpConnect, D: Dns>(
+    tcp: &'a T,
     dns: &D,
     verify: &Verify,
-    buffers: &mut TlsBuffers,
+    kept: Option<Kept<'a, T>>,
     request: &Request,
-) -> Result<Reply, HostError> {
+) -> (Result<Reply, HostError>, Option<Kept<'a, T>>) {
     let url = request.full_url();
     let failed = |e: String| HostError(format!("{url}: {e}"));
-    let (secure, name, port, path) =
-        split_url(&url).ok_or_else(|| HostError(format!("not an http url: {url}")))?;
-    let mut connection = crate::conn::open(tcp, dns, secure, &name, port, verify, buffers)
-        .await
-        .map_err(failed)?;
+    let Some((secure, name, port, path)) = split_url(&url) else {
+        return (Err(HostError(format!("not an http url: {url}"))), kept);
+    };
     let body = request.encoded_body();
+    let body = body.as_ref().map(|(t, b)| (*t, b.as_slice()));
     let headers: Vec<(&str, &str)> = request
         .headers
         .iter()
         .map(|(k, v)| (k.as_str(), v.as_str()))
         .collect();
-    let (status, body) = crate::http1::exchange(
-        &mut connection,
-        match request.method {
-            Method::Get => "GET",
-            Method::Post => "POST",
-        },
-        &authority(&name, port, secure),
-        &path,
-        &headers,
-        body.as_ref().map(|(t, b)| (*t, b.as_slice())),
-    )
-    .await
-    .map_err(failed)?;
-    Ok(Reply { status, body })
+    let method = match request.method {
+        Method::Get => "GET",
+        Method::Post => "POST",
+    };
+    let host = authority(&name, port, secure);
+    let mut reused = kept.filter(|k| k.secure == secure && k.name == name && k.port == port);
+    loop {
+        let fresh = reused.is_none();
+        tracing::debug!(
+            "{url}: on {} connection",
+            if fresh { "a new" } else { "the kept" }
+        );
+        let mut kept = match reused.take() {
+            Some(kept) => kept,
+            None => match crate::conn::open_owned(tcp, dns, secure, &name, port, verify).await {
+                Ok(connection) => Kept {
+                    secure,
+                    name: name.clone(),
+                    port,
+                    connection,
+                },
+                Err(e) => return (Err(failed(e)), None),
+            },
+        };
+        let exchanged = crate::http1::exchange_kept(
+            &mut kept.connection,
+            true,
+            method,
+            &host,
+            &path,
+            &headers,
+            body,
+        )
+        .await;
+        match exchanged {
+            Ok((status, body, reusable)) => {
+                return (Ok(Reply { status, body }), reusable.then_some(kept));
+            }
+            // The server closed the kept connection (idle): once more.
+            Err(e) if !fresh && e.unanswered => {
+                tracing::debug!(
+                    "{url}: the kept connection had closed ({}): a new one",
+                    e.reason
+                );
+            }
+            Err(e) => return (Err(failed(e.reason)), None),
+        }
+    }
 }
 
 /// `host[:port]`, the port left out when it is the scheme's.

@@ -1,6 +1,8 @@
-//! A small HTTP/1.1 client over any `embedded_io_async` stream: one exchange
-//! per connection (`Connection: close`), bodies by `Content-Length`, chunked,
-//! or until the connection ends. What fakts' and rath's requests need.
+//! A small HTTP/1.1 client over any `embedded_io_async` stream: bodies by
+//! `Content-Length`, chunked, or until the connection ends. What fakts' and
+//! rath's requests need. [`exchange`] is one exchange per connection
+//! (`Connection: close`); [`exchange_kept`] leaves the connection open for
+//! the next one when the response lets it.
 
 use alloc::format;
 use alloc::string::String;
@@ -23,7 +25,41 @@ pub async fn exchange<S: Read + Write>(
     headers: &[(&str, &str)],
     body: Option<(&str, &[u8])>,
 ) -> Result<(u16, Vec<u8>), String> {
-    let mut head = format!("{method} {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n");
+    exchange_kept(stream, false, method, host, path, headers, body)
+        .await
+        .map(|(status, body, _)| (status, body))
+        .map_err(|failed| failed.reason)
+}
+
+/// How an exchange failed.
+#[derive(Debug)]
+pub struct Failed {
+    pub reason: String,
+    /// No byte of a response came: on a kept connection the server may have
+    /// closed (idle), so the request can go again on a new one.
+    pub unanswered: bool,
+}
+
+/// As [`exchange`]; with `keep`, the connection is asked to stay open, and
+/// the third value says whether it can carry the next exchange (the
+/// response's end was its own, and the server did not say close).
+pub async fn exchange_kept<S: Read + Write>(
+    stream: &mut S,
+    keep: bool,
+    method: &str,
+    host: &str,
+    path: &str,
+    headers: &[(&str, &str)],
+    body: Option<(&str, &[u8])>,
+) -> Result<(u16, Vec<u8>, bool), Failed> {
+    let unanswered = |reason: String| Failed {
+        reason,
+        unanswered: true,
+    };
+    let mut head = format!("{method} {path} HTTP/1.1\r\nHost: {host}\r\n");
+    if !keep {
+        head.push_str("Connection: close\r\n");
+    }
     for (name, value) in headers {
         head.push_str(&format!("{name}: {value}\r\n"));
     }
@@ -36,24 +72,46 @@ pub async fn exchange<S: Read + Write>(
         head.push_str("Content-Length: 0\r\n");
     }
     head.push_str("\r\n");
-    stream.write_all(head.as_bytes()).await.map_err(io)?;
+    stream
+        .write_all(head.as_bytes())
+        .await
+        .map_err(|e| unanswered(io(e)))?;
     if let Some((_, bytes)) = body {
-        stream.write_all(bytes).await.map_err(io)?;
+        stream
+            .write_all(bytes)
+            .await
+            .map_err(|e| unanswered(io(e)))?;
     }
-    stream.flush().await.map_err(io)?;
+    stream.flush().await.map_err(|e| unanswered(io(e)))?;
 
     let mut reader = Reader {
         stream,
         buffer: vec![],
+        answered: false,
     };
+    let response = read_response(&mut reader, method, keep).await;
+    response.map_err(|reason| Failed {
+        reason,
+        unanswered: !reader.answered,
+    })
+}
+
+async fn read_response<S: Read>(
+    reader: &mut Reader<'_, S>,
+    method: &str,
+    keep: bool,
+) -> Result<(u16, Vec<u8>, bool), String> {
     let head = reader.until(b"\r\n\r\n", MAX_HEADERS).await?;
     let head = core::str::from_utf8(&head).map_err(|_| "a response head that is not text")?;
     let mut lines = head.split("\r\n");
-    let status = lines
-        .next()
-        .and_then(|line| line.split_whitespace().nth(1))
+    let status_line = lines.next().unwrap_or("");
+    let status = status_line
+        .split_whitespace()
+        .nth(1)
         .and_then(|code| code.parse::<u16>().ok())
         .ok_or_else(|| format!("no status in {head}"))?;
+    // HTTP/1.0 closes unless it says otherwise; this client does not ask it to.
+    let mut reusable = keep && status_line.starts_with("HTTP/1.1");
     let mut length = None;
     let mut chunked = false;
     for line in lines {
@@ -65,6 +123,10 @@ pub async fn exchange<S: Read + Write>(
             length = Some(value.parse::<usize>().map_err(|_| "a bad content-length")?);
         } else if name.eq_ignore_ascii_case("transfer-encoding") {
             chunked = value.to_ascii_lowercase().contains("chunked");
+        } else if name.eq_ignore_ascii_case("connection")
+            && value.to_ascii_lowercase().contains("close")
+        {
+            reusable = false;
         }
     }
     let body = if method == "HEAD" || status == 204 || status == 304 || (100..200).contains(&status)
@@ -87,6 +149,10 @@ pub async fn exchange<S: Read + Write>(
             body.extend(reader.exactly(size).await?);
             reader.until(b"\r\n", 2).await?;
         }
+        // The trailers, to the empty line: the next response starts after.
+        if keep {
+            while !reader.until(b"\r\n", MAX_HEADERS).await?.is_empty() {}
+        }
         body
     } else if let Some(length) = length {
         if length > MAX_BODY {
@@ -94,9 +160,12 @@ pub async fn exchange<S: Read + Write>(
         }
         reader.exactly(length).await?
     } else {
+        // Its end is the connection's.
+        reusable = false;
         reader.rest().await?
     };
-    Ok((status, body))
+    // Bytes beyond the response are none of ours.
+    Ok((status, body, reusable && reader.buffer.is_empty()))
 }
 
 fn io<E: core::fmt::Debug>(e: E) -> String {
@@ -107,12 +176,15 @@ fn io<E: core::fmt::Debug>(e: E) -> String {
 struct Reader<'s, S> {
     stream: &'s mut S,
     buffer: Vec<u8>,
+    /// Any byte came.
+    answered: bool,
 }
 
 impl<S: Read> Reader<'_, S> {
     async fn fill(&mut self) -> Result<bool, String> {
         let mut chunk = [0u8; 2048];
         let n = self.stream.read(&mut chunk).await.map_err(io)?;
+        self.answered |= n > 0;
         self.buffer.extend_from_slice(&chunk[..n]);
         Ok(n > 0)
     }
@@ -236,6 +308,115 @@ mod tests {
             assert!(sent.contains("authorization: Bearer t\r\n"));
             assert!(sent.ends_with("Content-Length: 2\r\n\r\n{}"));
         }
+    }
+
+    fn kept(stream: &mut Scripted) -> Result<(u16, Vec<u8>, bool), Failed> {
+        embassy_futures::block_on(exchange_kept(stream, true, "GET", "x", "/", &[], None))
+    }
+
+    /// A server: the next response once a request's head came, `chunk`
+    /// bytes per read.
+    struct Server {
+        responses: Vec<&'static [u8]>,
+        pending: Vec<u8>,
+        chunk: usize,
+        written: Vec<u8>,
+    }
+
+    impl embedded_io_async::ErrorType for Server {
+        type Error = Infallible;
+    }
+
+    impl Read for Server {
+        async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Infallible> {
+            let n = buf.len().min(self.chunk).min(self.pending.len());
+            buf[..n].copy_from_slice(&self.pending[..n]);
+            self.pending.drain(..n);
+            Ok(n)
+        }
+    }
+
+    impl Write for Server {
+        async fn write(&mut self, buf: &[u8]) -> Result<usize, Infallible> {
+            self.written.extend_from_slice(buf);
+            if self.written.ends_with(b"\r\n\r\n") && !self.responses.is_empty() {
+                let response = self.responses.remove(0);
+                self.pending.extend_from_slice(response);
+            }
+            Ok(buf.len())
+        }
+
+        async fn flush(&mut self) -> Result<(), Infallible> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_kept_connection_carries_the_next_exchange() {
+        for chunk in [1, 5, 4096] {
+            let mut server = Server {
+                responses: vec![
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi",
+                    b"HTTP/1.1 201 Created\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n0\r\nT: 1\r\n\r\n",
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\nz",
+                ],
+                pending: vec![],
+                chunk,
+                written: vec![],
+            };
+            let mut next = || {
+                embassy_futures::block_on(exchange_kept(
+                    &mut server,
+                    true,
+                    "GET",
+                    "x",
+                    "/",
+                    &[],
+                    None,
+                ))
+                .unwrap()
+            };
+            assert_eq!(next(), (200, b"hi".to_vec(), true));
+            assert_eq!(next(), (201, b"abc".to_vec(), true));
+            assert_eq!(next(), (200, b"z".to_vec(), true));
+            let sent = String::from_utf8(server.written).unwrap();
+            assert!(!sent.contains("Connection: close"), "{sent}");
+        }
+    }
+
+    #[test]
+    fn a_connection_the_response_ends_is_not_kept() {
+        for response in [
+            "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 1\r\n\r\nx",
+            "HTTP/1.0 200 OK\r\nContent-Length: 1\r\n\r\nx",
+            "HTTP/1.1 200 OK\r\n\r\nuntil the end",
+        ] {
+            let mut stream = Scripted {
+                response: response.as_bytes().to_vec(),
+                at: 0,
+                chunk: 4096,
+                written: vec![],
+            };
+            assert!(!kept(&mut stream).unwrap().2, "{response}");
+        }
+    }
+
+    #[test]
+    fn a_closed_kept_connection_is_unanswered() {
+        let mut stream = Scripted {
+            response: vec![],
+            at: 0,
+            chunk: 4096,
+            written: vec![],
+        };
+        assert!(kept(&mut stream).unwrap_err().unanswered);
+        let mut stream = Scripted {
+            response: b"HTTP/1.1 200 OK\r\nContent-Le".to_vec(),
+            at: 0,
+            chunk: 4096,
+            written: vec![],
+        };
+        assert!(!kept(&mut stream).unwrap_err().unanswered);
     }
 
     #[test]

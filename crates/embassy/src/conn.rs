@@ -21,11 +21,16 @@ use crate::tls::{Buf, TlsStream};
 pub const TLS_RECORD: usize = 16_640;
 
 /// How to check a TLS server.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Verify {
     /// Against this CA certificate (DER): the one that signed the last
     /// certificate the server sends (ISRG Root X1 for Let's Encrypt).
     Ca(Vec<u8>),
+    /// Against any of these CA certificates (DER). The chain is checked to
+    /// the first of them it reaches: with Let's Encrypt's ISRG Root YE
+    /// beside X1, a board verifies two signatures of its ECDSA chain, not
+    /// four (YE, X2 and X2's cross-sign by X1 too).
+    Roots(Vec<Vec<u8>>),
     /// Not at all: anyone in the path can pose as the server.
     Unverified,
 }

@@ -8,6 +8,12 @@
 //! long as the transport's own `read` is, as embassy-net's TCP is.
 //! (embedded-tls, before, read each record header into its stack and lost
 //! it when cancelled.)
+//!
+//! Sessions are resumed: [`config`] makes one config per [`Verify`] and
+//! hands it out again (rustls resumes a session only under the verifier it
+//! was made with), so a server a board shook hands with before takes a key
+//! exchange only (TLS 1.3 tickets), not its certificate chain again, which
+//! costs seconds there.
 
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
@@ -17,8 +23,9 @@ use alloc::vec::Vec;
 
 use embedded_io_async::{ErrorKind, Read, Write};
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
-use rustls::client::UnbufferedClientConnection;
+use rustls::client::{ClientSessionMemoryCache, Resumption, UnbufferedClientConnection};
 use rustls::crypto::CryptoProvider;
+use rustls::lock::{Lock, MakeMutex, MutexGuard, Poisoned};
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::time_provider::TimeProvider;
 use rustls::unbuffered::{ConnectionState, EncodeError, EncryptError, UnbufferedStatus};
@@ -119,22 +126,75 @@ impl ServerCertVerifier for Unverified {
     }
 }
 
-/// A client config: TLS 1.3 and 1.2, checked against `verify`.
+/// rustls's locks without std: spin mutexes.
+struct SpinLocks;
+
+struct SpinLock<T>(spin::Mutex<T>);
+
+impl<T> core::fmt::Debug for SpinLock<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("SpinLock")
+    }
+}
+
+impl<T: Send> Lock<T> for SpinLock<T> {
+    fn lock(&self) -> Result<MutexGuard<'_, T>, Poisoned> {
+        Ok(Box::new(self.0.lock()))
+    }
+}
+
+impl MakeMutex for SpinLocks {
+    fn make_mutex<T>(value: T) -> Arc<dyn Lock<T>>
+    where
+        T: Send + 'static,
+    {
+        Arc::new(SpinLock(spin::Mutex::new(value)))
+    }
+}
+
+/// Servers whose sessions a config keeps: 8 tickets each.
+const SESSION_SERVERS: usize = 8;
+
+/// The configs made, one per [`Verify`] (a firmware has one or two).
+static CONFIGS: spin::Mutex<Vec<(Verify, Arc<ClientConfig>)>> = spin::Mutex::new(Vec::new());
+
+/// A client config: TLS 1.3 and 1.2, checked against `verify`, its sessions
+/// resumed. The same one each time for the same `verify`.
 pub fn config(verify: &Verify) -> Result<Arc<ClientConfig>, rustls::Error> {
+    if let Some((_, config)) = CONFIGS.lock().iter().find(|(v, _)| v == verify) {
+        return Ok(config.clone());
+    }
+    let config = make_config(verify)?;
+    CONFIGS.lock().push((verify.clone(), config.clone()));
+    Ok(config)
+}
+
+fn make_config(verify: &Verify) -> Result<Arc<ClientConfig>, rustls::Error> {
     let provider = Arc::new(rustls_rustcrypto::provider());
     let builder = ClientConfig::builder_with_details(provider.clone(), Arc::new(Clock))
         .with_protocol_versions(&[&rustls::version::TLS13, &rustls::version::TLS12])?;
-    let config = match verify {
-        Verify::Ca(der) => {
-            let mut roots = RootCertStore::empty();
-            roots.add(CertificateDer::from(der.clone()))?;
-            builder.with_root_certificates(roots).with_no_client_auth()
+    let roots = |ders: &[&Vec<u8>]| -> Result<RootCertStore, rustls::Error> {
+        let mut roots = RootCertStore::empty();
+        for der in ders {
+            roots.add(CertificateDer::from((*der).clone()))?;
         }
+        Ok(roots)
+    };
+    let mut config = match verify {
+        Verify::Ca(der) => builder
+            .with_root_certificates(roots(&[der])?)
+            .with_no_client_auth(),
+        Verify::Roots(ders) => builder
+            .with_root_certificates(roots(&ders.iter().collect::<Vec<_>>())?)
+            .with_no_client_auth(),
         Verify::Unverified => builder
             .dangerous()
             .with_custom_certificate_verifier(Arc::new(Unverified(provider)))
             .with_no_client_auth(),
     };
+    config.resumption = Resumption::store(Arc::new(ClientSessionMemoryCache::new::<SpinLocks>(
+        SESSION_SERVERS * 8,
+    )));
     Ok(Arc::new(config))
 }
 
@@ -224,6 +284,11 @@ impl<'b, C: Read + Write> TlsStream<'b, C> {
                 Wait::Closed => return Err(ConnError(ErrorKind::ConnectionAborted)),
             }
         }
+    }
+
+    /// Whether the handshake was full or resumed a session.
+    pub fn handshake_kind(&self) -> Option<rustls::HandshakeKind> {
+        self.conn.handshake_kind()
     }
 
     /// Run rustls as far as it goes without I/O: records decrypted into
@@ -403,3 +468,16 @@ impl<'b, C: Read + Write> TlsStream<'b, C> {
 
 /// Boxed: the connection state is large.
 pub type BoxedTls<'b, C> = Box<TlsStream<'b, C>>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn one_config_per_verify_so_sessions_resume() {
+        let a = Verify::Roots(Vec::new());
+        let first = config(&a).unwrap();
+        assert!(Arc::ptr_eq(&first, &config(&a).unwrap()));
+        assert!(!Arc::ptr_eq(&first, &config(&Verify::Unverified).unwrap()));
+    }
+}
