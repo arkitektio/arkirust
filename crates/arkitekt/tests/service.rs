@@ -83,7 +83,6 @@ fn an_agent_asks_for_rekuests_scopes() {
         [
             "openid",
             "rekuest_agent",
-            "rekuest_call",
             "rekuest_read",
             "rekuest_write"
         ]

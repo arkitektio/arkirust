@@ -142,12 +142,7 @@ pub fn requirement() -> arkitekt_spec::Requirement {
 
 /// What a rekuest agent has to be allowed to do: the scopes the Python
 /// client's `RekuestApi` asks for (read off rekuest's schema).
-pub const SCOPES: &[&str] = &[
-    "rekuest_agent",
-    "rekuest_call",
-    "rekuest_read",
-    "rekuest_write",
-];
+pub const SCOPES: &[&str] = &["rekuest_agent", "rekuest_read", "rekuest_write"];
 
 /// Lets `#[action]` find the spec through rekuest. Not a public API.
 #[doc(hidden)]
