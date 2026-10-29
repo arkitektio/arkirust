@@ -80,12 +80,7 @@ fn an_agent_asks_for_rekuests_scopes() {
     let agent = arkitekt::manifest(&App::new("app", "0.1.0").action(noop), None);
     assert_eq!(
         agent.scopes,
-        [
-            "openid",
-            "rekuest_agent",
-            "rekuest_read",
-            "rekuest_write"
-        ]
+        ["openid", "rekuest_agent", "rekuest_read", "rekuest_write"]
     );
     let no_actions = arkitekt::manifest(&App::new("app", "0.1.0"), None);
     assert_eq!(no_actions.scopes, ["openid"]);
