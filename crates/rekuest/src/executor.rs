@@ -124,6 +124,16 @@ struct Inner {
     session_id: Option<String>,
 }
 
+impl Drop for Inner {
+    /// An executor dropped without `teardown` (its agent's future dropped,
+    /// say on a lost network) still stops its background hooks.
+    fn drop(&mut self) {
+        for handle in self.background.lock().drain(..) {
+            handle.abort();
+        }
+    }
+}
+
 /// Runs assignments for a [`Registry`]. Cheap to clone.
 #[derive(Clone)]
 pub struct Executor {
@@ -771,6 +781,43 @@ mod tests {
             .map(|(k, _, _)| k.as_str())
             .collect();
         assert_eq!(ends, ["FAILED"]);
+    }
+
+    #[tokio::test]
+    async fn dropping_the_executor_stops_its_background_hooks() {
+        use core::sync::atomic::{AtomicUsize, Ordering};
+        let ticks = Arc::new(AtomicUsize::new(0));
+        let counted = ticks.clone();
+        let mut registry = Registry::new();
+        registry.register(quick).background(move |_| {
+            let ticks = counted.clone();
+            async move {
+                loop {
+                    ticks.fetch_add(1, Ordering::SeqCst);
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+            }
+        });
+        let journal = Arc::new(Journal::new(
+            Arc::new(Recorder::default()),
+            None,
+            Some("s".into()),
+        ));
+        let executor = Executor::with_session(registry, Context::default(), journal, None, None);
+        executor.activate().await.unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while ticks.load(Ordering::SeqCst) == 0 {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+
+        drop(executor);
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let stopped = ticks.load(Ordering::SeqCst);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(ticks.load(Ordering::SeqCst), stopped);
     }
 
     #[tokio::test]
