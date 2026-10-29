@@ -1,6 +1,28 @@
 # CHANGELOG
 
 
+## v0.18.1 (2026-10-29)
+
+### Bug Fixes
+
+- **fakts**: A mesh alias's challenge gets 60 s
+  ([`417fa7f`](https://github.com/arkitektio/arkirust/commit/417fa7f9a793f159b3ac7ae52ad752be90ec2a2f))
+
+A board just provisioned meets its first mesh peer after control announced a new node and its DERP
+  connections did full TLS handshakes (~3 s each on an ESP32-S3): 20 s was not always enough, and
+  the agent failed with 'no alias of rekuest answered its challenge' until its retry 30 s later.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+- **rekuest**: A dropped executor stops its background hooks
+  ([`b0efe24`](https://github.com/arkitektio/arkirust/commit/b0efe24fa703faf835c5415d4b220aa5f4831309))
+
+An agent future dropped without teardown (on the board: the Wi-Fi went) left its background hooks
+  running, one more per reconnect.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+
 ## v0.18.0 (2026-10-28)
 
 ### Features
