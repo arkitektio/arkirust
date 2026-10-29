@@ -1,6 +1,28 @@
 # CHANGELOG
 
 
+## v0.18.2 (2026-10-29)
+
+### Bug Fixes
+
+- **rekuest**: An agent no longer asks for rekuest_call
+  ([`63b6756`](https://github.com/arkitektio/arkirust/commit/63b675661eb612255cd0dc697b9fbf82062429f4))
+
+A rekuest agent registers and runs its actions over the agent socket, which needs `rekuest_agent`;
+  starting tasks of its own is now `rekuest_root_call`, which only an app taking in the caller
+  client asks for. `SCOPES` follows the Python client's `RekuestApi`, which no longer carries the
+  root-call operations.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+### Code Style
+
+- Cargo fmt the agent scope test
+  ([`898328b`](https://github.com/arkitektio/arkirust/commit/898328b36aaa70db8f3d76e5f057e1994526d513))
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+
 ## v0.18.1 (2026-10-29)
 
 ### Bug Fixes
