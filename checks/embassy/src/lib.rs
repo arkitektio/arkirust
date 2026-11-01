@@ -19,7 +19,7 @@ use embassy_futures::select::{select, Either};
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_time::{Instant, Timer};
-use rekuest_session::protocol::definition::AgentDeclaration;
+use rekuest_session::protocol::definition::{AgentDeclaration, SPEC_VERSION};
 use rekuest_session::testing::{Echo, FakeServer, ServerOutput};
 use rekuest_session::{to_text, ConnectionPolicy, Event, Session, SessionConfig, SessionError};
 
@@ -105,5 +105,6 @@ fn declaration() -> AgentDeclaration {
         locks: vec![],
         bloks: vec![],
         hash: None,
+        spec_version: Some(SPEC_VERSION.into()),
     }
 }
