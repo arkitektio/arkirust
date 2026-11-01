@@ -970,6 +970,10 @@ mod tests {
         assert_eq!(v["name"], "app:1");
         assert_eq!(v["implementations"], json!([]));
         assert!(v["hash"].is_string());
+        assert_eq!(
+            v["spec_version"],
+            arkitekt_spec::actions::definition::SPEC_VERSION
+        );
         assert!(v.get("features").is_none());
     }
 

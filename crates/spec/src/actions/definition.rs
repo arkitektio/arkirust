@@ -123,7 +123,16 @@ pub struct AgentDeclaration {
     pub bloks: Vec<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hash: Option<String>,
+    /// The spec this agent runs, which a server refuses to go without. Not part of the hash, so an
+    /// upgrade that declares nothing new still says it. What a server may send it is what its
+    /// `features` say, never this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spec_version: Option<String>,
 }
+
+/// The release of Python's `arkitekt-spec` whose action language these types follow, which is what
+/// an agent says it runs. Raised by hand when they catch up with a newer one.
+pub const SPEC_VERSION: &str = "8.0.0";
 
 impl AgentDeclaration {
     pub fn new(
@@ -139,16 +148,18 @@ impl AgentDeclaration {
             locks: vec![],
             bloks: vec![],
             hash: None,
+            spec_version: Some(SPEC_VERSION.into()),
         };
         declaration.hash = Some(declaration.compute_hash());
         declaration
     }
 
-    /// sha256 over the canonical JSON of the declaration (without the hash).
+    /// sha256 over the canonical JSON of the declaration (without the hash or the spec version).
     /// The backend only stores it and skips reconciliation when it matches.
     pub fn compute_hash(&self) -> String {
         let mut without = self.clone();
         without.hash = None;
+        without.spec_version = None;
         let value = serde_json::to_value(&without).expect("declaration serializes");
         let canonical = canonical_json(&value);
         hex::encode(Sha256::digest(canonical.as_bytes()))

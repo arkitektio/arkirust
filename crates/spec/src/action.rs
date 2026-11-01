@@ -239,6 +239,7 @@ impl Registry {
                 .collect(),
             bloks: vec![],
             hash: None,
+            spec_version: Some(crate::actions::definition::SPEC_VERSION.into()),
         };
         declaration.hash = Some(declaration.compute_hash());
         declaration
