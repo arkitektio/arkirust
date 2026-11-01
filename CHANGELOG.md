@@ -1,6 +1,27 @@
 # CHANGELOG
 
 
+## v0.19.0 (2026-11-01)
+
+### Bug Fixes
+
+- The embassy check declares its spec version too
+  ([`f1df046`](https://github.com/arkitektio/arkirust/commit/f1df0463f5a7d9197204ec1da2c62e327c7c02fa))
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+### Features
+
+- An agent says which spec it runs
+  ([`cd7cd1a`](https://github.com/arkitektio/arkirust/commit/cd7cd1a32cf07c13c5917a2ec53ac60b57ab3db8))
+
+AgentDeclaration carries spec_version, from SPEC_VERSION: the release of the Python arkitekt-spec
+  whose action language these types follow. A server refuses a REGISTER without one. It stays out of
+  the hash, so existing declarations keep theirs.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+
 ## v0.18.2 (2026-10-29)
 
 ### Bug Fixes
