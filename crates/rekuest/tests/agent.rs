@@ -96,13 +96,22 @@ async fn serves_assignments() {
     assert!(register["hash"].is_string());
     send(
         &mut ws,
-        json!({"type": "INIT", "id": "i", "agent": "agent-1", "inquiries": [{"task": "lost"}]}),
+        json!({"type": "INIT", "id": "i", "agent": "agent-1"}),
     )
     .await;
 
-    // An inquiry about a task this agent never saw is answered as lost.
-    let lost = recv_type(&mut ws, "CRITICAL").await;
-    assert_eq!(lost["task"], "lost");
+    // Asked about a task this agent never saw, it says so at once: an answer, not a report.
+    send(
+        &mut ws,
+        json!({"type": "INQUIRE", "id": "q", "task": "lost", "request": "q-1"}),
+    )
+    .await;
+    let answer = recv_type(&mut ws, "INQUIRY_ANSWER").await;
+    assert_eq!(
+        (&answer["task"], &answer["status"], &answer["request"]),
+        (&json!("lost"), &json!("UNKNOWN"), &json!("q-1"))
+    );
+    assert!(answer.get("pos").is_none());
 
     // Heartbeats are answered.
     send(&mut ws, json!({"type": "HEARTBEAT", "id": "h"})).await;
@@ -115,7 +124,18 @@ async fn serves_assignments() {
     assert_eq!(yielded["returns"], json!({"return0": 5}));
     let completed = recv_type(&mut ws, "COMPLETED").await;
     assert_eq!(completed["task"], "t1");
-    assert!(completed["seq"].as_u64().unwrap() > yielded["seq"].as_u64().unwrap());
+    assert!(completed["pos"].as_u64().unwrap() > yielded["pos"].as_u64().unwrap());
+
+    // Asked about a task it finished, it says so.
+    send(
+        &mut ws,
+        json!({"type": "INQUIRE", "id": "q2", "task": "t1", "request": "q-2"}),
+    )
+    .await;
+    assert_eq!(
+        recv_type(&mut ws, "INQUIRY_ANSWER").await["status"],
+        "ENDED"
+    );
 
     // Bad input fails; unknown interfaces are critical.
     send(&mut ws, assign("t2", "add", json!({"a": "x", "b": 3}))).await;
@@ -127,15 +147,29 @@ async fn serves_assignments() {
     send(&mut ws, assign("t4", "sleepy", json!({}))).await;
     let log = recv_type(&mut ws, "LOG").await;
     assert_eq!(log["message"], "going to sleep");
+    // Asked about a task under way, it says where it stands and what it last said.
+    send(
+        &mut ws,
+        json!({"type": "INQUIRE", "id": "q3", "task": "t4", "request": "q-3"}),
+    )
+    .await;
+    let running = recv_type(&mut ws, "INQUIRY_ANSWER").await;
+    assert_eq!(
+        (&running["status"], &running["message"]),
+        (&json!("RUNNING"), &json!("going to sleep"))
+    );
+    assert!(
+        running["reported_at"].as_f64().unwrap() > 0.0 && running["step"].as_u64().unwrap() > 0
+    );
     send(&mut ws, json!({"type": "CANCEL", "id": "c", "task": "t4"})).await;
     assert_eq!(recv_type(&mut ws, "CANCELLED").await["task"], "t4");
 
     // Everything not covered by a JOURNAL_ACK is re-sent after a reconnect
-    // (terminal reports included; EVENT_ACK is not needed).
+    // (terminal reports included).
     let acked = completed["pos"].as_u64().unwrap();
     send(
         &mut ws,
-        json!({"type": "JOURNAL_ACK", "id": "a", "journal_session": completed["journal_session"], "pos": acked}),
+        json!({"type": "JOURNAL_ACK", "id": "a", "journal_session": completed["journal_session"], "through": acked}),
     )
     .await;
     ws.close(None).await.unwrap();
@@ -170,7 +204,7 @@ async fn serves_assignments() {
         (acked + 1..=last).collect::<Vec<_>>(),
         "gapless, in order"
     );
-    // "lost" and t1 were acked; the other terminal reports come again.
+    // t1 was acked; the other terminal reports come again.
     assert_eq!(terminals, vec!["t2", "t3", "t4"]);
 
     // Being kicked is fatal.

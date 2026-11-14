@@ -1,20 +1,38 @@
 //! The agent websocket protocol (`/agi`).
 //!
 //! Every frame is a JSON object with a `type` discriminator and an `id`.
-//! Agent events that take part in the ack stream also carry a per-connection
-//! monotonic `seq`.
+//!
+//! A frame that must not be lost carries `pos`: its position in its sender's stream. The
+//! agent's stream is per journal session and acknowledged with `JOURNAL_ACK`; the server's
+//! (its commands) is per agent and acknowledged with `COMMAND_ACK`. Each side keeps what it
+//! sent until the other acknowledged it, and sends it again after a reconnect.
 
 use crate::prelude::*;
+use alloc::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use arkitekt_spec::actions::AgentDeclaration;
 pub use arkitekt_spec::actions::LogLevel;
 
-/// A task the server asks about after (re)connecting.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Inquiry {
-    pub task: String,
+/// What an agent says about a task it is asked about (`INQUIRE`), from memory and at once:
+/// asking never touches the task.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum TaskStatus {
+    /// The agent has no such task. From the agent the task was given to, that is final: the
+    /// server ends the task as lost.
+    Unknown,
+    /// Taken, not started yet (behind a lock, or while the app starts).
+    Waiting,
+    /// Started, and at work.
+    Running,
+    /// Stopped at a pause point, until it is resumed.
+    Paused,
+    /// Waiting for a person's decision (a hold it asked for).
+    Held,
+    /// The agent reported its end.
+    Ended,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -145,6 +163,11 @@ pub const STATE_PRECONDITION: &str = "STATE_PRECONDITION";
 /// agent would drop them and run the task unchecked.
 pub const FEATURE_STATE_REQUIRES: &str = "state_requires";
 
+/// What an agent speaking this protocol says on `REGISTER` (in `features`): positions in
+/// both directions, acknowledged commands, refused gaps. A server refuses an agent that
+/// does not say it.
+pub const FEATURE_PROTOCOL_2: &str = "protocol_2";
+
 /// A request to run an action.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Assign {
@@ -210,12 +233,13 @@ pub struct Journal {
 }
 
 /// The fields every `…_EVENT` mirror carries: the server tells a caller what
-/// happened to a task it assigned. `event` is the event's id, `seq` its order.
+/// happened to a task it assigned. `event` is the event's id: a mirror seen twice (a
+/// replay overlapping what arrived live) is the same event. Their order is the order of
+/// the command stream they travel in.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ExecutionEvent {
     pub task: String,
     pub event: String,
-    pub seq: u64,
 }
 
 /// Server → agent.
@@ -224,12 +248,18 @@ pub struct ExecutionEvent {
 pub enum ToAgent {
     Init {
         agent: String,
-        #[serde(default)]
-        inquiries: Vec<Inquiry>,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         hash: Option<String>,
         #[serde(default)]
         diagnostics: Vec<Diagnostic>,
+        /// The `nonce` of the `REGISTER` this answers. An agent ignores an `INIT` that is
+        /// not its current connection's.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        nonce: Option<String>,
+        /// How far the server has projected each journal session the `REGISTER` listed.
+        /// The agent drops what is at or below it and sends the rest.
+        #[serde(default)]
+        positions: BTreeMap<String, u64>,
     },
     Assign(Box<Assign>),
     Cancel {
@@ -268,6 +298,40 @@ pub enum ToAgent {
         reason: String,
     },
     Heartbeat {},
+    /// Ask about a task this agent was given: answered at once with an `INQUIRY_ANSWER`. A
+    /// question, not a command: it carries no position, is not kept, and changes nothing.
+    Inquire {
+        task: String,
+        /// Says which question an answer belongs to.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        request: Option<String>,
+    },
+    /// The answer to an `INQUIRE_REQUEST`: what the task's agent says of it (`status`), or,
+    /// where the agent was not asked, what the server knows. `asked` is false then: the agent
+    /// is away, has not acknowledged the assign yet, or did not answer in time.
+    InquireResponse {
+        request: String,
+        task: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        status: Option<TaskStatus>,
+        #[serde(default)]
+        asked: bool,
+        /// Why the agent was not asked, or why there is no answer.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        step: Option<u64>,
+        /// When the task last reported anything, as its agent has it (epoch seconds).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reported_at: Option<f64>,
+        /// What it last said of its progress, as its agent has it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        progress: Option<i64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
     Bounce {
         #[serde(default)]
         duration: Option<u64>,
@@ -279,38 +343,23 @@ pub enum ToAgent {
     ProtocolError {
         error: String,
     },
-    EventAck {
-        #[serde(default)]
-        event: Option<String>,
-        #[serde(default)]
-        task: Option<String>,
-        #[serde(default)]
-        seq: Option<u64>,
-    },
     /// Drop these shelved values (by the id the agent minted).
     Collect {
         #[serde(default)]
         drawers: Vec<String>,
     },
-    /// The server's answer to a `SHELVE`; the agent minted the id already.
-    Shelved {
-        #[serde(rename = "ref")]
-        reference: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        drawer: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        error: Option<String>,
-    },
-    Unshelved {
-        #[serde(rename = "ref")]
-        reference: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        error: Option<String>,
-    },
-    /// Everything of `journal_session` up to `pos` is persisted.
+    /// Everything of `journal_session` through this position is persisted. (`through`, not
+    /// `pos`: a frame's own `pos` is where it stands in its sender's stream.)
     JournalAck {
         journal_session: String,
-        pos: u64,
+        through: u64,
+    },
+    /// A frame of `journal_session` arrived ahead of `expected` and was not taken: send
+    /// again from `expected`, in order. An agent that no longer holds it says so with
+    /// `JOURNAL_SKIP`.
+    JournalNack {
+        journal_session: String,
+        expected: u64,
     },
     /// The answer to an `ASSIGN_REQUEST`: the child task, or why there is none.
     /// `created` is false when the request named a child that already exists.
@@ -434,6 +483,34 @@ pub enum ToAgent {
     Unknown,
 }
 
+impl ToAgent {
+    /// Whether this is a command: numbered, kept by the server until a `COMMAND_ACK`
+    /// covers it, and sent again after a reconnect. Work for the agent (`ASSIGN` and what
+    /// steers it), the answers to its numbered requests, and what happened to the tasks it
+    /// assigned. The rest belongs to one connection (`INIT`, `HEARTBEAT`, the acks, `KICK`,
+    /// `BOUNCE`) or answers a request that is not numbered either.
+    ///
+    /// A probe's frames are commands by kind but travel unnumbered: whoever sends them
+    /// leaves `pos` out.
+    pub fn is_command(&self) -> bool {
+        !matches!(
+            self,
+            ToAgent::Init { .. }
+                | ToAgent::Heartbeat {}
+                | ToAgent::Inquire { .. }
+                | ToAgent::InquireResponse { .. }
+                | ToAgent::Bounce { .. }
+                | ToAgent::Kick { .. }
+                | ToAgent::ProtocolError { .. }
+                | ToAgent::JournalAck { .. }
+                | ToAgent::JournalNack { .. }
+                | ToAgent::ProbeResponse { .. }
+                | ToAgent::StateRevisionResponse { .. }
+                | ToAgent::Unknown
+        )
+    }
+}
+
 /// Agent → server.
 ///
 /// `D` is what a `REGISTER` declares. An agent sends its own [`AgentDeclaration`]; a
@@ -451,10 +528,56 @@ pub enum FromAgent<D = AgentDeclaration> {
         /// What this agent implements beyond the base protocol ([`FEATURE_STATE_REQUIRES`]).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         features: Vec<String>,
+        /// New for every connection attempt; the `INIT` that answers it says it again.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        nonce: Option<String>,
+        /// The highest command position this process has handled; 0 for a fresh process.
+        /// The server sends its commands from the one after.
+        #[serde(default)]
+        commands_seen: u64,
+        /// The journal sessions this agent still holds unacknowledged frames of.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        sessions: Vec<String>,
         #[serde(flatten)]
         declaration: D,
     },
     HeartbeatAnswer {},
+    /// The answer to an `INQUIRE`: what this agent knows of the task, at once. `step` is the
+    /// last step the task reported.
+    InquiryAnswer {
+        task: String,
+        status: TaskStatus,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        request: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        step: Option<u64>,
+        /// When the task last reported anything (epoch seconds).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reported_at: Option<f64>,
+        /// What it last said of its progress.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        progress: Option<i64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
+    },
+    /// Ask about a task this agent assigned: is its agent still on it? Answered with an
+    /// `INQUIRE_RESPONSE`. A read: not numbered, not kept.
+    InquireRequest {
+        task: String,
+    },
+    /// Every command through this position is handled (cumulative). The server forgets them.
+    CommandAck {
+        through: u64,
+    },
+    /// The frames `first..=last` of the journal session `session` are gone (the agent no
+    /// longer holds them): the answer to a `JOURNAL_NACK` it cannot satisfy. The server
+    /// records the loss and goes on after `last`. The only way a position is ever passed
+    /// over. (`session`, not `journal_session`: that is the frame's own.)
+    JournalSkip {
+        session: String,
+        first: u64,
+        last: u64,
+    },
     Started {
         task: String,
     },
@@ -528,7 +651,7 @@ pub enum FromAgent<D = AgentDeclaration> {
         message: Option<String>,
         blok: TaskBlok,
     },
-    /// One RFC 6902 operation on a state. `old_value` is always null, as in Python.
+    /// One RFC 6902 operation on a state.
     StatePatch {
         session_id: String,
         global_rev: u64,
@@ -537,7 +660,6 @@ pub enum FromAgent<D = AgentDeclaration> {
         op: String,
         path: String,
         value: Value,
-        old_value: Value,
         task_id: Option<String>,
     },
     /// Every state at a revision.
@@ -565,8 +687,6 @@ pub enum FromAgent<D = AgentDeclaration> {
     /// itself. The value is referenced by that id right away; the server only
     /// records the drawer.
     Shelve {
-        #[serde(rename = "ref", default, skip_serializing_if = "Option::is_none")]
-        reference: Option<String>,
         identifier: String,
         resource_id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -579,8 +699,6 @@ pub enum FromAgent<D = AgentDeclaration> {
     },
     /// The agent dropped a shelved value.
     Unshelve {
-        #[serde(rename = "ref", default, skip_serializing_if = "Option::is_none")]
-        reference: Option<String>,
         drawer: String,
     },
     /// A value the task took from outside itself (the clock, randomness, a
@@ -593,8 +711,8 @@ pub enum FromAgent<D = AgentDeclaration> {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         key: Option<String>,
     },
-    /// Ask the server to assign a child task (dependent work). Not numbered
-    /// (no `pos`): the server answers it. `parent_step` is the parent's step for
+    /// Ask the server to assign a child task (dependent work). Numbered like a report;
+    /// its `ASSIGN_RESPONSE` comes back as a command. `parent_step` is the parent's step for
     /// this call; the server stores it as the child's parent step and is
     /// idempotent on (`parent`, `parent_step`). `reference` is the caller's own
     /// idempotency key; the server mints one when it is omitted.
@@ -640,6 +758,16 @@ pub enum FromAgent<D = AgentDeclaration> {
         /// What the child's agent's state must hold for it to run (see [`StateRequirement`]).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         state_requires: Vec<StateRequirement>,
+        /// What to do with the child should its agent be lost while it runs: `FAIL` (it ends
+        /// lost), `RESUME` (a workflow goes on from what it recorded) or `RESTART` (an action
+        /// declared idempotent is run again from the start). Left out, a workflow resumes and
+        /// anything else ends lost.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        on_lost: Option<String>,
+        /// How often the child may be sent again (resumed or restarted) before it ends lost
+        /// after all. Left out, the server's own limit applies.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_resumes: Option<u32>,
     },
     /// Ask the server to run an action as a probe (not a task; nothing is recorded).
     ProbeRequest {
@@ -722,44 +850,20 @@ impl<D> FromAgent<D> {
         )
     }
 
-    /// Events that carry a `seq`.
-    /// Task events carry a `seq`; registration, heartbeats, requests, state,
-    /// lock and shelve messages do not.
-    pub fn is_event(&self) -> bool {
-        !matches!(
-            self,
-            FromAgent::Register { .. }
-                | FromAgent::HeartbeatAnswer {}
-                | FromAgent::AssignRequest { .. }
-                | FromAgent::ProbeRequest { .. }
-                | FromAgent::StateRevisionRequest { .. }
-                | FromAgent::CancelRequest { .. }
-                | FromAgent::InterruptRequest { .. }
-                | FromAgent::PauseRequest { .. }
-                | FromAgent::ResumeRequest { .. }
-                | FromAgent::StatePatch { .. }
-                | FromAgent::StateSnapshot { .. }
-                | FromAgent::SessionInit { .. }
-                | FromAgent::Lock { .. }
-                | FromAgent::Unlock { .. }
-                | FromAgent::Shelve { .. }
-                | FromAgent::Unshelve { .. }
-        )
-    }
-
-    /// Frames that never get a journal position: they have their own reply.
+    /// Frames that never get a journal position: the handshake, the acknowledgements, and
+    /// the two requests that are answered at once and safe to lose (a probe is ephemeral, a
+    /// state revision a read).
     pub fn is_unnumbered(&self) -> bool {
         matches!(
             self,
             FromAgent::Register { .. }
                 | FromAgent::HeartbeatAnswer {}
-                | FromAgent::AssignRequest { .. }
+                | FromAgent::InquiryAnswer { .. }
+                | FromAgent::InquireRequest { .. }
+                | FromAgent::CommandAck { .. }
+                | FromAgent::JournalSkip { .. }
                 | FromAgent::ProbeRequest { .. }
                 | FromAgent::StateRevisionRequest { .. }
-                | FromAgent::CancelRequest { .. }
-                | FromAgent::InterruptRequest { .. }
-                | FromAgent::PauseRequest { .. }
-                | FromAgent::ResumeRequest { .. }
         )
     }
 
@@ -795,14 +899,11 @@ impl<D> FromAgent<D> {
     }
 }
 
-/// A [`FromAgent`] message with its `id`, (for events) `seq`, and (once
-/// journaled) its position. Journal fields are named so they cannot clash
+/// A [`FromAgent`] message with its `id` and (once journaled) its position. Journal fields are named so they cannot clash
 /// with message fields (`STATE_PATCH` has its own `session_id` and `ts`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Envelope<D = AgentDeclaration> {
     pub id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub seq: Option<u64>,
     /// Position in the agent's journal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pos: Option<u64>,
@@ -829,7 +930,6 @@ impl<D> Envelope<D> {
     pub fn with_id(id: String, message: FromAgent<D>) -> Self {
         Self {
             id,
-            seq: None,
             pos: None,
             journal_session: None,
             agent_ts: None,
@@ -844,8 +944,21 @@ impl<D> Envelope<D> {
 pub struct ToAgentFrame {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
+    /// A command's position in the server's stream to this agent; none on a frame that is
+    /// not a command (see [`ToAgent::is_command`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pos: Option<u64>,
     #[serde(flatten)]
     pub message: ToAgent,
+}
+
+/// Parse a server frame with its `id` and (for a command) its position. Returns the raw value
+/// alongside so that a frame which fails to parse can still be answered.
+pub fn parse_to_agent_frame(
+    text: &str,
+) -> Result<ToAgentFrame, (Option<Value>, serde_json::Error)> {
+    let value: Value = serde_json::from_str(text).map_err(|e| (None, e))?;
+    serde_json::from_value(value.clone()).map_err(|e| (Some(value), e))
 }
 
 /// Parse a server frame. Returns the raw value alongside so that a frame
@@ -863,11 +976,9 @@ mod tests {
 
     #[test]
     fn parses_server_frames() {
-        let init = parse_to_agent(
-            r#"{"type":"INIT","id":"1","agent":"a","inquiries":[{"task":"t"}],"diagnostics":[]}"#,
-        )
-        .unwrap();
-        assert!(matches!(init, ToAgent::Init { ref inquiries, .. } if inquiries[0].task == "t"));
+        let init =
+            parse_to_agent(r#"{"type":"INIT","id":"1","agent":"a","diagnostics":[]}"#).unwrap();
+        assert!(matches!(init, ToAgent::Init { ref agent, .. } if agent == "a"));
 
         let assign = parse_to_agent(
             &json!({
@@ -914,8 +1025,11 @@ mod tests {
             ToAgent::Cancel { .. }
         ));
         assert!(matches!(
-            parse_to_agent(r#"{"type":"EVENT_ACK","id":"5","event":"e","seq":3}"#).unwrap(),
-            ToAgent::EventAck { seq: Some(3), .. }
+            parse_to_agent(
+                r#"{"type":"JOURNAL_NACK","id":"5","journal_session":"s","expected":3}"#
+            )
+            .unwrap(),
+            ToAgent::JournalNack { expected: 3, .. }
         ));
         assert!(matches!(
             parse_to_agent(r#"{"type":"STATE_SOMETHING_NEW","id":"6"}"#).unwrap(),
@@ -932,10 +1046,10 @@ mod tests {
             task: "t".into(),
             returns: json!({"return0": 1}).as_object().unwrap().clone(),
         });
-        env.seq = Some(4);
+        env.pos = Some(4);
         let v = serde_json::to_value(&env).unwrap();
         assert_eq!(v["type"], "YIELD");
-        assert_eq!(v["seq"], 4);
+        assert_eq!(v["pos"], 4);
         assert_eq!(v["returns"]["return0"], 1);
         assert!(v["id"].as_str().unwrap().len() > 10);
 
@@ -944,7 +1058,7 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(v["type"], "HEARTBEAT_ANSWER");
-        assert!(v.get("seq").is_none());
+        assert!(v.get("pos").is_none());
 
         let v = serde_json::to_value(Envelope::<AgentDeclaration>::new(FromAgent::Failed {
             task: "t".into(),
@@ -963,6 +1077,9 @@ mod tests {
             force: false,
             session_id: Some("s".into()),
             features: vec![],
+            nonce: None,
+            commands_seen: 0,
+            sessions: vec![],
             declaration: decl,
         }))
         .unwrap();

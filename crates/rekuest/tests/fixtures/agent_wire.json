@@ -1,35 +1,471 @@
 {
-  "about": "Canonical agent-socket frames for docs/design/journal.md. Every agent (Rust rekuest crate, Python rekuest/arkitekt-runtime) and the server parse each frame, and re-serialize it without losing a field. Copies live in the agents' test fixtures; keep them identical.",
+  "about": "Canonical agent-socket frames for docs/design/journal.md (agent protocol 2). Every agent (Rust rekuest crate, Python rekuest/arkitekt-runtime) and the server parse each frame, and re-serialize it without losing a field. Copies live in the agents' test fixtures; keep them identical.",
   "session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90",
   "numbered_from_agent": [
-    {"name": "session_init", "frame": {"type": "SESSION_INIT", "id": "f-01", "session_id": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "states": {"counter": {"value": 0}}, "pos": 1, "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "agent_ts": 1790000000.0}},
-    {"name": "started", "frame": {"type": "STARTED", "id": "f-02", "task": "42", "pos": 2, "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "agent_ts": 1790000000.1, "task_step": 1}},
-    {"name": "lock", "frame": {"type": "LOCK", "id": "f-03", "key": "stage", "task": "42", "pos": 3, "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "agent_ts": 1790000000.2, "task_step": 2}},
-    {"name": "progress", "frame": {"type": "PROGRESS", "id": "f-04", "task": "42", "progress": 10, "message": "moving", "pos": 4, "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "agent_ts": 1790000000.3, "task_step": 3}},
-    {"name": "log", "frame": {"type": "LOG", "id": "f-05", "task": "42", "message": "at 10%", "level": "INFO", "pos": 5, "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "agent_ts": 1790000000.4, "task_step": 4}},
-    {"name": "effect_now", "frame": {"type": "EFFECT", "id": "f-06", "task": "42", "effect": "NOW", "value": 1790000000.5, "key": "NOW:1", "pos": 6, "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "agent_ts": 1790000000.5, "task_step": 5}},
-    {"name": "effect_random", "frame": {"type": "EFFECT", "id": "f-07", "task": "42", "effect": "RANDOM", "value": "9f86d081884c7d65", "key": "RANDOM:1", "pos": 7, "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "agent_ts": 1790000000.6, "task_step": 6}},
-    {"name": "effect_sleep", "frame": {"type": "EFFECT", "id": "f-08", "task": "42", "effect": "SLEEP", "value": 1790000002.6, "key": "SLEEP:1", "pos": 8, "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "agent_ts": 1790000000.6, "task_step": 7}},
-    {"name": "state_patch", "frame": {"type": "STATE_PATCH", "id": "f-09", "session_id": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "global_rev": 1, "state_name": "counter", "ts": 1790000002.7, "op": "replace", "path": "/value", "value": 1, "old_value": 0, "task_id": "42", "pos": 9, "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "agent_ts": 1790000002.7, "task_step": 9}},
-    {"name": "state_snapshot", "frame": {"type": "STATE_SNAPSHOT", "id": "f-10", "session_id": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "global_rev": 1, "snapshots": {"counter": {"value": 1}}, "pos": 10, "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "agent_ts": 1790000002.8}},
-    {"name": "shelve", "frame": {"type": "SHELVE", "id": "f-11", "ref": "0d4e8a1f7c2b4e6a8b1c3d5e7f9a0b2c", "identifier": "@mikro/image", "resource_id": "0d4e8a1f7c2b4e6a8b1c3d5e7f9a0b2c", "label": "an image", "task": "42", "pos": 11, "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "agent_ts": 1790000002.9, "task_step": 10}},
-    {"name": "yield", "frame": {"type": "YIELD", "id": "f-12", "task": "42", "returns": {"image": {"__identifier": "@mikro/image", "object": "0d4e8a1f7c2b4e6a8b1c3d5e7f9a0b2c"}}, "pos": 12, "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "agent_ts": 1790000003.0, "task_step": 11}},
-    {"name": "completed", "frame": {"type": "COMPLETED", "id": "f-13", "task": "42", "pos": 13, "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "agent_ts": 1790000003.1, "task_step": 12}},
-    {"name": "unlock", "frame": {"type": "UNLOCK", "id": "f-14", "key": "stage", "task": "42", "pos": 14, "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "agent_ts": 1790000003.1, "task_step": 13}},
-    {"name": "unshelve", "frame": {"type": "UNSHELVE", "id": "f-15", "ref": "0d4e8a1f7c2b4e6a8b1c3d5e7f9a0b2c", "drawer": "0d4e8a1f7c2b4e6a8b1c3d5e7f9a0b2c", "pos": 15, "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "agent_ts": 1790000004.0}},
-    {"name": "failed", "frame": {"type": "FAILED", "id": "f-16", "task": "43", "error": "boom", "pos": 16, "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "agent_ts": 1790000004.1, "task_step": 2}},
-    {"name": "critical", "frame": {"type": "CRITICAL", "id": "f-17", "task": "44", "error": "hardware fault", "pos": 17, "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "agent_ts": 1790000004.2, "task_step": 2}},
-    {"name": "cancelled", "frame": {"type": "CANCELLED", "id": "f-18", "task": "45", "pos": 18, "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "agent_ts": 1790000004.3, "task_step": 2}},
-    {"name": "interrupted", "frame": {"type": "INTERRUPTED", "id": "f-19", "task": "46", "pos": 19, "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "agent_ts": 1790000004.4, "task_step": 2}},
-    {"name": "paused", "frame": {"type": "PAUSED", "id": "f-20", "task": "47", "pos": 20, "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "agent_ts": 1790000004.5, "task_step": 2}},
-    {"name": "resumed", "frame": {"type": "RESUMED", "id": "f-21", "task": "47", "pos": 21, "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "agent_ts": 1790000004.6, "task_step": 3}}
+    {
+      "name": "session_init",
+      "frame": {
+        "type": "SESSION_INIT",
+        "id": "f-01",
+        "session_id": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90",
+        "states": {
+          "counter": {
+            "value": 0
+          }
+        },
+        "pos": 1,
+        "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90",
+        "agent_ts": 1790000000.0
+      }
+    },
+    {
+      "name": "started",
+      "frame": {
+        "type": "STARTED",
+        "id": "f-02",
+        "task": "42",
+        "pos": 2,
+        "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90",
+        "agent_ts": 1790000000.1,
+        "task_step": 1
+      }
+    },
+    {
+      "name": "lock",
+      "frame": {
+        "type": "LOCK",
+        "id": "f-03",
+        "key": "stage",
+        "task": "42",
+        "pos": 3,
+        "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90",
+        "agent_ts": 1790000000.2,
+        "task_step": 2
+      }
+    },
+    {
+      "name": "progress",
+      "frame": {
+        "type": "PROGRESS",
+        "id": "f-04",
+        "task": "42",
+        "progress": 10,
+        "message": "moving",
+        "pos": 4,
+        "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90",
+        "agent_ts": 1790000000.3,
+        "task_step": 3
+      }
+    },
+    {
+      "name": "log",
+      "frame": {
+        "type": "LOG",
+        "id": "f-05",
+        "task": "42",
+        "message": "at 10%",
+        "level": "INFO",
+        "pos": 5,
+        "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90",
+        "agent_ts": 1790000000.4,
+        "task_step": 4
+      }
+    },
+    {
+      "name": "effect_now",
+      "frame": {
+        "type": "EFFECT",
+        "id": "f-06",
+        "task": "42",
+        "effect": "NOW",
+        "value": 1790000000.5,
+        "key": "NOW:1",
+        "pos": 6,
+        "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90",
+        "agent_ts": 1790000000.5,
+        "task_step": 5
+      }
+    },
+    {
+      "name": "effect_random",
+      "frame": {
+        "type": "EFFECT",
+        "id": "f-07",
+        "task": "42",
+        "effect": "RANDOM",
+        "value": "9f86d081884c7d65",
+        "key": "RANDOM:1",
+        "pos": 7,
+        "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90",
+        "agent_ts": 1790000000.6,
+        "task_step": 6
+      }
+    },
+    {
+      "name": "effect_sleep",
+      "frame": {
+        "type": "EFFECT",
+        "id": "f-08",
+        "task": "42",
+        "effect": "SLEEP",
+        "value": 1790000002.6,
+        "key": "SLEEP:1",
+        "pos": 8,
+        "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90",
+        "agent_ts": 1790000000.6,
+        "task_step": 7
+      }
+    },
+    {
+      "name": "state_patch",
+      "frame": {
+        "type": "STATE_PATCH",
+        "id": "f-09",
+        "session_id": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90",
+        "global_rev": 1,
+        "state_name": "counter",
+        "ts": 1790000002.7,
+        "op": "replace",
+        "path": "/value",
+        "value": 1,
+        "task_id": "42",
+        "pos": 9,
+        "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90",
+        "agent_ts": 1790000002.7,
+        "task_step": 9
+      }
+    },
+    {
+      "name": "state_snapshot",
+      "frame": {
+        "type": "STATE_SNAPSHOT",
+        "id": "f-10",
+        "session_id": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90",
+        "global_rev": 1,
+        "snapshots": {
+          "counter": {
+            "value": 1
+          }
+        },
+        "pos": 10,
+        "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90",
+        "agent_ts": 1790000002.8
+      }
+    },
+    {
+      "name": "shelve",
+      "frame": {
+        "type": "SHELVE",
+        "id": "f-11",
+        "identifier": "@mikro/image",
+        "resource_id": "0d4e8a1f7c2b4e6a8b1c3d5e7f9a0b2c",
+        "label": "an image",
+        "task": "42",
+        "pos": 11,
+        "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90",
+        "agent_ts": 1790000002.9,
+        "task_step": 10
+      }
+    },
+    {
+      "name": "yield",
+      "frame": {
+        "type": "YIELD",
+        "id": "f-12",
+        "task": "42",
+        "returns": {
+          "image": {
+            "__identifier": "@mikro/image",
+            "object": "0d4e8a1f7c2b4e6a8b1c3d5e7f9a0b2c"
+          }
+        },
+        "pos": 12,
+        "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90",
+        "agent_ts": 1790000003.0,
+        "task_step": 11
+      }
+    },
+    {
+      "name": "completed",
+      "frame": {
+        "type": "COMPLETED",
+        "id": "f-13",
+        "task": "42",
+        "pos": 13,
+        "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90",
+        "agent_ts": 1790000003.1,
+        "task_step": 12
+      }
+    },
+    {
+      "name": "unlock",
+      "frame": {
+        "type": "UNLOCK",
+        "id": "f-14",
+        "key": "stage",
+        "task": "42",
+        "pos": 14,
+        "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90",
+        "agent_ts": 1790000003.1,
+        "task_step": 13
+      }
+    },
+    {
+      "name": "unshelve",
+      "frame": {
+        "type": "UNSHELVE",
+        "id": "f-15",
+        "drawer": "0d4e8a1f7c2b4e6a8b1c3d5e7f9a0b2c",
+        "pos": 15,
+        "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90",
+        "agent_ts": 1790000004.0
+      }
+    },
+    {
+      "name": "failed",
+      "frame": {
+        "type": "FAILED",
+        "id": "f-16",
+        "task": "43",
+        "error": "boom",
+        "pos": 16,
+        "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90",
+        "agent_ts": 1790000004.1,
+        "task_step": 2
+      }
+    },
+    {
+      "name": "critical",
+      "frame": {
+        "type": "CRITICAL",
+        "id": "f-17",
+        "task": "44",
+        "error": "hardware fault",
+        "pos": 17,
+        "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90",
+        "agent_ts": 1790000004.2,
+        "task_step": 2
+      }
+    },
+    {
+      "name": "cancelled",
+      "frame": {
+        "type": "CANCELLED",
+        "id": "f-18",
+        "task": "45",
+        "pos": 18,
+        "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90",
+        "agent_ts": 1790000004.3,
+        "task_step": 2
+      }
+    },
+    {
+      "name": "interrupted",
+      "frame": {
+        "type": "INTERRUPTED",
+        "id": "f-19",
+        "task": "46",
+        "pos": 19,
+        "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90",
+        "agent_ts": 1790000004.4,
+        "task_step": 2
+      }
+    },
+    {
+      "name": "paused",
+      "frame": {
+        "type": "PAUSED",
+        "id": "f-20",
+        "task": "47",
+        "pos": 20,
+        "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90",
+        "agent_ts": 1790000004.5,
+        "task_step": 2
+      }
+    },
+    {
+      "name": "resumed",
+      "frame": {
+        "type": "RESUMED",
+        "id": "f-21",
+        "task": "47",
+        "pos": 21,
+        "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90",
+        "agent_ts": 1790000004.6,
+        "task_step": 3
+      }
+    }
   ],
   "unnumbered_from_agent": [
-    {"name": "child_call", "note": "task 42 took step 8 for this call; call_key is what task 42 calls it (the action, a hash of its args, the occurrence); reference is the caller's own", "frame": {"type": "ASSIGN_REQUEST", "id": "f-30", "reference": "c0ffee00c0ffee00c0ffee00c0ffee00", "parent": "42", "parent_step": 8, "call_key": "7:3f2b6a9c:1", "action": "7", "args": {"x": 1}}},
-    {"name": "probe_log", "note": "a probe task (ASSIGN probe: true, id p-…) is never numbered", "frame": {"type": "LOG", "id": "f-31", "task": "p-3b9f0c2d4e6a8b1c3d5e7f9a0b2c4d6e", "message": "probing", "level": "INFO"}}
+    {
+      "name": "probe_log",
+      "note": "a probe task (ASSIGN probe: true, id p-…) is never numbered",
+      "frame": {
+        "type": "LOG",
+        "id": "f-31",
+        "task": "p-3b9f0c2d4e6a8b1c3d5e7f9a0b2c4d6e",
+        "message": "probing",
+        "level": "INFO"
+      }
+    },
+    {
+      "name": "command_ack",
+      "note": "cumulative: every command through this position is handled",
+      "frame": {
+        "type": "COMMAND_ACK",
+        "id": "f-33",
+        "through": 7
+      }
+    },
+    {
+      "name": "journal_skip",
+      "note": "the answer to a JOURNAL_NACK the agent cannot satisfy: these positions are gone",
+      "frame": {
+        "type": "JOURNAL_SKIP",
+        "id": "f-34",
+        "session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90",
+        "first": 14,
+        "last": 15
+      }
+    },
+    {
+      "name": "inquiry_answer",
+      "note": "from memory, at once; UNKNOWN from the agent a task was given to ends the task as lost",
+      "frame": {
+        "type": "INQUIRY_ANSWER",
+        "id": "f-35",
+        "task": "42",
+        "status": "RUNNING",
+        "request": "q-1",
+        "step": 12,
+        "reported_at": 1790000011.5,
+        "progress": 40,
+        "message": "half way"
+      }
+    },
+    {
+      "name": "inquire_request",
+      "note": "a caller asking about a task it assigned: a read",
+      "frame": {
+        "type": "INQUIRE_REQUEST",
+        "id": "f-36",
+        "task": "88"
+      }
+    }
   ],
   "to_agent": [
-    {"name": "journal_ack", "frame": {"type": "JOURNAL_ACK", "id": "t-01", "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90", "pos": 13}},
-    {"name": "collect", "note": "drawers are named by the resource_id the agent minted", "frame": {"type": "COLLECT", "id": "t-02", "drawers": ["0d4e8a1f7c2b4e6a8b1c3d5e7f9a0b2c"]}}
+    {
+      "name": "init",
+      "note": "nonce is the REGISTER's; positions say how far the server has each session the REGISTER listed",
+      "frame": {
+        "type": "INIT",
+        "id": "t-00",
+        "agent": "7",
+        "diagnostics": [],
+        "nonce": "9d2c4b6a8e0f4a1c",
+        "positions": {
+          "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90": 13
+        }
+      }
+    },
+    {
+      "name": "journal_ack",
+      "frame": {
+        "type": "JOURNAL_ACK",
+        "id": "t-01",
+        "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90",
+        "through": 13
+      }
+    },
+    {
+      "name": "journal_nack",
+      "note": "a frame arrived ahead of position 14 and was not taken",
+      "frame": {
+        "type": "JOURNAL_NACK",
+        "id": "t-03",
+        "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90",
+        "expected": 14
+      }
+    },
+    {
+      "name": "collect",
+      "note": "a command, at its position in the server's stream to this agent; drawers are named by the resource_id the agent minted",
+      "frame": {
+        "type": "COLLECT",
+        "id": "t-02",
+        "pos": 7,
+        "drawers": [
+          "0d4e8a1f7c2b4e6a8b1c3d5e7f9a0b2c"
+        ]
+      }
+    },
+    {
+      "name": "child_completed",
+      "note": "what happened to a task this agent assigned is a command too; event names the event, so a mirror seen twice is recognised",
+      "frame": {
+        "type": "COMPLETED_EVENT",
+        "id": "t-04",
+        "pos": 8,
+        "task": "88",
+        "event": "4711"
+      }
+    },
+    {
+      "name": "inquire",
+      "note": "a question, not a command: no position, not kept; answered at once",
+      "frame": {
+        "type": "INQUIRE",
+        "id": "t-05",
+        "task": "42",
+        "request": "q-1"
+      }
+    },
+    {
+      "name": "inquire_response",
+      "note": "to a caller that asked about a task it assigned: what the task's agent said",
+      "frame": {
+        "type": "INQUIRE_RESPONSE",
+        "id": "t-06",
+        "request": "f-36",
+        "task": "88",
+        "status": "RUNNING",
+        "asked": true,
+        "step": 3,
+        "reported_at": 1790000011.5
+      }
+    }
+  ],
+  "numbered_requests_from_agent": [
+    {
+      "name": "child_call",
+      "note": "a request is numbered like a report (its answer comes back as a command) but belongs to no task of this agent, so it has no task_step; task 42 took step 8 for this call, which travels as parent_step; call_key is what task 42 calls it; reference is the caller's own",
+      "frame": {
+        "type": "ASSIGN_REQUEST",
+        "id": "f-30",
+        "reference": "c0ffee00c0ffee00c0ffee00c0ffee00",
+        "parent": "42",
+        "parent_step": 8,
+        "call_key": "7:3f2b6a9c:1",
+        "action": "7",
+        "args": {
+          "x": 1
+        },
+        "pos": 22,
+        "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90",
+        "agent_ts": 1790000021.0
+      }
+    },
+    {
+      "name": "cancel_request",
+      "note": "steering a task this agent assigned is numbered too: sent again after a reconnect, it is not carried out twice",
+      "frame": {
+        "type": "CANCEL_REQUEST",
+        "id": "f-32",
+        "task": "88",
+        "pos": 23,
+        "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90",
+        "agent_ts": 1790000022.0
+      }
+    }
   ]
 }

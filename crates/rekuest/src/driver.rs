@@ -22,7 +22,7 @@ use rekuest_session::{to_text, Event, Outbox, Session, SessionConfig};
 use crate::emit::Emitter;
 use crate::executor::Executor;
 use crate::journal::{Journal, JournalEntry, JournalSink};
-use crate::messages::{FromAgent, ToAgent};
+use crate::messages::{FromAgent, TaskStatus, ToAgent};
 use arkitekt_spec::rt::{self, Signal};
 use arkitekt_spec::AgentDeclaration;
 use arkitekt_spec::Context;
@@ -164,7 +164,6 @@ impl Driver {
                     );
                 }
             }
-            Event::Inquiries(tasks) => self.answer_inquiries(tasks),
             Event::Activate => {
                 let executor = self.executor.clone();
                 let shared = self.shared.clone();
@@ -190,40 +189,42 @@ impl Driver {
             ToAgent::Interrupt { task } => self.executor.interrupt(&task),
             ToAgent::Pause { task } => self.executor.pause(&task),
             ToAgent::Resume { task, step } => self.executor.resume(&task, step),
+            ToAgent::Inquire { task, request } => self.answer_inquiry(task, request),
             ToAgent::Collect { drawers } => {
                 for drawer in drawers {
                     self.executor.shelf().remove(&drawer);
                 }
             }
-            ToAgent::Shelved { error: Some(e), .. } | ToAgent::Unshelved { error: Some(e), .. } => {
-                tracing::warn!("the server could not record a drawer: {e}")
-            }
             other => tracing::debug!("ignoring {other:?}"),
         }
     }
 
-    fn answer_inquiries(&self, tasks: Vec<String>) {
-        for task in tasks {
-            if self.executor.is_running(&task) {
-                self.journal.emit(
-                    FromAgent::Progress {
-                        task,
-                        progress: None,
-                        message: Some("still running".into()),
-                    },
-                    None,
-                );
-            } else if !self.executor.has_finished(&task) {
-                // A predecessor's task: numbered, but with no task step.
-                self.journal.emit_unowned(
-                    FromAgent::Critical {
-                        task,
-                        error: "the agent restarted and lost this task".into(),
-                    },
-                    None,
-                );
-            }
-        }
+    /// What this agent knows of a task it is asked about, at once: where it stands and what
+    /// it last said of itself. "Unknown" is the last thing said: the server ends the task as
+    /// lost on it.
+    fn answer_inquiry(&self, task: String, request: Option<String>) {
+        let report = self.journal.task_report(&task);
+        let status = if self.executor.is_running(&task) {
+            // Taken, and not yet started: behind a lock, or still being set up.
+            report
+                .as_ref()
+                .map_or(TaskStatus::Waiting, |report| report.status)
+        } else if self.executor.has_finished(&task) {
+            TaskStatus::Ended
+        } else {
+            TaskStatus::Unknown
+        };
+        let report = report.filter(|_| !matches!(status, TaskStatus::Ended | TaskStatus::Unknown));
+        self.shared.lock().send(FromAgent::InquiryAnswer {
+            task,
+            status,
+            request,
+            step: report.as_ref().and_then(|report| report.step),
+            reported_at: report.as_ref().map(|report| report.reported_at),
+            progress: report.as_ref().and_then(|report| report.progress),
+            message: report.and_then(|report| report.message),
+        });
+        self.shared.wake.raise();
     }
 }
 
@@ -253,7 +254,7 @@ mod tests {
             );
             session.handle_text(
                 Duration::ZERO,
-                r#"{"type":"INIT","id":"i","agent":"a","inquiries":[],"diagnostics":[]}"#,
+                r#"{"type":"INIT","id":"i","agent":"a","diagnostics":[]}"#,
             );
             session.poll_transmit();
         });
@@ -300,7 +301,7 @@ mod tests {
     }
 
     #[test]
-    fn probes_and_requests_are_never_numbered_or_retained() {
+    fn a_probe_is_never_numbered_and_a_request_is_kept_like_a_report() {
         let driver = driver();
         live(&driver);
         let journal = driver.journal();
@@ -326,6 +327,8 @@ mod tests {
                 step: None,
                 prompt: None,
                 state_requires: vec![],
+                on_lost: None,
+                max_resumes: None,
             },
             None,
         );
@@ -335,12 +338,17 @@ mod tests {
             sent.iter()
                 .map(|e| (e.pos, e.task_step))
                 .collect::<Vec<_>>(),
-            [(None, None), (None, None), (None, None), (Some(1), Some(1))]
+            [
+                (None, None),
+                (None, None),
+                (Some(1), None),
+                (Some(2), Some(1))
+            ],
+            "the request is numbered in the session, and in no task of this agent"
         );
-        assert_eq!(sent[2].seq, None, "a request has no seq");
         assert_eq!(
             driver.with_session(|session| session.outbox().retained_len()),
-            1
+            2
         );
     }
 }

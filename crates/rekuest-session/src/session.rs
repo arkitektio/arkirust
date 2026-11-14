@@ -3,9 +3,10 @@
 //! Connection lifecycle:
 //! 1. [`Event::Connect`]: the driver opens a socket and gets a token, then
 //!    calls [`Session::connected`], which queues `REGISTER`
-//! 2. `INIT`: re-send every numbered frame not covered by a `JOURNAL_ACK`
+//! 2. `INIT` (the one that names this connection's `REGISTER`): drop what it
+//!    says the server has, re-send every numbered frame not covered
 //!    (earlier sessions' first; when frames were dropped from memory,
-//!    [`Event::ReloadJournal`] first), answer inquiries
+//!    [`Event::ReloadJournal`] first)
 //! 3. after the *first* `INIT` only: [`Event::Activate`]. Messages about
 //!    tasks (`ASSIGN`, `CANCEL`, `PAUSE`, `DECIDE`, …) wait, in order, until
 //!    the driver reports [`Session::activated`]; heartbeats, acks and
@@ -17,6 +18,12 @@
 //!
 //! Frames that arrive between `REGISTER` and `INIT` (or while the journal
 //! is reloaded) are held and handed on after it, heartbeats excepted.
+//!
+//! A command (a frame with a `pos`) is handed on once per position and
+//! acknowledged with a cumulative `COMMAND_ACK`: the server sends it again
+//! after a dropped connection, and it is not carried out twice. A
+//! `JOURNAL_NACK` (the server found a gap) has the outbox send again; what it
+//! no longer holds is given up with a `JOURNAL_SKIP`.
 
 use alloc::collections::VecDeque;
 use core::time::Duration;
@@ -28,7 +35,10 @@ use crate::outbox::Outbox;
 use crate::policy::ConnectionPolicy;
 use crate::prelude::*;
 use crate::protocol::definition::AgentDeclaration;
-use crate::protocol::messages::{parse_to_agent, Diagnostic, Envelope, FromAgent, ToAgent};
+use crate::protocol::messages::{
+    parse_to_agent_frame, Diagnostic, Envelope, FromAgent, TaskStatus, ToAgent, ToAgentFrame,
+    FEATURE_PROTOCOL_2,
+};
 use crate::rng::Rng;
 
 /// Close codes after which reconnecting is pointless.
@@ -119,9 +129,6 @@ pub enum Event {
     /// Frames were dropped from memory: read the unacknowledged entries back
     /// from the local journal and hand them to [`Session::reloaded`].
     ReloadJournal,
-    /// The server asks about these tasks: report the running ones, fail the
-    /// ones this process never ran.
-    Inquiries(Vec<String>),
     /// Start the app (startup hooks, `SESSION_INIT`, …), then
     /// [`Session::activated`]. Once per session.
     Activate,
@@ -140,7 +147,7 @@ pub enum Event {
 /// Activation happens once per session; until it is done, task messages wait.
 enum Activation {
     NotStarted,
-    Running(Vec<ToAgent>),
+    Running(Vec<ToAgentFrame>),
     Done,
 }
 
@@ -153,12 +160,11 @@ enum Phase {
     Connecting,
     /// `REGISTER` sent; frames before `INIT` are held.
     Registering {
-        early: Vec<ToAgent>,
+        early: Vec<ToAgentFrame>,
     },
     /// `INIT` arrived; waiting for the journal backlog.
     Reloading {
-        early: Vec<ToAgent>,
-        inquiries: Vec<String>,
+        early: Vec<ToAgentFrame>,
     },
     Live,
     Ended,
@@ -179,6 +185,10 @@ pub struct Session {
     attempt_started: Duration,
     last_inbound: Duration,
     rng: Rng,
+    /// What the current connection's `REGISTER` named itself; its `INIT` says it again.
+    nonce: Option<String>,
+    /// The highest command position handed on (or held for the app) by this process.
+    commands_seen: u64,
 }
 
 impl Session {
@@ -201,6 +211,8 @@ impl Session {
             attempt_started: Duration::ZERO,
             last_inbound: Duration::ZERO,
             rng,
+            nonce: None,
+            commands_seen: 0,
         }
     }
 
@@ -245,11 +257,16 @@ impl Session {
         if !matches!(self.phase, Phase::Connecting) {
             return;
         }
+        let nonce = self.mint_id();
+        self.nonce = Some(nonce.clone());
         let register = FromAgent::Register {
             token,
             force: self.config.force,
             session_id: Some(self.config.session_id.clone()),
-            features: vec![],
+            features: vec![FEATURE_PROTOCOL_2.to_owned()],
+            nonce: Some(nonce),
+            commands_seen: self.commands_seen,
+            sessions: self.outbox.sessions_owed(),
             declaration,
         };
         let id = self.mint_id();
@@ -271,10 +288,11 @@ impl Session {
             return;
         }
         self.last_inbound = now;
-        let message = match parse_to_agent(text) {
-            Ok(message) => message,
+        let frame = match parse_to_agent_frame(text) {
+            Ok(frame) => frame,
             Err((raw, error)) => return self.reject_frame(raw, error),
         };
+        let ToAgentFrame { id, pos, message } = frame;
         match message {
             ToAgent::Heartbeat {} => {
                 let id = self.mint_id();
@@ -283,23 +301,32 @@ impl Session {
             }
             ToAgent::Init {
                 agent,
-                inquiries,
                 diagnostics,
+                nonce,
+                positions,
                 ..
             } => {
+                if nonce.is_some() && nonce != self.nonce {
+                    tracing::info!("ignoring the INIT of a connection that is gone");
+                    return;
+                }
+                for (session, projected) in positions {
+                    if projected > 0 {
+                        self.outbox.journal_ack(&session, projected);
+                    }
+                }
                 self.events
                     .push_back(Event::Registered { agent, diagnostics });
-                let inquiries: Vec<String> = inquiries.into_iter().map(|i| i.task).collect();
                 let early = match core::mem::replace(&mut self.phase, Phase::Live) {
                     Phase::Registering { early } => early,
                     Phase::Reloading { early, .. } => early,
                     _ => vec![],
                 };
                 if self.outbox.needs_reload() {
-                    self.phase = Phase::Reloading { early, inquiries };
+                    self.phase = Phase::Reloading { early };
                     self.events.push_back(Event::ReloadJournal);
                 } else {
-                    self.go_live(early, inquiries);
+                    self.go_live(early);
                 }
             }
             ToAgent::ProtocolError { error } => self.end(SessionError::Refused(error)),
@@ -310,10 +337,15 @@ impl Session {
                 let delay = duration.map(Duration::from_secs).unwrap_or(BOUNCE_DELAY);
                 self.disconnect(now + delay);
             }
-            other => match &mut self.phase {
-                Phase::Registering { early } | Phase::Reloading { early, .. } => early.push(other),
-                _ => self.dispatch(other),
-            },
+            message => {
+                let frame = ToAgentFrame { id, pos, message };
+                match &mut self.phase {
+                    Phase::Registering { early } | Phase::Reloading { early, .. } => {
+                        early.push(frame)
+                    }
+                    _ => self.dispatch(frame),
+                }
+            }
         }
     }
 
@@ -364,12 +396,11 @@ impl Session {
             self.outbox.reload(entries);
         }
         if let Phase::Reloading { .. } = self.phase {
-            let Phase::Reloading { early, inquiries } =
-                core::mem::replace(&mut self.phase, Phase::Live)
+            let Phase::Reloading { early } = core::mem::replace(&mut self.phase, Phase::Live)
             else {
                 unreachable!()
             };
-            self.go_live(early, inquiries);
+            self.go_live(early);
         }
     }
 
@@ -383,8 +414,8 @@ impl Session {
                 if let Activation::Running(held) =
                     core::mem::replace(&mut self.activation, Activation::Done)
                 {
-                    for message in held {
-                        self.events.push_back(Event::Message(message));
+                    for frame in held {
+                        self.events.push_back(Event::Message(frame.message));
                     }
                 }
             }
@@ -395,7 +426,7 @@ impl Session {
         }
     }
 
-    /// Queue an unnumbered message (requests, probes) for the current connection.
+    /// Queue an unnumbered message (a probe's, a state revision request) for the current connection.
     pub fn send(&mut self, message: FromAgent) {
         let id = self.mint_id();
         self.outbox.push(Envelope::with_id(id, message));
@@ -435,15 +466,12 @@ impl Session {
         )
     }
 
-    /// After `INIT` (and the backlog): attach, re-send, answer inquiries,
-    /// activate once, then what arrived early.
-    fn go_live(&mut self, early: Vec<ToAgent>, inquiries: Vec<String>) {
+    /// After `INIT` (and the backlog): attach, re-send, activate once, then
+    /// what arrived early.
+    fn go_live(&mut self, early: Vec<ToAgentFrame>) {
         self.phase = Phase::Live;
         self.outbox.attach();
         self.outbox.resend_unacked();
-        if !inquiries.is_empty() {
-            self.events.push_back(Event::Inquiries(inquiries));
-        }
         if matches!(self.activation, Activation::NotStarted) {
             self.activation = Activation::Running(vec![]);
             self.events.push_back(Event::Activate);
@@ -453,30 +481,110 @@ impl Session {
         }
     }
 
-    fn dispatch(&mut self, message: ToAgent) {
-        match message {
-            message if is_for_tasks(&message) => match &mut self.activation {
-                Activation::Done => self.events.push_back(Event::Message(message)),
-                Activation::Running(held) => held.push(message),
-                // Cannot happen (task messages come after INIT), but never lose one.
-                Activation::NotStarted => self.activation = Activation::Running(vec![message]),
-            },
+    /// Hand a frame on. A command is handed on once per position and acknowledged: the
+    /// server sends it again when it cannot know it arrived.
+    fn dispatch(&mut self, frame: ToAgentFrame) {
+        if let Some(pos) = frame.pos {
+            if pos <= self.commands_seen {
+                tracing::debug!("command {} was handled before; acknowledging it again", pos);
+                return self.ack_commands();
+            }
+            // Held for the app (until it is activated) counts: what is held is kept across
+            // connections and handed on in order.
+            self.commands_seen = pos;
+            self.ack_commands();
+        }
+        match frame.message {
+            message if is_for_tasks(&message) => {
+                let frame = ToAgentFrame {
+                    id: frame.id,
+                    pos: frame.pos,
+                    message,
+                };
+                match &mut self.activation {
+                    Activation::Done => self.events.push_back(Event::Message(frame.message)),
+                    Activation::Running(held) => held.push(frame),
+                    // Cannot happen (task messages come after INIT), but never lose one.
+                    Activation::NotStarted => self.activation = Activation::Running(vec![frame]),
+                }
+            }
             ToAgent::JournalAck {
                 journal_session,
-                pos,
+                through,
             } => {
-                self.outbox.journal_ack(&journal_session, pos);
+                self.outbox.journal_ack(&journal_session, through);
                 self.events.push_back(Event::Acked {
                     session: journal_session,
-                    pos,
+                    pos: through,
                 });
             }
-            // Frames are retired by JOURNAL_ACK; the server stops sending
-            // EVENT_ACK once it gets positions.
-            ToAgent::EventAck { .. } => {}
+            ToAgent::JournalNack {
+                journal_session,
+                expected,
+            } => {
+                if let Some((first, last)) = self.outbox.nack(&journal_session, expected) {
+                    tracing::error!(
+                        "the reports {}..={} of session {} are no longer held and cannot be sent again",
+                        first,
+                        last,
+                        journal_session
+                    );
+                    let id = self.mint_id();
+                    // Ahead of the resend: the control frames go out first.
+                    self.control.push_back(Envelope::with_id(
+                        id,
+                        FromAgent::JournalSkip {
+                            session: journal_session,
+                            first,
+                            last,
+                        },
+                    ));
+                }
+            }
+            // An assign still held for the app to start is known, and waiting: said here,
+            // as the app (which would say "unknown", and lose the task) has not seen it.
+            ToAgent::Inquire { task, request } if self.holds_assign(&task) => {
+                let id = self.mint_id();
+                self.control.push_back(Envelope::with_id(
+                    id,
+                    FromAgent::InquiryAnswer {
+                        task,
+                        status: TaskStatus::Waiting,
+                        request,
+                        step: None,
+                        reported_at: None,
+                        progress: None,
+                        message: None,
+                    },
+                ));
+            }
             ToAgent::Unknown => tracing::debug!("ignoring an unsupported message"),
             other => self.events.push_back(Event::Message(other)),
         }
+    }
+
+    /// Whether an `ASSIGN` for `task` waits for the app to be activated.
+    fn holds_assign(&self, task: &str) -> bool {
+        match &self.activation {
+            Activation::Running(held) => held.iter().any(
+                |frame| matches!(&frame.message, ToAgent::Assign(assign) if assign.task == task),
+            ),
+            _ => false,
+        }
+    }
+
+    /// One cumulative `COMMAND_ACK` waiting to go out: a newer position replaces an older one.
+    fn ack_commands(&mut self) {
+        let through = self.commands_seen;
+        for envelope in self.control.iter_mut() {
+            if let FromAgent::CommandAck { through: pending } = &mut envelope.message {
+                *pending = through;
+                return;
+            }
+        }
+        let id = self.mint_id();
+        self.control
+            .push_back(Envelope::with_id(id, FromAgent::CommandAck { through }));
     }
 
     /// A frame that did not parse. A broken `ASSIGN` is answered so the

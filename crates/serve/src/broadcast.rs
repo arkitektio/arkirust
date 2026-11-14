@@ -51,8 +51,6 @@ struct Subscriber {
 pub struct Broadcaster {
     subscribers: Mutex<Vec<Subscriber>>,
     next_id: AtomicU64,
-    /// Numbered under the subscribers lock, so frames go out in `seq` order.
-    seq: Mutex<u64>,
 }
 
 impl std::fmt::Debug for Broadcaster {
@@ -116,12 +114,6 @@ impl Broadcaster {
         let mut envelope = Envelope::new(message);
         if let Some(entry) = entry {
             envelope.id = entry.message_id.clone();
-        }
-        // Numbered even when nobody is listening, as in Python.
-        if envelope.message.is_event() {
-            let mut seq = self.seq.lock().expect("seq");
-            *seq += 1;
-            envelope.seq = Some(*seq);
         }
         let legacy = legacy_route(&envelope.message, action_key);
         let journal_route = entry.map(JournalEntry::route).or(legacy);

@@ -56,7 +56,7 @@ fn registering(session: &mut Session, now: Duration) {
 fn init(session: &mut Session, now: Duration) {
     session.handle_text(
         now,
-        r#"{"type":"INIT","id":"i","agent":"a","inquiries":[],"diagnostics":[]}"#,
+        r#"{"type":"INIT","id":"i","agent":"a","diagnostics":[]}"#,
     );
 }
 
@@ -256,7 +256,7 @@ fn unacknowledged_frames_are_resent_in_order_after_a_reconnect() {
     assert_eq!(sent(&mut session).len(), 3);
     session.handle_text(
         secs(1),
-        r#"{"type":"JOURNAL_ACK","id":"a","journal_session":"s","pos":1}"#,
+        r#"{"type":"JOURNAL_ACK","id":"a","journal_session":"s","through":1}"#,
     );
     assert_eq!(
         events(&mut session),
@@ -281,11 +281,11 @@ fn unacknowledged_frames_are_resent_in_order_after_a_reconnect() {
         "nothing between REGISTER and INIT"
     );
     init(&mut session, at);
-    let resent: Vec<(u64, u64)> = sent(&mut session)
+    let resent: Vec<u64> = sent(&mut session)
         .iter()
-        .map(|f| (f["pos"].as_u64().unwrap(), f["seq"].as_u64().unwrap()))
+        .map(|f| f["pos"].as_u64().unwrap())
         .collect();
-    assert_eq!(resent, [(2, 1), (3, 2), (4, 3)]);
+    assert_eq!(resent, [2, 3, 4]);
 }
 
 #[test]
@@ -451,15 +451,31 @@ fn a_malformed_assign_is_reported_other_garbage_ignored() {
 }
 
 #[test]
-fn inquiries_follow_the_resend() {
+fn an_assign_held_for_activation_is_waiting_not_unknown() {
+    // The app has not seen it yet and would say it does not know it, which ends the task as
+    // lost: the session answers for what it holds.
     let mut session = Session::new(config());
     registering(&mut session, secs(0));
+    init(&mut session, secs(0));
+    events(&mut session);
+    sent(&mut session);
     session.handle_text(
         secs(0),
-        r#"{"type":"INIT","id":"i","agent":"a","inquiries":[{"task":"old"}],"diagnostics":[]}"#,
+        r#"{"type":"ASSIGN","id":"a","pos":1,"interface":"i","task":"7","user":"u","org":"o","action":"x","implementation":"m"}"#,
     );
-    let events = events(&mut session);
-    assert_eq!(events[1], Event::Inquiries(vec!["old".into()]));
+    session.handle_text(
+        secs(0),
+        r#"{"type":"INQUIRE","id":"q","task":"7","request":"q-1"}"#,
+    );
+    let answers: Vec<_> = sent(&mut session)
+        .into_iter()
+        .filter(|frame| frame["type"] == "INQUIRY_ANSWER")
+        .collect();
+    assert_eq!(answers.len(), 1);
+    assert_eq!(
+        (&answers[0]["status"], &answers[0]["request"]),
+        (&serde_json::json!("WAITING"), &serde_json::json!("q-1"))
+    );
 }
 
 /// The shared scenario, driven synchronously: the reference the async

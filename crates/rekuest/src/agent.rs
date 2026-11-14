@@ -7,7 +7,7 @@
 //! Connection lifecycle:
 //! 1. connect, send `REGISTER` (token + declaration), wait for `INIT`
 //! 2. re-send every numbered frame not covered by a `JOURNAL_ACK` (earlier
-//!    sessions' first), answer inquiries
+//!    sessions' first)
 //! 3. after the *first* `INIT` only: activate (startup hooks, `SESSION_INIT`,
 //!    background hooks). Activation runs beside the read loop so heartbeats
 //!    keep being answered; task messages wait until it is done.

@@ -42,7 +42,12 @@
           "operator": "EQUALS",
           "value": "value-1"
         }
-      ]
+      ],
+      "pos": 7,
+      "journal_session": "journal_session-1",
+      "agent_ts": 1.5,
+      "on_lost": "FAIL",
+      "max_resumes": 7
     },
     "CANCELLED": {
       "id": "id-1",
@@ -50,7 +55,6 @@
       "journal_session": "journal_session-1",
       "agent_ts": 1.5,
       "task_step": 7,
-      "seq": 7,
       "type": "CANCELLED",
       "task": "task-1"
     },
@@ -58,7 +62,10 @@
       "id": "id-1",
       "task": "task-1",
       "type": "CANCEL_REQUEST",
-      "auto_interrupt": 1.5
+      "auto_interrupt": 1.5,
+      "pos": 7,
+      "journal_session": "journal_session-1",
+      "agent_ts": 1.5
     },
     "COMPLETED": {
       "id": "id-1",
@@ -66,7 +73,6 @@
       "journal_session": "journal_session-1",
       "agent_ts": 1.5,
       "task_step": 7,
-      "seq": 7,
       "type": "COMPLETED",
       "task": "task-1"
     },
@@ -76,7 +82,6 @@
       "journal_session": "journal_session-1",
       "agent_ts": 1.5,
       "task_step": 7,
-      "seq": 7,
       "type": "CRITICAL",
       "task": "task-1",
       "error": "error-1"
@@ -87,7 +92,6 @@
       "journal_session": "journal_session-1",
       "agent_ts": 1.5,
       "task_step": 7,
-      "seq": 7,
       "type": "EFFECT",
       "task": "task-1",
       "effect": "NOW",
@@ -100,7 +104,6 @@
       "journal_session": "journal_session-1",
       "agent_ts": 1.5,
       "task_step": 7,
-      "seq": 7,
       "type": "FAILED",
       "task": "task-1",
       "error": "error-1",
@@ -116,7 +119,6 @@
       "journal_session": "journal_session-1",
       "agent_ts": 1.5,
       "task_step": 7,
-      "seq": 7,
       "type": "HELD",
       "task": "task-1",
       "message": "message-1",
@@ -209,14 +211,16 @@
       "journal_session": "journal_session-1",
       "agent_ts": 1.5,
       "task_step": 7,
-      "seq": 7,
       "type": "INTERRUPTED",
       "task": "task-1"
     },
     "INTERRUPT_REQUEST": {
       "id": "id-1",
       "task": "task-1",
-      "type": "INTERRUPT_REQUEST"
+      "type": "INTERRUPT_REQUEST",
+      "pos": 7,
+      "journal_session": "journal_session-1",
+      "agent_ts": 1.5
     },
     "LOCK": {
       "id": "id-1",
@@ -234,7 +238,6 @@
       "journal_session": "journal_session-1",
       "agent_ts": 1.5,
       "task_step": 7,
-      "seq": 7,
       "type": "LOG",
       "task": "task-1",
       "message": "message-1",
@@ -246,7 +249,6 @@
       "journal_session": "journal_session-1",
       "agent_ts": 1.5,
       "task_step": 7,
-      "seq": 7,
       "type": "PAUSED",
       "task": "task-1",
       "message": "message-1",
@@ -262,7 +264,10 @@
     "PAUSE_REQUEST": {
       "id": "id-1",
       "task": "task-1",
-      "type": "PAUSE_REQUEST"
+      "type": "PAUSE_REQUEST",
+      "pos": 7,
+      "journal_session": "journal_session-1",
+      "agent_ts": 1.5
     },
     "PROBE_REQUEST": {
       "id": "id-1",
@@ -281,7 +286,6 @@
       "journal_session": "journal_session-1",
       "agent_ts": 1.5,
       "task_step": 7,
-      "seq": 7,
       "type": "PROGRESS",
       "task": "task-1",
       "progress": 7,
@@ -302,6 +306,11 @@
       "bloks": [],
       "features": [
         "features-1"
+      ],
+      "nonce": "nonce-1",
+      "commands_seen": 7,
+      "sessions": [
+        "session_id-1"
       ]
     },
     "RESUMED": {
@@ -310,7 +319,6 @@
       "journal_session": "journal_session-1",
       "agent_ts": 1.5,
       "task_step": 7,
-      "seq": 7,
       "type": "RESUMED",
       "task": "task-1"
     },
@@ -318,7 +326,10 @@
       "id": "id-1",
       "task": "task-1",
       "type": "RESUME_REQUEST",
-      "step": true
+      "step": true,
+      "pos": 7,
+      "journal_session": "journal_session-1",
+      "agent_ts": 1.5
     },
     "SESSION_INIT": {
       "id": "id-1",
@@ -344,7 +355,6 @@
       "agent_ts": 1.5,
       "task_step": 7,
       "type": "SHELVE",
-      "ref": "ref-1",
       "identifier": "identifier-1",
       "resource_id": "resource_id-1",
       "label": "label-1",
@@ -357,7 +367,6 @@
       "journal_session": "journal_session-1",
       "agent_ts": 1.5,
       "task_step": 7,
-      "seq": 7,
       "type": "STARTED",
       "task": "task-1"
     },
@@ -375,7 +384,6 @@
       "op": "replace",
       "path": "/barcode",
       "value": "B1",
-      "old_value": null,
       "task_id": "task_id-1"
     },
     "STATE_REVISION_REQUEST": {
@@ -431,7 +439,6 @@
       "agent_ts": 1.5,
       "task_step": 7,
       "type": "UNSHELVE",
-      "ref": "ref-1",
       "drawer": "drawer-1"
     },
     "YIELD": {
@@ -440,7 +447,6 @@
       "journal_session": "journal_session-1",
       "agent_ts": 1.5,
       "task_step": 7,
-      "seq": 7,
       "type": "YIELD",
       "task": "task-1",
       "returns": {
@@ -458,7 +464,6 @@
       "journal_session": "journal_session-1",
       "agent_ts": 1.5,
       "task_step": 7,
-      "seq": 7,
       "type": "INFORM",
       "task": "task-1",
       "message": "message-1",
@@ -532,6 +537,34 @@
         ],
         "module": "module-1"
       }
+    },
+    "COMMAND_ACK": {
+      "id": "id-1",
+      "type": "COMMAND_ACK",
+      "through": 7
+    },
+    "JOURNAL_SKIP": {
+      "id": "id-1",
+      "type": "JOURNAL_SKIP",
+      "session": "journal_session-1",
+      "first": 3,
+      "last": 7
+    },
+    "INQUIRY_ANSWER": {
+      "id": "id-1",
+      "type": "INQUIRY_ANSWER",
+      "task": "task-1",
+      "status": "RUNNING",
+      "request": "request-1",
+      "step": 7,
+      "reported_at": 1.5,
+      "progress": 7,
+      "message": "message-1"
+    },
+    "INQUIRE_REQUEST": {
+      "id": "id-1",
+      "type": "INQUIRE_REQUEST",
+      "task": "task-1"
     }
   },
   "to_agent": {
@@ -574,7 +607,8 @@
           "operator": "EQUALS",
           "value": "value-1"
         }
-      ]
+      ],
+      "pos": 7
     },
     "ASSIGN_RESPONSE": {
       "id": "id-1",
@@ -583,7 +617,8 @@
       "reference": "reference-1",
       "task": "task-1",
       "created": true,
-      "error": "error-1"
+      "error": "error-1",
+      "pos": 7
     },
     "BOUNCE": {
       "id": "id-1",
@@ -594,41 +629,43 @@
       "id": "id-1",
       "task": "task-1",
       "event": "event-1",
-      "seq": 7,
-      "type": "BOUND_EVENT"
+      "type": "BOUND_EVENT",
+      "pos": 7
     },
     "CANCEL": {
       "id": "id-1",
       "type": "CANCEL",
-      "task": "task-1"
+      "task": "task-1",
+      "pos": 7
     },
     "CANCELLED_EVENT": {
       "id": "id-1",
       "task": "task-1",
       "event": "event-1",
-      "seq": 7,
-      "type": "CANCELLED_EVENT"
+      "type": "CANCELLED_EVENT",
+      "pos": 7
     },
     "CANCELLING_EVENT": {
       "id": "id-1",
       "task": "task-1",
       "event": "event-1",
-      "seq": 7,
-      "type": "CANCELLING_EVENT"
+      "type": "CANCELLING_EVENT",
+      "pos": 7
     },
     "COLLECT": {
       "id": "id-1",
       "type": "COLLECT",
       "drawers": [
         "drawers-1"
-      ]
+      ],
+      "pos": 7
     },
     "COMPLETED_EVENT": {
       "id": "id-1",
       "task": "task-1",
       "event": "event-1",
-      "seq": 7,
-      "type": "COMPLETED_EVENT"
+      "type": "COMPLETED_EVENT",
+      "pos": 7
     },
     "CONTROL_RESPONSE": {
       "id": "id-1",
@@ -636,15 +673,16 @@
       "request": "request-1",
       "task": "task-1",
       "accepted": true,
-      "error": "error-1"
+      "error": "error-1",
+      "pos": 7
     },
     "CRITICAL_EVENT": {
       "id": "id-1",
       "task": "task-1",
       "event": "event-1",
-      "seq": 7,
       "type": "CRITICAL_EVENT",
-      "error": "error-1"
+      "error": "error-1",
+      "pos": 7
     },
     "DECIDE": {
       "id": "id-1",
@@ -660,38 +698,32 @@
             "two"
           ]
         }
-      }
+      },
+      "pos": 7
     },
     "DELEGATE_EVENT": {
       "id": "id-1",
       "task": "task-1",
       "event": "event-1",
-      "seq": 7,
-      "type": "DELEGATE_EVENT"
+      "type": "DELEGATE_EVENT",
+      "pos": 7
     },
     "DENIED_EVENT": {
       "id": "id-1",
       "task": "task-1",
       "event": "event-1",
-      "seq": 7,
       "type": "DENIED_EVENT",
-      "answer": "answer-1"
-    },
-    "EVENT_ACK": {
-      "id": "id-1",
-      "type": "EVENT_ACK",
-      "event": "event-1",
-      "task": "task-1",
-      "seq": 7
+      "answer": "answer-1",
+      "pos": 7
     },
     "FAILED_EVENT": {
       "id": "id-1",
       "task": "task-1",
       "event": "event-1",
-      "seq": 7,
       "type": "FAILED_EVENT",
       "error": "error-1",
-      "code": "code-1"
+      "code": "code-1",
+      "pos": 7
     },
     "HEARTBEAT": {
       "id": "id-1",
@@ -701,22 +733,17 @@
       "id": "id-1",
       "task": "task-1",
       "event": "event-1",
-      "seq": 7,
       "type": "HELD_EVENT",
       "prompt": {
         "title": "title-1",
         "description": "description-1"
-      }
+      },
+      "pos": 7
     },
     "INIT": {
       "id": "id-1",
       "type": "INIT",
       "agent": "agent-1",
-      "inquiries": [
-        {
-          "task": "task-1"
-        }
-      ],
       "hash": "hash-1",
       "diagnostics": [
         {
@@ -725,32 +752,37 @@
           "message": "message-1",
           "path": "path-1"
         }
-      ]
+      ],
+      "nonce": "nonce-1",
+      "positions": {
+        "journal_session-1": 7
+      }
     },
     "INTERRUPT": {
       "id": "id-1",
       "type": "INTERRUPT",
-      "task": "task-1"
+      "task": "task-1",
+      "pos": 7
     },
     "INTERRUPTED_EVENT": {
       "id": "id-1",
       "task": "task-1",
       "event": "event-1",
-      "seq": 7,
-      "type": "INTERRUPTED_EVENT"
+      "type": "INTERRUPTED_EVENT",
+      "pos": 7
     },
     "INTERRUPTING_EVENT": {
       "id": "id-1",
       "task": "task-1",
       "event": "event-1",
-      "seq": 7,
-      "type": "INTERRUPTING_EVENT"
+      "type": "INTERRUPTING_EVENT",
+      "pos": 7
     },
     "JOURNAL_ACK": {
       "id": "id-1",
       "type": "JOURNAL_ACK",
       "journal_session": "journal_session-1",
-      "pos": 7
+      "through": 7
     },
     "KICK": {
       "id": "id-1",
@@ -761,40 +793,41 @@
       "id": "id-1",
       "task": "task-1",
       "event": "event-1",
-      "seq": 7,
       "type": "LOG_EVENT",
       "message": "message-1",
-      "level": "DEBUG"
+      "level": "DEBUG",
+      "pos": 7
     },
     "LOST_EVENT": {
       "id": "id-1",
       "task": "task-1",
       "event": "event-1",
-      "seq": 7,
       "type": "LOST_EVENT",
       "started": true,
       "last_progress": 7,
       "effects": "effects-1",
-      "reason": "reason-1"
+      "reason": "reason-1",
+      "pos": 7
     },
     "PAUSE": {
       "id": "id-1",
       "type": "PAUSE",
-      "task": "task-1"
+      "task": "task-1",
+      "pos": 7
     },
     "PAUSED_EVENT": {
       "id": "id-1",
       "task": "task-1",
       "event": "event-1",
-      "seq": 7,
-      "type": "PAUSED_EVENT"
+      "type": "PAUSED_EVENT",
+      "pos": 7
     },
     "PAUSING_EVENT": {
       "id": "id-1",
       "task": "task-1",
       "event": "event-1",
-      "seq": 7,
-      "type": "PAUSING_EVENT"
+      "type": "PAUSING_EVENT",
+      "pos": 7
     },
     "PROBE_RESPONSE": {
       "id": "id-1",
@@ -807,10 +840,10 @@
       "id": "id-1",
       "task": "task-1",
       "event": "event-1",
-      "seq": 7,
       "type": "PROGRESS_EVENT",
       "progress": 7,
-      "message": "message-1"
+      "message": "message-1",
+      "pos": 7
     },
     "PROTOCOL_ERROR": {
       "id": "id-1",
@@ -821,42 +854,36 @@
       "id": "id-1",
       "task": "task-1",
       "event": "event-1",
-      "seq": 7,
-      "type": "QUEUED_EVENT"
+      "type": "QUEUED_EVENT",
+      "pos": 7
     },
     "RESUME": {
       "id": "id-1",
       "type": "RESUME",
       "task": "task-1",
-      "step": true
+      "step": true,
+      "pos": 7
     },
     "RESUMED_EVENT": {
       "id": "id-1",
       "task": "task-1",
       "event": "event-1",
-      "seq": 7,
-      "type": "RESUMED_EVENT"
+      "type": "RESUMED_EVENT",
+      "pos": 7
     },
     "RESUMING_EVENT": {
       "id": "id-1",
       "task": "task-1",
       "event": "event-1",
-      "seq": 7,
-      "type": "RESUMING_EVENT"
-    },
-    "SHELVED": {
-      "id": "id-1",
-      "type": "SHELVED",
-      "ref": "ref-1",
-      "drawer": "drawer-1",
-      "error": "error-1"
+      "type": "RESUMING_EVENT",
+      "pos": 7
     },
     "STARTED_EVENT": {
       "id": "id-1",
       "task": "task-1",
       "event": "event-1",
-      "seq": 7,
-      "type": "STARTED_EVENT"
+      "type": "STARTED_EVENT",
+      "pos": 7
     },
     "STATE_REVISION_RESPONSE": {
       "id": "id-1",
@@ -874,17 +901,10 @@
       "detail": "detail-1",
       "error": "error-1"
     },
-    "UNSHELVED": {
-      "id": "id-1",
-      "type": "UNSHELVED",
-      "ref": "ref-1",
-      "error": "error-1"
-    },
     "YIELD_EVENT": {
       "id": "id-1",
       "task": "task-1",
       "event": "event-1",
-      "seq": 7,
       "type": "YIELD_EVENT",
       "returns": {
         "key": {
@@ -893,13 +913,41 @@
             "two"
           ]
         }
-      }
+      },
+      "pos": 7
     },
     "BLOK_REFUSED": {
       "id": "id-1",
       "type": "BLOK_REFUSED",
       "task": "task-1",
-      "reason": "reason-1"
+      "reason": "reason-1",
+      "pos": 7
+    },
+    "JOURNAL_NACK": {
+      "id": "id-1",
+      "type": "JOURNAL_NACK",
+      "journal_session": "journal_session-1",
+      "expected": 7
+    },
+    "INQUIRE": {
+      "id": "id-1",
+      "type": "INQUIRE",
+      "task": "task-1",
+      "request": "request-1"
+    },
+    "INQUIRE_RESPONSE": {
+      "id": "id-1",
+      "type": "INQUIRE_RESPONSE",
+      "request": "request-1",
+      "task": "task-1",
+      "status": "RUNNING",
+      "asked": true,
+      "detail": "detail-1",
+      "step": 7,
+      "error": "error-1",
+      "reported_at": 1.5,
+      "progress": 7,
+      "message": "message-1"
     }
   }
 }

@@ -1,7 +1,6 @@
 [
   {
     "id": "d6dff72d-4802-4ae6-b4b7-45da041e50a6",
-    "seq": 1,
     "type": "PROGRESS",
     "task": "759fc766-5cc5-41e8-a756-d4fd34f811c4",
     "progress": 0,
@@ -23,12 +22,10 @@
     "op": "replace",
     "path": "/exposure_ms",
     "value": 20.0,
-    "old_value": null,
     "task_id": "759fc766-5cc5-41e8-a756-d4fd34f811c4"
   },
   {
     "id": "df2aca38-83ba-410c-b52d-a9dde81119d6",
-    "seq": 2,
     "type": "YIELD",
     "task": "759fc766-5cc5-41e8-a756-d4fd34f811c4",
     "returns": {
@@ -37,7 +34,6 @@
   },
   {
     "id": "52d7780f-15ef-4fff-9d74-d0a10fe1a12f",
-    "seq": 3,
     "type": "COMPLETED",
     "task": "759fc766-5cc5-41e8-a756-d4fd34f811c4"
   },

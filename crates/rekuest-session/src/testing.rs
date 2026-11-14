@@ -175,7 +175,7 @@ impl FakeServer {
             (Stage::Second, "COMPLETED") => {
                 let pos = frame["pos"].as_u64().unwrap_or_default();
                 let session = frame["journal_session"].as_str().unwrap_or_default();
-                self.send(json!({"type": "JOURNAL_ACK", "id": "ack", "journal_session": session, "pos": pos}));
+                self.send(json!({"type": "JOURNAL_ACK", "id": "ack", "journal_session": session, "through": pos}));
                 self.stage = Stage::Done;
             }
             _ => {}

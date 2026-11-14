@@ -138,7 +138,6 @@ impl StatePublisher for HubInner {
                 op: published.op.clone(),
                 path: published.path.clone(),
                 value: published.value.clone(),
-                old_value: Value::Null,
                 task_id: published.task_id.clone(),
             },
             None,

@@ -198,7 +198,7 @@ async fn unacknowledged_entries_survive_a_restart() {
     assert_ne!(new_init["journal_session"], first_session.as_str());
 
     // Acknowledge the old session; a third run re-sends nothing of it.
-    send(&mut ws, json!({"type": "JOURNAL_ACK", "journal_session": first_session, "pos": *sent_positions.last().unwrap()})).await;
+    send(&mut ws, json!({"type": "JOURNAL_ACK", "journal_session": first_session, "through": *sent_positions.last().unwrap()})).await;
     tokio::time::sleep(Duration::from_millis(200)).await;
     second.shutdown().await;
     drop(ws);
@@ -226,7 +226,7 @@ async fn a_shelved_value_is_announced_before_it_is_referenced() {
     let yielded = frames.iter().position(|f| f["type"] == "YIELD").unwrap();
     assert!(shelve < yielded);
     let id = frames[shelve]["resource_id"].as_str().unwrap().to_owned();
-    assert_eq!(frames[shelve]["ref"], id.as_str());
+    assert!(frames[shelve].get("ref").is_none(), "the id is said once");
     assert_eq!(
         frames[shelve]["task"], "t1",
         "SHELVE names the task that shelved"

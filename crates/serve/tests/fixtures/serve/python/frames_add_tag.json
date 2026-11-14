@@ -1,7 +1,6 @@
 [
   {
     "id": "870ce9de-ca09-457e-92e0-cdf929d541b4",
-    "seq": 4,
     "type": "PROGRESS",
     "task": "582cdbfb-562f-4068-9686-dd246bc5b2f5",
     "progress": 0,
@@ -23,12 +22,10 @@
     "op": "add",
     "path": "/tags/0",
     "value": "a",
-    "old_value": null,
     "task_id": "582cdbfb-562f-4068-9686-dd246bc5b2f5"
   },
   {
     "id": "0a76fb1d-e55d-44a6-84ba-31066f80c12a",
-    "seq": 5,
     "type": "YIELD",
     "task": "582cdbfb-562f-4068-9686-dd246bc5b2f5",
     "returns": {
@@ -37,7 +34,6 @@
   },
   {
     "id": "ea383c96-e4b4-48a9-97c6-64275caca398",
-    "seq": 6,
     "type": "COMPLETED",
     "task": "582cdbfb-562f-4068-9686-dd246bc5b2f5"
   },

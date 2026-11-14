@@ -50,7 +50,6 @@ impl JournalEntry {
     pub fn envelope(&self, message: FromAgent) -> Envelope {
         Envelope {
             id: self.message_id.clone(),
-            seq: None,
             pos: Some(self.pos),
             journal_session: Some(self.session_id.clone()),
             agent_ts: Some(self.event_time as f64 / 1000.0),

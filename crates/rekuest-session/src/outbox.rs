@@ -6,9 +6,11 @@
 //!
 //! Every numbered frame (one with a journal `pos`) is retained, in
 //! `(session, pos)` order, until a cumulative `JOURNAL_ACK` covers it; that
-//! includes terminal reports (`EVENT_ACK` is not needed). Frames of earlier
+//! includes terminal reports and the requests a task makes. Frames of earlier
 //! sessions (read back from the local journal after a restart) go first.
-//! Unnumbered frames (probes, requests) are sent once and never retained.
+//! Unnumbered frames (a probe's, the acknowledgements) are sent once and never
+//! retained. A `JOURNAL_NACK` (the server found a gap) has everything retained
+//! sent again, in order.
 //!
 //! The retained frames are bounded ([`RETAIN_LIMIT`]) only when the local
 //! journal persists them: beyond it, the newest are dropped from memory (the
@@ -33,7 +35,6 @@ pub struct Outbox {
     attached: bool,
     /// Frames for the current connection, oldest first.
     queue: VecDeque<Envelope>,
-    seq: u64,
     /// Numbered frames not yet covered by a `JOURNAL_ACK`, by `(session order, pos)`.
     retained: BTreeMap<(i64, u64), Envelope>,
     /// The order sessions are re-sent in; earlier sessions come first.
@@ -68,7 +69,6 @@ impl Outbox {
         Self {
             attached: false,
             queue: VecDeque::new(),
-            seq: 0,
             retained: BTreeMap::new(),
             sessions: BTreeMap::new(),
             next_session: 0,
@@ -82,11 +82,7 @@ impl Outbox {
 
     /// Queue `envelope` on the current connection (if any). Numbered ones
     /// (with `pos` and `journal_session`) are retained until acknowledged.
-    pub fn push(&mut self, mut envelope: Envelope) {
-        if envelope.message.is_event() {
-            self.seq += 1;
-            envelope.seq = Some(self.seq);
-        }
+    pub fn push(&mut self, envelope: Envelope) {
         self.retain(&envelope);
         if self.attached {
             self.queue.push_back(envelope);
@@ -164,11 +160,39 @@ impl Outbox {
         self.spilled
     }
 
-    /// Bind a fresh connection. Numbering restarts per connection.
+    /// Bind a fresh connection.
     pub fn attach(&mut self) {
         self.attached = true;
         self.queue.clear();
-        self.seq = 0;
+    }
+
+    /// The journal sessions frames are still owed of (`REGISTER`'s `sessions`).
+    pub fn sessions_owed(&self) -> Vec<String> {
+        self.sessions
+            .iter()
+            .filter(|(_, order)| self.retained.keys().any(|(o, _)| o == *order))
+            .map(|(session, _)| session.clone())
+            .collect()
+    }
+
+    /// The server found a gap in `session` and takes `expected` next (`JOURNAL_NACK`): what
+    /// is queued with a position is taken back and everything retained goes out again, in
+    /// order. If `expected` itself is no longer held, the positions that are gone
+    /// (`first..=last`) are returned, for the `JOURNAL_SKIP` that must go out first.
+    pub fn nack(&mut self, session: &str, expected: u64) -> Option<(u64, u64)> {
+        self.queue.retain(|envelope| envelope.pos.is_none());
+        let lowest = self.sessions.get(session).and_then(|order| {
+            self.retained
+                .keys()
+                .filter(|(o, _)| o == order)
+                .map(|(_, pos)| *pos)
+                .min()
+        });
+        self.resend_unacked();
+        match lowest {
+            Some(lowest) if lowest > expected => Some((expected, lowest - 1)),
+            _ => None,
+        }
     }
 
     /// The connection is gone: what was queued for it and not yet taken is
@@ -304,34 +328,23 @@ mod tests {
 
         outbox.attach();
         outbox.resend_unacked();
-        let resent: Vec<(Option<u64>, Option<u64>)> =
-            drain(&mut outbox).iter().map(|e| (e.pos, e.seq)).collect();
+        let resent: Vec<Option<u64>> = drain(&mut outbox).iter().map(|e| e.pos).collect();
         assert_eq!(
             resent,
-            vec![(Some(2), Some(1)), (Some(3), Some(2))],
+            vec![Some(2), Some(3)],
             "once each, in journal order"
         );
+        assert_eq!(outbox.sessions_owed(), ["s"]);
+
+        // A gap at 2: both go out again. A gap at 1, which is acknowledged and gone: said so.
+        assert_eq!(outbox.nack("s", 2), None);
+        assert_eq!(drain(&mut outbox).len(), 2);
+        assert_eq!(outbox.nack("s", 1), Some((1, 1)));
+        drain(&mut outbox);
 
         // The terminal report is retired by JOURNAL_ACK alone.
         outbox.journal_ack("s", 3);
         assert_eq!(outbox.retained_len(), 0);
-    }
-
-    #[test]
-    fn seq_counts_on_while_detached_and_restarts_on_attach() {
-        let mut outbox = Outbox::new();
-        let mut journal = Numberer::new("s");
-        outbox.attach();
-        emit(&mut outbox, &mut journal, log("t"));
-        outbox.detach();
-        emit(&mut outbox, &mut journal, log("t"));
-        outbox.attach();
-        emit(&mut outbox, &mut journal, log("t"));
-        assert_eq!(
-            drain(&mut outbox).iter().map(|e| e.seq).collect::<Vec<_>>(),
-            [Some(1)],
-            "the frame queued for the dead connection is gone, the new one starts at 1"
-        );
     }
 
     #[test]

@@ -21,13 +21,17 @@ fn frames<'a>(fixture: &'a Value, group: &str) -> Vec<(&'a str, &'a Value)> {
 #[test]
 fn from_agent_frames_round_trip() {
     let fixture = fixture();
-    for group in ["numbered_from_agent", "unnumbered_from_agent"] {
+    for group in [
+        "numbered_from_agent",
+        "numbered_requests_from_agent",
+        "unnumbered_from_agent",
+    ] {
         for (name, frame) in frames(&fixture, group) {
             let envelope: Envelope = serde_json::from_value(frame.clone())
                 .unwrap_or_else(|e| panic!("{name} does not parse: {e}"));
             assert_eq!(
                 envelope.pos.is_some(),
-                group == "numbered_from_agent",
+                group != "unnumbered_from_agent",
                 "{name}: numbering"
             );
             assert_eq!(
@@ -59,13 +63,20 @@ fn to_agent_frames_round_trip() {
 #[test]
 fn child_call_step_belongs_to_the_request() {
     let fixture = fixture();
-    let frame = frames(&fixture, "unnumbered_from_agent")
+    let frame = frames(&fixture, "numbered_requests_from_agent")
         .into_iter()
         .find(|(name, _)| *name == "child_call")
         .map(|(_, frame)| frame.clone())
         .expect("child_call frame");
     let envelope: Envelope = serde_json::from_value(frame).unwrap();
-    assert_eq!(envelope.task_step, None, "the envelope stays unnumbered");
+    assert!(
+        envelope.pos.is_some(),
+        "kept until acknowledged, like a report"
+    );
+    assert_eq!(
+        envelope.task_step, None,
+        "numbered in the session, in no task of this agent"
+    );
     match envelope.message {
         rekuest::messages::FromAgent::AssignRequest {
             parent_step,

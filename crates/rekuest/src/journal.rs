@@ -37,7 +37,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::emit::Emitter;
-use crate::messages::FromAgent;
+use crate::messages::{is_probe_task, FromAgent, TaskStatus};
 use crate::state::apply_op;
 pub use arkitekt_spec::task::{GatePass, TaskGate};
 
@@ -300,7 +300,21 @@ struct JournalState {
     finished: VecDeque<String>,
     /// The last step of each task.
     steps: crate::collections::HashMap<String, u64>,
+    /// What each task under way last said of itself, for whoever asks about it.
+    reports: crate::collections::HashMap<String, TaskReport>,
     writer: Option<async_channel::Sender<Arc<JournalEntry>>>,
+}
+
+/// What a task under way last said of itself: the answer to an inquiry.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TaskReport {
+    pub status: TaskStatus,
+    /// When it last reported anything (seconds since the epoch).
+    pub reported_at: f64,
+    pub progress: Option<i64>,
+    pub message: Option<String>,
+    /// The last step it reported.
+    pub step: Option<u64>,
 }
 
 /// Numbers, records and hands on every message. See the module docs.
@@ -506,6 +520,62 @@ async fn write_loop(
 }
 
 impl Journal {
+    /// What `task` last said of itself, if it has started and not ended.
+    pub fn task_report(&self, task: &str) -> Option<TaskReport> {
+        let state = self.state.lock();
+        let mut report = state.reports.get(task).cloned()?;
+        report.step = state.steps.get(task).copied().filter(|step| *step > 0);
+        Some(report)
+    }
+
+    /// Keep what a task's report says of where the task stands.
+    fn note_report(state: &mut JournalState, message: &FromAgent) {
+        let Some(task) = message.task().filter(|task| !is_probe_task(task)) else {
+            return;
+        };
+        if message.is_terminal() {
+            state.reports.remove(task);
+            return;
+        }
+        // A task is under way from its first report on (this agent's tasks say they are queued
+        // for running before anything else; one that has said nothing yet is still waiting).
+        let report = state
+            .reports
+            .entry(task.to_owned())
+            .or_insert_with(|| TaskReport {
+                status: TaskStatus::Running,
+                reported_at: 0.0,
+                progress: None,
+                message: None,
+                step: None,
+            });
+        match message {
+            FromAgent::Started { .. } | FromAgent::Resumed { .. } => {
+                report.status = TaskStatus::Running
+            }
+            FromAgent::Paused { .. } => report.status = TaskStatus::Paused,
+            FromAgent::Held { .. } => report.status = TaskStatus::Held,
+            FromAgent::Progress {
+                progress, message, ..
+            } => {
+                if let Some(progress) = progress {
+                    report.progress = Some(i64::from(*progress));
+                }
+                if message.is_some() {
+                    report.message = message.clone();
+                }
+            }
+            FromAgent::Log { message, .. } => report.message = Some(message.clone()),
+            // A state patch, a lock or a shelve says nothing of where the task stands.
+            FromAgent::StatePatch { .. }
+            | FromAgent::Lock { .. }
+            | FromAgent::Unlock { .. }
+            | FromAgent::Shelve { .. } => return,
+            _ => {}
+        }
+        report.reported_at = now_ms() as f64 / 1000.0;
+    }
+
     /// Number and hand on `message`. Without `owned`, it is a report about a
     /// task this process never ran: numbered, but without a `task_step`.
     fn record(&self, message: FromAgent, action_key: Option<&str>, owned: bool) {
@@ -513,6 +583,9 @@ impl Journal {
             return self.inner.emit(message, action_key);
         }
         let mut state = self.state.lock();
+        if owned {
+            Self::note_report(&mut state, &message);
+        }
         match &message {
             FromAgent::SessionInit { session_id, .. } => {
                 if state.session.as_deref() != Some(session_id.as_str()) {
@@ -616,7 +689,6 @@ mod tests {
             op: "replace".into(),
             path: "/exposure".into(),
             value: json!(rev + 1),
-            old_value: Value::Null,
             task_id: Some(task.into()),
         }
     }
