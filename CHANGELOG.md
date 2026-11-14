@@ -1,6 +1,46 @@
 # CHANGELOG
 
 
+## v0.20.0 (2026-11-14)
+
+### Features
+
+- Agent protocol 2
+  ([`11c2314`](https://github.com/arkitektio/arkirust/commit/11c231454753f9dd2c6d7781149571a89f148be5))
+
+Both directions of the agent socket are now numbered, acknowledged and resumable, and nothing in the
+  protocol tries anything a second time.
+
+- A frame that must not be lost carries `pos`, its position in its sender's stream. The agent's
+  stream is acknowledged with `JOURNAL_ACK {through}`; the server's commands with the agent's
+  `COMMAND_ACK {through}`. `seq` is gone from reports and from child-event mirrors (a mirror is
+  identified by `event`). - `REGISTER` carries `nonce`, `commands_seen` and `sessions`, and must say
+  `protocol_2`; `INIT` echoes the nonce and answers with `positions`. The list of inquiries in
+  `INIT` is gone. - A gap is refused with `JOURNAL_NACK {expected}`; only the agent's `JOURNAL_SKIP`
+  passes a position over. - Everything a task sends is numbered: `HELD`, `INFORM`, `ASSIGN_REQUEST`
+  and the control requests too. `PROBE_REQUEST` and `STATE_REVISION_REQUEST` stay unnumbered. -
+  `INQUIRE` / `INQUIRY_ANSWER` (server and executing agent) and `INQUIRE_REQUEST` /
+  `INQUIRE_RESPONSE` (calling agent and server): what an agent knows of a task, at once.
+  `TaskStatus` is UNKNOWN, WAITING, RUNNING, PAUSED, HELD or ENDED, with the task's last step,
+  report time, progress and message. - `ASSIGN_REQUEST` carries `on_lost` and `max_resumes`: what
+  becomes of the child should its agent be lost is the caller's to say. - Removed: `EVENT_ACK`,
+  `SHELVED`, `UNSHELVED`, `STATE_PATCH.old_value`, `SHELVE.ref`, `UNSHELVE.ref`.
+
+The agent hands a command on once per position and acknowledges it, sends again from where a
+  `JOURNAL_NACK` names, answers inquiries from its journal, and ignores the `INIT` of a connection
+  that is gone.
+
+BREAKING CHANGE: the wire format changed in both directions; an agent on this protocol needs a
+  server that speaks it, and the server refuses an agent that does not say `protocol_2`.
+
+Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+
+### Breaking Changes
+
+- The wire format changed in both directions; an agent on this protocol needs a server that speaks
+  it, and the server refuses an agent that does not say `protocol_2`.
+
+
 ## v0.19.0 (2026-11-01)
 
 ### Bug Fixes
