@@ -1,6 +1,19 @@
 # CHANGELOG
 
 
+## v0.20.1 (2026-11-15)
+
+### Bug Fixes
+
+- **rekuest-session**: A numbered bounce or kick, and a command that cannot be read, count as seen
+  ([`62d6117`](https://github.com/arkitektio/arkirust/commit/62d61175436655f81c1d0d252c35b3b7a2afcb1f))
+
+Nothing is handed on for them, so nothing acknowledged their position, and the server sent them
+  again on every connection: a bounce without end.
+
+Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+
+
 ## v0.20.0 (2026-11-14)
 
 ### Features
