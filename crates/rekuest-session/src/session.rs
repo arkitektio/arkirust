@@ -290,7 +290,18 @@ impl Session {
         self.last_inbound = now;
         let frame = match parse_to_agent_frame(text) {
             Ok(frame) => frame,
-            Err((raw, error)) => return self.reject_frame(raw, error),
+            Err((raw, error)) => {
+                // Unreadable, but it arrived: a command is acknowledged like any other, or
+                // the server would send it again on every connection.
+                let pos = raw
+                    .as_ref()
+                    .and_then(|v| v.get("pos"))
+                    .and_then(Value::as_u64);
+                if self.passed_over(pos) {
+                    self.ack_commands();
+                }
+                return self.reject_frame(raw, error);
+            }
         };
         let ToAgentFrame { id, pos, message } = frame;
         match message {
@@ -330,9 +341,15 @@ impl Session {
                 }
             }
             ToAgent::ProtocolError { error } => self.end(SessionError::Refused(error)),
-            ToAgent::Kick { reason } => self.end(SessionError::Kicked(reason)),
+            ToAgent::Kick { reason } => {
+                self.passed_over(pos);
+                self.end(SessionError::Kicked(reason))
+            }
             ToAgent::Bounce { duration } => {
                 tracing::info!("server bounced the agent, reconnecting");
+                // An order to leave has no position. A server from before that was settled
+                // gives it one: seen here, or it would bounce this agent on every connection.
+                self.passed_over(pos);
                 self.attempt = 0;
                 let delay = duration.map(Duration::from_secs).unwrap_or(BOUNCE_DELAY);
                 self.disconnect(now + delay);
@@ -478,6 +495,20 @@ impl Session {
         }
         for message in early {
             self.dispatch(message);
+        }
+    }
+
+    /// A position nothing is handed on for (an order to leave an older server numbered, a
+    /// command that could not be read) counts as seen, so it is not sent again. Only while
+    /// live: before that, earlier commands still wait to be handed on, and must not be
+    /// taken for handled. Whether it was counted.
+    fn passed_over(&mut self, pos: Option<u64>) -> bool {
+        match pos {
+            Some(pos) if matches!(self.phase, Phase::Live) && pos > self.commands_seen => {
+                self.commands_seen = pos;
+                true
+            }
+            _ => false,
         }
     }
 

@@ -414,6 +414,27 @@ fn a_connection_that_held_resets_the_budget_and_bounce_its_own_delay() {
 }
 
 #[test]
+fn a_numbered_bounce_is_seen_and_not_obeyed_on_every_connection() {
+    // A server from before bounces were unnumbered sends one at a position. Nothing is
+    // handed on for it, so it has to count as seen here: the next REGISTER says so, and
+    // the server does not send it again.
+    let mut session = Session::new(config());
+    live(&mut session, secs(0));
+    session.activated(Ok(()));
+    sent(&mut session);
+    session.handle_text(secs(1), r#"{"type":"BOUNCE","id":"b","pos":7}"#);
+    let again = session.poll_timeout().unwrap();
+    events(&mut session);
+    session.handle_timeout(again);
+    session.connected(again, "token".into(), declaration());
+    let register = sent(&mut session)
+        .into_iter()
+        .find(|frame| frame["type"] == "REGISTER")
+        .expect("it registers again");
+    assert_eq!(register["commands_seen"], 7);
+}
+
+#[test]
 fn only_frames_from_the_server_keep_a_connection_alive() {
     let mut session = Session::new(config());
     live(&mut session, secs(0));
