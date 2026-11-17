@@ -661,6 +661,14 @@ pub enum FromAgent<D = AgentDeclaration> {
         path: String,
         value: Value,
         task_id: Option<String>,
+        /// Where in a task's or the agent's life the change was made, when not in its
+        /// ordinary course: `cleanup` (a task being stopped, on its way out) or `shutdown`
+        /// (the agent's shutdown hooks). Said by the agent's runtime, never by the app.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        lifecycle: Option<String>,
+        /// What the app says the change was for: its own names.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        qualifiers: Option<Vec<String>>,
     },
     /// Every state at a revision.
     StateSnapshot {

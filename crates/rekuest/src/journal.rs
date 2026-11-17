@@ -690,6 +690,8 @@ mod tests {
             path: "/exposure".into(),
             value: json!(rev + 1),
             task_id: Some(task.into()),
+            lifecycle: None,
+            qualifiers: None,
         }
     }
 
