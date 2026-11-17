@@ -1,6 +1,21 @@
 # CHANGELOG
 
 
+## v0.21.0 (2026-11-17)
+
+### Features
+
+- **protocol**: A state patch says its lifecycle and its qualifiers
+  ([`788fc7f`](https://github.com/arkitektio/arkirust/commit/788fc7ff9da78b4aad6dc2ec52f5ec86c1f9ae79))
+
+STATE_PATCH carries two optional fields: `lifecycle`, said by the agent's runtime when a change is
+  not made in the ordinary course of a task (`cleanup`: a task being stopped, on its way out;
+  `shutdown`: the agent's shutdown hooks), and `qualifiers`, the app's own names for what a change
+  was for. Both are left out of the frame when unset.
+
+Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+
+
 ## v0.20.1 (2026-11-15)
 
 ### Bug Fixes
