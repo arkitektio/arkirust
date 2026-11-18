@@ -16,7 +16,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use arkitekt_spec::{action, Context, Registry};
+use arkitekt_spec::{action, Blok, Context, Registry, State};
 use fakts::{Fakts, Grant, MandateKeyOptions, Manifest, Requirement};
 use rekuest::store::HistoryStore;
 use rekuest::{Agent, AgentOptions};
@@ -31,6 +31,21 @@ use harness::{Stack, MANDATE_KEY};
 async fn add(a: i64, b: i64) -> i64 {
     a + b
 }
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, State)]
+#[state(name = "Sum")]
+struct Sum {
+    last: i64,
+}
+
+/// Sent as its source alone: the server parses it and finds the state and the action it reads.
+/// One it refused would end the registration, and the agent would never activate.
+const LAST_SUM: &str = r#"<Blok kind="agent" context="panel">
+  <Card>
+    <Text>{self.Sum.last}</Text>
+    <Button onClick={self.add(a: 1, b: 2)}>Add</Button>
+  </Card>
+</Blok>"#;
 
 async fn eventually<T>(what: &str, mut check: impl AsyncFnMut() -> Option<T>) -> T {
     let deadline = Instant::now() + Duration::from_secs(60);
@@ -81,6 +96,8 @@ async fn the_agent_registers_and_the_server_acknowledges_its_journal() {
     options.journal_path = Some(journal.clone());
     let mut registry = Registry::new();
     registry.register(add);
+    registry.state(Sum::default());
+    registry.blok(Blok::new("last_sum", LAST_SUM));
     let agent = Arc::new(Agent::new(
         options,
         registry,

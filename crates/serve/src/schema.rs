@@ -4,7 +4,7 @@
 use serde_json::{json, Map, Value};
 
 use arkitekt_spec::{ActionKind, Definition, Implementation};
-use arkitekt_spec::{Port, PortKind};
+use arkitekt_spec::{Blok, Port, PortKind};
 use rekuest::state::StateDeclaration;
 
 fn kind_name(kind: PortKind) -> Value {
@@ -95,6 +95,30 @@ pub(crate) fn api_state(s: &StateDeclaration) -> Value {
             "ports": s.ports.iter().map(|p| api_port(p, false)).collect::<Vec<_>>(),
             "name": s.name,
         },
+    })
+}
+
+/// A declared blok as the API hands it out. Served like this, an app has no server to parse
+/// its source: the tree, the context and the dependencies stay unset, and whoever draws the
+/// blok reads them off the source.
+pub(crate) fn api_blok(b: &Blok) -> Value {
+    json!({
+        "key": b.key,
+        "dependencies": [],
+        "components": null,
+        "source": b.source,
+        "module": null,
+        "catalog": null,
+        "catalogMinor": null,
+        "description": b.description,
+        "context": null,
+        "default": b.default,
+        "forModel": b.for_model,
+        "forNode": b.for_node,
+        "args": b.args.iter().map(|p| api_port(p, true)).collect::<Vec<_>>(),
+        "vocab": arkitekt_spec::BLOK_VOCAB,
+        "catalogs": [],
+        "demo": null,
     })
 }
 

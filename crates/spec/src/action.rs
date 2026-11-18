@@ -6,6 +6,7 @@ use futures::future::BoxFuture;
 use serde_json::{Map, Value};
 
 use crate::actions::{AgentDeclaration, Definition, Implementation};
+use crate::blok::Blok;
 use crate::context::Context;
 use crate::hooks::{hook_fn, Background, Hooks, Startup};
 use crate::state::{StateDeclaration, StateType};
@@ -92,6 +93,7 @@ pub trait Action: Send + Sync + 'static {
 pub struct Registry {
     actions: Vec<Arc<dyn Action>>,
     states: Vec<StateDeclaration>,
+    bloks: Vec<Blok>,
     hooks: Hooks,
 }
 
@@ -109,6 +111,10 @@ impl core::fmt::Debug for Registry {
             .field(
                 "states",
                 &self.states.iter().map(|s| &s.name).collect::<Vec<_>>(),
+            )
+            .field(
+                "bloks",
+                &self.bloks.iter().map(|b| &b.key).collect::<Vec<_>>(),
             )
             .field("hooks", &self.hooks)
             .finish()
@@ -139,6 +145,13 @@ impl Registry {
     pub fn declare_state<T: StateType>(&mut self) -> &mut Self {
         self.states.retain(|s| s.name != T::NAME);
         self.states.push(StateDeclaration::of::<T>(None));
+        self
+    }
+
+    /// Declare a blok; a later declaration under the same key replaces the earlier one.
+    pub fn blok(&mut self, blok: Blok) -> &mut Self {
+        self.bloks.retain(|b| b.key != blok.key);
+        self.bloks.push(blok);
         self
     }
 
@@ -199,6 +212,10 @@ impl Registry {
         &self.states
     }
 
+    pub fn bloks(&self) -> &[Blok] {
+        &self.bloks
+    }
+
     pub fn hooks(&self) -> &Hooks {
         &self.hooks
     }
@@ -237,7 +254,7 @@ impl Registry {
                     })
                 })
                 .collect(),
-            bloks: vec![],
+            bloks: self.bloks.iter().map(Blok::to_declaration_json).collect(),
             hash: None,
             spec_version: Some(crate::actions::definition::SPEC_VERSION.into()),
         };

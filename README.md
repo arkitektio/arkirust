@@ -176,6 +176,44 @@ let app = App::new("camera", "0.1.0")
   * `.background(..)` runs for the app's lifetime.
   * `.shutdown(..)` runs when the app stops.
 
+**Bloks.** An app can ship its own UI: a blok, written in BSX, that reads the
+app's states and calls its actions.
+
+```rust
+const STATUS: &str = r#"<Blok kind="agent" context="panel">
+  <Card>
+    <Text>{self.CameraState.exposure_ms}</Text>
+    <Button onClick={self.set_exposure(exposure_ms: 25)}>Short exposure</Button>
+  </Card>
+</Blok>"#;
+
+let app = App::new("camera", "0.1.0")
+    .state(CameraState::default())
+    .action(set_exposure)
+    .blok("status", STATUS);
+```
+
+* The source is all the app says:
+  * The `<Blok>` element names what the blok is (`kind`) and what draws it
+    (`context`: `panel`, `scene` or `logo`).
+  * `self.<State>.<field>` reads a state, `self.<action>(...)` calls an action.
+  * Nothing in this crate parses BSX. The rekuest server does, and works out
+    from the source which states and actions the blok depends on.
+* What is refused:
+  * A source that does not parse, or that reads a state or calls an action the
+    app does not declare, fails the registration. The agent logs the server's
+    finding and stops.
+  * Other findings come back as warnings in the log.
+* More than a source: `App::blok_with(Blok::new(key, source)...)` adds a
+  description, makes the blok the app's default, or declares the items it is
+  opened for (`.arg(port)`, read as `args.<key>`).
+* Write the source as a literal or with `include_str!`, not as a string built at
+  run time.
+* Needs rekuest-server 21.4 or newer. An older server registers the blok
+  without its dependencies, so it reads nothing of the app.
+* Not here: bloks of a single action (its logo, what it asks a person), and the
+  files a blok names (`self.assets`).
+
 ## The mesh
 
 A deployment can serve some instances only over its private mesh (an ionscale
@@ -334,6 +372,7 @@ Implemented:
 - [x] Rekuest agent: register, heartbeat, assign, cancel, interrupt, progress, log, reports acked by seq, reconnect with backoff
 - [x] Mikro: create, fetch and read array datasets through zarr v3 on S3
 - [x] States (JSON-patch published, with history), locks, pause/resume/step, startup/background/shutdown hooks
+- [x] Bloks declared as BSX source (`App::blok`); the server parses them and finds what they read
 - [x] Serving over HTTP + websocket without a rekuest server, contract-tested against the Python implementation
 - [x] A journal of task events and state changes in one order: resumable subscriptions, replay at any position
 - [x] A local write-ahead journal: what the server has not acknowledged is re-sent after a restart
@@ -346,6 +385,7 @@ Not implemented yet:
 - [ ] GraphQL subscriptions over websocket
 - [ ] Workflows (`WORKFLOW` actions that call other actions and are resumed from their journal), and an `effects` claim per action
 - [ ] Structure-typed fields inside states
+- [ ] An action's own bloks (logo, asks, informs) and agent assets
 - [ ] Other mikro data types (tables, files, meshes, …) and multiscale pyramids
 - [ ] Other services (unlok, fluss, kabinet, …)
 

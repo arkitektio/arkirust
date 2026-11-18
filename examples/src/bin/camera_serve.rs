@@ -42,6 +42,15 @@ struct SensorState {
     temperature: f64,
 }
 
+/// The camera at a glance. A blok is BSX, and the app declares it as this string: whoever
+/// registers or serves the app works out that it reads `CameraState` and calls `acquire`.
+const STATUS: &str = r#"<Blok kind="agent" context="panel">
+  <Card>
+    <Text>{self.CameraState.frames}</Text>
+    <Button onClick={self.acquire(count: 3)}>Acquire</Button>
+  </Card>
+</Blok>"#;
+
 /// Set Exposure
 ///
 /// Changes the exposure time.
@@ -114,7 +123,8 @@ async fn main() -> anyhow::Result<()> {
             Ok(())
         })
         .action(set_exposure)
-        .action(acquire);
+        .action(acquire)
+        .blok("status", STATUS);
 
     // Nothing above connects: an App is a declaration. `serve` runs the startup
     // hooks and mounts the agent next to your own routes.

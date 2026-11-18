@@ -6,6 +6,7 @@ use core::future::Future;
 use crate::prelude::*;
 
 use crate::action::{Action, Registry};
+use crate::blok::Blok;
 use crate::hooks::{Background, Startup};
 use crate::manifest::{Manifest, PublicSource, Requirement};
 use crate::service::Service;
@@ -112,6 +113,21 @@ impl App {
     /// Declare a state whose initial value a startup hook provides.
     pub fn declare_state<T: StateType>(mut self) -> Self {
         self.registry.declare_state::<T>();
+        self
+    }
+
+    /// Declare a blok: UI the app ships, written in BSX (one `<Blok kind=... context=...>`).
+    /// The source is all the app says of it. The server parses it and works out which of the
+    /// app's states and actions it reads; one that reads what the app does not declare, or
+    /// does not parse, fails the registration.
+    pub fn blok(self, key: impl Into<String>, source: impl Into<String>) -> Self {
+        self.blok_with(Blok::new(key, source))
+    }
+
+    /// Declare a blok that says more than its source: a description, the items it is opened
+    /// for, the model it decorates (see [`Blok`]).
+    pub fn blok_with(mut self, blok: Blok) -> Self {
+        self.registry.blok(blok);
         self
     }
 

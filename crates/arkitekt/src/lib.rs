@@ -49,8 +49,8 @@ pub use rath;
 pub use rekuest;
 
 pub use arkitekt_spec::{
-    action, service, widgets, Action, Alias, App, Background, Context, ContextBuilder, LogLevel,
-    PortType, Registry, Service, Shutdown, Startup, State, StateMut, StateRef, StateType,
+    action, service, widgets, Action, Alias, App, Background, Blok, Context, ContextBuilder,
+    LogLevel, PortType, Registry, Service, Shutdown, Startup, State, StateMut, StateRef, StateType,
     Structure, Task,
 };
 pub use async_trait::async_trait;

@@ -95,6 +95,8 @@ mod action;
 #[cfg(feature = "declare")]
 mod app;
 #[cfg(feature = "declare")]
+mod blok;
+#[cfg(feature = "declare")]
 mod context;
 #[cfg(feature = "declare")]
 mod hooks;
@@ -123,6 +125,7 @@ pub use crate::wiring::Alias;
 pub use crate::{
     action::{Action, ActionError, Concurrency, Registry},
     app::App,
+    blok::{Blok, VOCAB as BLOK_VOCAB},
     context::{Context, ContextBuilder, MissingClient},
     hooks::{Background, Hooks, Shutdown, Startup},
     port_type::{unwrap_reference, PortError, PortType, Structure},

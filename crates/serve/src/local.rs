@@ -1031,8 +1031,16 @@ async fn schema_locks(State(shared): S) -> Response {
     Json(json!({ "count": locks.len(), "locks": locks })).into_response()
 }
 
-async fn schema_bloks() -> Response {
-    Json(json!({ "count": 0, "bloks": {} })).into_response()
+async fn schema_bloks(State(shared): S) -> Response {
+    let bloks: Map<String, Value> = shared
+        .agent
+        .executor
+        .registry()
+        .bloks()
+        .iter()
+        .map(|b| (b.key.clone(), crate::schema::api_blok(b)))
+        .collect();
+    Json(json!({ "count": bloks.len(), "bloks": bloks })).into_response()
 }
 
 // ---------------------------------------------------------------- history --
