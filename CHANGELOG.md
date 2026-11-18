@@ -1,6 +1,21 @@
 # CHANGELOG
 
 
+## v0.23.0 (2026-11-18)
+
+### Features
+
+- **state**: Everything one update changes is one STATE_UPDATE
+  ([`3c41b41`](https://github.com/arkitektio/arkirust/commit/3c41b41140462ba6934a51ef15eeb1d63050ccf5))
+
+A state's `update` hands its publisher one update with all the operations it took (StateUpdate,
+  where it handed over one StatePatch per operation). The agent reports it as one STATE_UPDATE at
+  one revision, and the served agent keeps one row per update: a patch document it answers with is a
+  list of operations. Journals and stores written before are still read.
+
+Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+
+
 ## v0.22.0 (2026-11-18)
 
 ### Bug Fixes
