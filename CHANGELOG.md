@@ -1,6 +1,36 @@
 # CHANGELOG
 
 
+## v0.22.0 (2026-11-18)
+
+### Bug Fixes
+
+- **rekuest-session**: The control crates register the way the session now takes it
+  ([`ac53667`](https://github.com/arkitektio/arkirust/commit/ac53667e1c9cb6c02b0f356f8ac14ae533c7b8f4))
+
+Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+
+### Features
+
+- **protocol**: A state changes by updates, an agent says what it holds, and reports go out through
+  a window
+  ([`e437bb7`](https://github.com/arkitektio/arkirust/commit/e437bb7a0592f1ee14bfcdf31cde47eefe687c38))
+
+STATE_UPDATE is one update of a state: its operations are applied in order and together, and take
+  the state to one revision. STATE_PATCH stays as what agents said before.
+
+REGISTER carries `tasks`: every task the process holds. A server ends as lost what it had under way
+  for that process and does not find there, in the handshake, where it asked about each task before.
+  The agent says it.
+
+The outbox sends through a window: at most 256 numbered frames are out and unacknowledged, and the
+  rest wait in order. A JOURNAL_NACK has the session it names sent again from the position asked,
+  and a gap among frames kept only in the local journal has the journal read back, where it was
+  declared lost.
+
+Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+
+
 ## v0.21.0 (2026-11-17)
 
 ### Features
