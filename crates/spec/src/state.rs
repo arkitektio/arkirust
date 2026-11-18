@@ -114,13 +114,23 @@ impl StateDeclaration {
     }
 }
 
-/// A change to one state, for the [`StatePublisher`] to number and publish.
+/// One RFC 6902 operation of a [`StateUpdate`].
 #[derive(Debug, Clone, PartialEq)]
-pub struct StatePatch {
-    pub state: String,
+pub struct StateOp {
     pub op: String,
     pub path: String,
     pub value: Value,
+}
+
+/// One update of a state, for the [`StatePublisher`] to number and publish: everything one
+/// `update` changed, as the operations that describe it. A state changes by updates: each
+/// takes it from one revision to the next, and whoever follows the state sees an update
+/// whole or not at all.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StateUpdate {
+    pub state: String,
+    /// What changed, applied in order. Never empty.
+    pub ops: Vec<StateOp>,
     pub task_id: Option<String>,
     /// Epoch seconds.
     pub ts: f64,
@@ -131,7 +141,7 @@ pub struct StatePatch {
 /// Called while the state's value is locked, so the changes of one state
 /// arrive in the order they were made; it must not block.
 pub trait StatePublisher: Send + Sync + 'static {
-    fn publish(&self, patch: StatePatch);
+    fn publish(&self, update: StateUpdate);
 }
 
 /// Type-erased access to a state cell.
@@ -225,17 +235,16 @@ impl<T: StateType> StateCell<T> {
 
         if !ops.is_empty() {
             if let Some(publisher) = self.publisher.lock().as_ref() {
-                let ts = now_ts();
-                for (op, path, value) in ops {
-                    publisher.publish(StatePatch {
-                        state: T::NAME.to_owned(),
-                        op,
-                        path,
-                        value,
-                        task_id: mutation.task_id.clone(),
-                        ts,
-                    });
-                }
+                // Everything this call changed is one update.
+                publisher.publish(StateUpdate {
+                    state: T::NAME.to_owned(),
+                    ops: ops
+                        .into_iter()
+                        .map(|(op, path, value)| StateOp { op, path, value })
+                        .collect(),
+                    task_id: mutation.task_id.clone(),
+                    ts: now_ts(),
+                });
             }
         }
         drop(guard);

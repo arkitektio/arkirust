@@ -2,7 +2,7 @@
 //!
 //! States themselves are the declaration's ([`arkitekt_spec::state`]):
 //! typed cells, changed through [`StateMut`]. The hub gives each change an
-//! agent-wide `global_rev`, emits it as `STATE_PATCH` (with a full
+//! agent-wide `global_rev`, emits it as `STATE_UPDATE` (with a full
 //! `STATE_SNAPSHOT` every [`SNAPSHOT_INTERVAL`] revisions) and persists the
 //! history to a [`Sink`] in the background.
 
@@ -15,8 +15,8 @@ use async_trait::async_trait;
 use serde_json::{Map, Value};
 
 pub use arkitekt_spec::state::{
-    Mutation, StateCells, StateDeclaration, StateError, StateMut, StatePatch, StatePublisher,
-    StateRef, StateType,
+    Mutation, StateCells, StateDeclaration, StateError, StateMut, StateOp, StatePublisher,
+    StateRef, StateType, StateUpdate,
 };
 
 use crate::emit::Emitter;
@@ -25,16 +25,15 @@ use crate::messages::FromAgent;
 /// Publish a full snapshot of every state every this many revisions.
 pub const SNAPSHOT_INTERVAL: u64 = 60;
 
-/// A published patch, as handed to a [`Sink`].
+/// A published update of a state, as handed to a [`Sink`]: its operations take the state to
+/// `global_rev`, in order and together.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PublishedPatch {
     pub session_id: String,
     pub global_rev: u64,
     pub state_name: String,
     pub ts: f64,
-    pub op: String,
-    pub path: String,
-    pub value: Value,
+    pub ops: Vec<StateOp>,
     pub task_id: Option<String>,
 }
 
@@ -84,15 +83,21 @@ pub(crate) struct HubInner {
 }
 
 impl StatePublisher for HubInner {
-    fn publish(&self, patch: StatePatch) {
+    fn publish(&self, update: StateUpdate) {
+        if update.ops.is_empty() {
+            return;
+        }
         let mut state = self.state.lock();
         let Some(emitter) = state.emitter.clone() else {
             return;
         };
+        // One update, one revision, however many operations describe it.
         state.global_rev += 1;
         let rev = state.global_rev;
-        if let Some(doc) = state.shrunk.get_mut(&patch.state) {
-            apply_op(doc, &patch.op, &patch.path, &patch.value);
+        if let Some(doc) = state.shrunk.get_mut(&update.state) {
+            for op in &update.ops {
+                apply_op(doc, &op.op, &op.path, &op.value);
+            }
         }
 
         if rev.is_multiple_of(SNAPSHOT_INTERVAL) {
@@ -122,23 +127,25 @@ impl StatePublisher for HubInner {
         let published = PublishedPatch {
             session_id: state.session_id.clone(),
             global_rev: rev,
-            state_name: patch.state,
-            ts: patch.ts,
-            op: patch.op,
-            path: patch.path,
-            value: patch.value,
-            task_id: patch.task_id,
+            state_name: update.state,
+            ts: update.ts,
+            ops: update.ops,
+            task_id: update.task_id,
         };
         emitter.emit(
-            FromAgent::StatePatch {
-                session_id: published.session_id.clone(),
+            FromAgent::StateUpdate {
+                state: published.state_name.clone(),
                 global_rev: rev,
-                state_name: published.state_name.clone(),
-                ts: published.ts,
-                op: published.op.clone(),
-                path: published.path.clone(),
-                value: published.value.clone(),
-                task_id: published.task_id.clone(),
+                ops: published
+                    .ops
+                    .iter()
+                    .map(|op| crate::messages::StateOp {
+                        op: op.op.clone(),
+                        path: op.path.clone(),
+                        value: op.value.clone(),
+                    })
+                    .collect(),
+                task: published.task_id.clone(),
                 lifecycle: None,
                 qualifiers: None,
             },
@@ -401,16 +408,20 @@ mod tests {
         let patches: Vec<(u64, String, String, Value)> = messages
             .iter()
             .filter_map(|m| match m {
-                FromAgent::StatePatch {
+                FromAgent::StateUpdate {
                     global_rev,
-                    op,
-                    path,
-                    value,
-                    task_id,
+                    ops,
+                    task,
                     ..
                 } => {
-                    assert_eq!(task_id.as_deref(), Some("t1"));
-                    Some((*global_rev, op.clone(), path.clone(), value.clone()))
+                    assert_eq!(task.as_deref(), Some("t1"));
+                    assert_eq!(ops.len(), 1, "one field changed: one operation");
+                    Some((
+                        *global_rev,
+                        ops[0].op.clone(),
+                        ops[0].path.clone(),
+                        ops[0].value.clone(),
+                    ))
                 }
                 _ => None,
             })
@@ -521,7 +532,7 @@ mod tests {
         // The snapshot precedes the patch with the same revision and already contains it.
         assert!(matches!(
             &messages[snapshot_at + 1],
-            FromAgent::StatePatch { global_rev: 60, .. }
+            FromAgent::StateUpdate { global_rev: 60, .. }
         ));
         assert!(
             matches!(&messages[snapshot_at], FromAgent::StateSnapshot { snapshots, .. } if snapshots["Camera"]["exposure_ms"] == 60.0)

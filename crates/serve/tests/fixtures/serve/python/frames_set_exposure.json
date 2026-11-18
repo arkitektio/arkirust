@@ -14,15 +14,17 @@
   },
   {
     "id": "77ccd67b-a439-4282-b559-083f36b0ec78",
-    "type": "STATE_PATCH",
-    "session_id": "1a476967-c09a-4769-af55-3743a411e45b",
+    "type": "STATE_UPDATE",
+    "state": "CameraState",
     "global_rev": 1,
-    "state_name": "CameraState",
-    "ts": 1790454478.263191,
-    "op": "replace",
-    "path": "/exposure_ms",
-    "value": 20.0,
-    "task_id": "759fc766-5cc5-41e8-a756-d4fd34f811c4"
+    "ops": [
+      {
+        "op": "replace",
+        "path": "/exposure_ms",
+        "value": 20.0
+      }
+    ],
+    "task": "759fc766-5cc5-41e8-a756-d4fd34f811c4"
   },
   {
     "id": "df2aca38-83ba-410c-b52d-a9dde81119d6",

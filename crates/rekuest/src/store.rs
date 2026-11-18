@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS state_patches (
     op TEXT NOT NULL,
     path TEXT NOT NULL,
     value TEXT,
+    ops TEXT,
     PRIMARY KEY (state_id, global_current_rev, session_id),
     FOREIGN KEY (session_id) REFERENCES sessions(session_id),
     CHECK (global_future_rev = global_current_rev + 1)
@@ -99,6 +100,9 @@ const MIGRATIONS: &[(&str, &str, &str)] = &[
         "INTEGER NOT NULL DEFAULT 0",
     ),
     ("journal", "step", "INTEGER"),
+    // A row is one update: its operations, as a JSON list. NULL in rows written when a row
+    // was one operation (`op`, `path`, `value`).
+    ("state_patches", "ops", "TEXT"),
 ];
 
 /// A state's value at a revision.
@@ -150,7 +154,8 @@ pub enum StateAt {
     Many(Vec<Snapshot>),
 }
 
-fn patch_document(op: &str, path: &str, value: Option<Value>) -> Value {
+/// One RFC 6902 operation; `remove` carries no value.
+fn patch_operation(op: &str, path: &str, value: Option<Value>) -> Value {
     let mut doc = Map::new();
     doc.insert("op".into(), Value::String(op.into()));
     doc.insert("path".into(), Value::String(path.into()));
@@ -160,18 +165,33 @@ fn patch_document(op: &str, path: &str, value: Option<Value>) -> Value {
     Value::Object(doc)
 }
 
+/// An update as an RFC 6902 patch document: its operations, in order.
+fn patch_document(ops: &[Value]) -> Value {
+    Value::Array(
+        ops.iter()
+            .map(|op| {
+                patch_operation(
+                    op["op"].as_str().unwrap_or_default(),
+                    op["path"].as_str().unwrap_or_default(),
+                    op.get("value").cloned(),
+                )
+            })
+            .collect(),
+    )
+}
+
 /// Replay `patches` onto `anchor`; the result is stamped with the last patch.
 fn replay(anchor: Snapshot, patches: &[PatchEvent]) -> Snapshot {
     let mut data = anchor.data;
     for event in patches {
-        let op = event.patch["op"].as_str().unwrap_or_default();
-        let path = event.patch["path"].as_str().unwrap_or_default();
-        apply_op(
-            &mut data,
-            op,
-            path,
-            event.patch.get("value").unwrap_or(&Value::Null),
-        );
+        for op in event.patch.as_array().map_or(&[][..], Vec::as_slice) {
+            apply_op(
+                &mut data,
+                op["op"].as_str().unwrap_or_default(),
+                op["path"].as_str().unwrap_or_default(),
+                op.get("value").unwrap_or(&Value::Null),
+            );
+        }
     }
     match patches.last() {
         Some(last) => Snapshot {
@@ -190,12 +210,21 @@ fn replay(anchor: Snapshot, patches: &[PatchEvent]) -> Snapshot {
 }
 
 const PATCH_COLUMNS: &str =
-    "state_id, global_current_rev, global_future_rev, event_time, correlation_id, session_id, op, path, value";
+    "state_id, global_current_rev, global_future_rev, event_time, correlation_id, session_id, op, path, value, ops";
 
 fn patch_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<PatchEvent> {
     let value: Option<String> = row.get(8)?;
     let op: String = row.get(6)?;
     let path: String = row.get(7)?;
+    // A row is one update; one written before that is its single operation.
+    let ops: Vec<Value> = match row.get::<_, Option<String>>(9)? {
+        Some(ops) => serde_json::from_str(&ops).unwrap_or_default(),
+        None => vec![patch_operation(
+            &op,
+            &path,
+            value.and_then(|v| serde_json::from_str(&v).ok()),
+        )],
+    };
     Ok(PatchEvent {
         state_id: row.get(0)?,
         global_current_rev: row.get(1)?,
@@ -203,11 +232,7 @@ fn patch_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<PatchEvent> {
         timepoint: iso_from_ms(row.get(3)?),
         correlation_id: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
         session_id: row.get(5)?,
-        patch: patch_document(
-            &op,
-            &path,
-            value.and_then(|v| serde_json::from_str(&v).ok()),
-        ),
+        patch: patch_document(&ops),
     })
 }
 
@@ -622,8 +647,10 @@ impl Sink for HistoryStore {
             .unwrap_or_default();
         self.with(move |conn| {
             conn.execute(
+                // `op` and `path` are what a row held before a row was an update; they
+                // cannot be dropped from files written then, so they say so.
                 "INSERT INTO state_patches (state_id, global_current_rev, global_future_rev, event_time, \
-                 correlation_id, session_id, op, path, value) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                 correlation_id, session_id, op, path, value, ops) VALUES (?, ?, ?, ?, ?, ?, 'update', '', NULL, ?)",
                 params![
                     patch.state_name,
                     patch.global_rev as i64 - 1,
@@ -631,9 +658,14 @@ impl Sink for HistoryStore {
                     (patch.ts * 1000.0) as i64,
                     patch.task_id,
                     session_id,
-                    patch.op,
-                    patch.path,
-                    (!patch.value.is_null()).then(|| patch.value.to_string()),
+                    Value::Array(
+                        patch
+                            .ops
+                            .iter()
+                            .map(|op| serde_json::json!({"op": op.op, "path": op.path, "value": op.value}))
+                            .collect()
+                    )
+                    .to_string(),
                 ],
             )
         })
@@ -706,7 +738,7 @@ const JOURNAL_COLUMNS: &str =
 /// Kinds that belong to the whole session rather than to a task, state or lock.
 const SESSION_KINDS: &str = "'SESSION_INIT', 'STATE_SNAPSHOT'";
 /// Kinds that carry state values.
-const STATE_KINDS: &str = "'SESSION_INIT', 'STATE_SNAPSHOT', 'STATE_PATCH'";
+const STATE_KINDS: &str = "'SESSION_INIT', 'STATE_SNAPSHOT', 'STATE_UPDATE', 'STATE_PATCH'";
 
 fn entry_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<JournalEntry> {
     let event_time: i64 = row.get(3)?;
@@ -827,8 +859,8 @@ impl HistoryStore {
                 let lock = keyed("subject", &query.lock_keys, &mut args);
                 let action = keyed("action_key", &query.action_keys, &mut args);
                 sql.push_str(&format!(
-                    " AND ((kind = 'STATE_PATCH' AND {state}) OR (kind IN ('LOCK', 'UNLOCK') AND {lock}) \
-                     OR kind IN ({SESSION_KINDS}) OR (kind NOT IN ('STATE_PATCH', 'LOCK', 'UNLOCK', {SESSION_KINDS}) \
+                    " AND ((kind IN ('STATE_UPDATE', 'STATE_PATCH') AND {state}) OR (kind IN ('LOCK', 'UNLOCK') AND {lock}) \
+                     OR kind IN ({SESSION_KINDS}) OR (kind NOT IN ('STATE_UPDATE', 'STATE_PATCH', 'LOCK', 'UNLOCK', {SESSION_KINDS}) \
                      AND (action_key IS NULL OR {action})))"
                 ));
             }
@@ -946,9 +978,11 @@ mod tests {
             global_rev: rev,
             state_name: "Camera".into(),
             ts: 1_700_000_000.0 + rev as f64,
-            op: op.into(),
-            path: path.into(),
-            value,
+            ops: vec![crate::state::StateOp {
+                op: op.into(),
+                path: path.into(),
+                value,
+            }],
             task_id: Some(task.into()),
         }
     }
@@ -994,14 +1028,17 @@ mod tests {
         assert_eq!(between.len(), 2);
         assert_eq!(
             between[1].patch,
-            json!({"op": "add", "path": "/tags/0", "value": "a"})
+            json!([{"op": "add", "path": "/tags/0", "value": "a"}])
         );
         let forward = store
             .forward_events(2, None, Some(&session), 100)
             .await
             .unwrap();
         assert_eq!(forward.len(), 1, "after 2 is exactly the patch 2 -> 3");
-        assert_eq!(forward[0].patch, json!({"op": "remove", "path": "/tags/0"}));
+        assert_eq!(
+            forward[0].patch,
+            json!([{"op": "remove", "path": "/tags/0"}])
+        );
 
         let task = store.task_boundaries("t2", None).await.unwrap().unwrap();
         assert_eq!(

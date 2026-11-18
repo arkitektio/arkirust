@@ -158,7 +158,7 @@ async fn one_order_for_tasks_and_state_and_replay_at_any_position() {
         [
             "PROGRESS",
             "LOCK",
-            "STATE_PATCH",
+            "STATE_UPDATE",
             "YIELD",
             "COMPLETED",
             "UNLOCK"
@@ -176,7 +176,7 @@ async fn one_order_for_tasks_and_state_and_replay_at_any_position() {
         [
             "PROGRESS",
             "LOCK",
-            "STATE_PATCH",
+            "STATE_UPDATE",
             "YIELD",
             "COMPLETED",
             "UNLOCK"
@@ -253,7 +253,7 @@ async fn one_order_for_tasks_and_state_and_replay_at_any_position() {
         [
             "PROGRESS",
             "LOCK",
-            "STATE_PATCH",
+            "STATE_UPDATE",
             "YIELD",
             "COMPLETED",
             "UNLOCK"
@@ -330,7 +330,7 @@ async fn delivery_order_is_journal_order_under_concurrency() {
     }
     let revs: Vec<u64> = frames
         .iter()
-        .filter(|f| f["type"] == "STATE_PATCH")
+        .filter(|f| f["type"] == "STATE_UPDATE")
         .map(|f| f["global_rev"].as_u64().unwrap())
         .collect();
     assert_eq!(revs, (1..=revs.len() as u64).collect::<Vec<_>>());
@@ -461,7 +461,7 @@ async fn nothing_of_a_cancelled_task_after_its_end() {
     let task = assign(&http, &base, "spin", json!({})).await;
     let mut patches = 0;
     while patches < 50 {
-        if next_frame(&mut ws).await["type"] == "STATE_PATCH" {
+        if next_frame(&mut ws).await["type"] == "STATE_UPDATE" {
             patches += 1;
         }
     }
@@ -484,7 +484,7 @@ async fn nothing_of_a_cancelled_task_after_its_end() {
     agent.journal().flush(Duration::from_secs(5)).await;
     let listing = get(
         &http,
-        format!("{base}/journal/{session}?kinds=STATE_PATCH&limit=100000"),
+        format!("{base}/journal/{session}?kinds=STATE_UPDATE&limit=100000"),
     )
     .await;
     let revs: Vec<u64> = listing["entries"]

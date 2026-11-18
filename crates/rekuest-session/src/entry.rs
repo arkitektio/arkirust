@@ -71,7 +71,7 @@ impl JournalEntry {
             self.subject.as_deref(),
             self.action_key.as_deref(),
         ) {
-            ("STATE_PATCH", Some(state), _) => Route::State(state),
+            ("STATE_UPDATE" | "STATE_PATCH", Some(state), _) => Route::State(state),
             ("LOCK" | "UNLOCK", Some(key), _) => Route::Lock(key),
             ("STATE_SNAPSHOT" | "SESSION_INIT", _, _) => Route::Everyone,
             (_, _, Some(key)) => Route::Action(key),

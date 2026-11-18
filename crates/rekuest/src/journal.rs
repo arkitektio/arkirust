@@ -69,6 +69,7 @@ pub use rekuest_session::entry::{is_terminal_kind, stamp, JournalEntry, Route};
 
 fn subject_of(message: &FromAgent) -> Option<String> {
     match message {
+        FromAgent::StateUpdate { state, .. } => Some(state.clone()),
         FromAgent::StatePatch { state_name, .. } => Some(state_name.clone()),
         FromAgent::Lock { key, .. } | FromAgent::Unlock { key, .. } => Some(key.clone()),
         _ => None,
@@ -127,14 +128,23 @@ impl Fold {
                 self.replace_states(payload.get("snapshots"));
                 self.snapshot_rev = entry.global_rev;
             }
-            "STATE_PATCH" if entry.global_rev > self.snapshot_rev => {
+            // An update's operations, in order; a patch (what was journaled before updates)
+            // is its one.
+            "STATE_UPDATE" | "STATE_PATCH" if entry.global_rev > self.snapshot_rev => {
                 if let Some(doc) = entry.subject.as_ref().and_then(|s| self.states.get_mut(s)) {
-                    apply_op(
-                        doc,
-                        payload["op"].as_str().unwrap_or_default(),
-                        payload["path"].as_str().unwrap_or_default(),
-                        payload.get("value").unwrap_or(&Value::Null),
-                    );
+                    let one = [payload.clone()];
+                    let ops = match entry.kind.as_str() {
+                        "STATE_UPDATE" => payload["ops"].as_array().map_or(&[][..], Vec::as_slice),
+                        _ => &one[..],
+                    };
+                    for op in ops {
+                        apply_op(
+                            doc,
+                            op["op"].as_str().unwrap_or_default(),
+                            op["path"].as_str().unwrap_or_default(),
+                            op.get("value").unwrap_or(&Value::Null),
+                        );
+                    }
                 }
             }
             "LOCK" => {
@@ -155,7 +165,7 @@ impl Fold {
         };
         if matches!(
             entry.kind.as_str(),
-            "STATE_PATCH" | "LOCK" | "UNLOCK" | "SHELVE"
+            "STATE_UPDATE" | "STATE_PATCH" | "LOCK" | "UNLOCK" | "SHELVE"
         ) {
             if let Some(task) = self.tasks.get_mut(task_id) {
                 task.last_pos = task.last_pos.max(entry.pos);
@@ -566,8 +576,9 @@ impl Journal {
                 }
             }
             FromAgent::Log { message, .. } => report.message = Some(message.clone()),
-            // A state patch, a lock or a shelve says nothing of where the task stands.
-            FromAgent::StatePatch { .. }
+            // A state update, a lock or a shelve says nothing of where the task stands.
+            FromAgent::StateUpdate { .. }
+            | FromAgent::StatePatch { .. }
             | FromAgent::Lock { .. }
             | FromAgent::Unlock { .. }
             | FromAgent::Shelve { .. } => return,
@@ -598,7 +609,8 @@ impl Journal {
                 }
                 state.global_rev = 0;
             }
-            FromAgent::StatePatch { global_rev, .. }
+            FromAgent::StateUpdate { global_rev, .. }
+            | FromAgent::StatePatch { global_rev, .. }
             | FromAgent::StateSnapshot { global_rev, .. } => {
                 state.global_rev = *global_rev;
             }
@@ -607,7 +619,10 @@ impl Journal {
         // A probe is ephemeral: its frames are handed on (in order, under the
         // lock), never numbered. Except the state patches it causes: the
         // revision chain has no holes. They carry no task step.
-        let probe_patch = matches!(message, FromAgent::StatePatch { .. }) && message.is_probe();
+        let probe_patch = matches!(
+            message,
+            FromAgent::StateUpdate { .. } | FromAgent::StatePatch { .. }
+        ) && message.is_probe();
         if message.is_probe() && !probe_patch {
             return self.inner.emit(message, action_key);
         }

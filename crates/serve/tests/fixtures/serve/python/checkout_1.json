@@ -27,11 +27,13 @@
         "global_future_rev": 1,
         "correlation_id": "759fc766-5cc5-41e8-a756-d4fd34f811c4",
         "session_id": "1a476967-c09a-4769-af55-3743a411e45b",
-        "patch": {
-          "op": "replace",
-          "path": "/exposure_ms",
-          "value": 20.0
-        }
+        "patch": [
+          {
+            "op": "replace",
+            "path": "/exposure_ms",
+            "value": 20.0
+          }
+        ]
       }
     ]
   }

@@ -76,6 +76,7 @@ fn legacy_route<'a>(message: &'a FromAgent, action_key: Option<&'a str>) -> Opti
         | FromAgent::Unshelve { .. }
         | FromAgent::Effect { .. }
         | FromAgent::AssignRequest { .. } => None,
+        FromAgent::StateUpdate { state, .. } => Some(Route::State(state)),
         FromAgent::StatePatch { state_name, .. } => Some(Route::State(state_name)),
         FromAgent::Lock { key, .. } | FromAgent::Unlock { key, .. } => Some(Route::Lock(key)),
         _ => action_key.map(Route::Action),

@@ -165,7 +165,7 @@ async fn states_locks_and_pauses_over_the_socket() {
         "states are published under the registered session"
     );
 
-    // A stateful action: LOCK, STATE_PATCH, YIELD, COMPLETED, then UNLOCK.
+    // A stateful action: LOCK, STATE_UPDATE, YIELD, COMPLETED, then UNLOCK.
     send(
         &mut ws,
         assign("t1", "set_exposure", json!({"exposure_ms": 20.0}), false),
@@ -174,16 +174,16 @@ async fn states_locks_and_pauses_over_the_socket() {
     let frames = frames_until(&mut ws, "UNLOCK").await;
     assert_eq!(
         kinds(&frames),
-        ["LOCK", "STATE_PATCH", "YIELD", "COMPLETED", "UNLOCK"]
+        ["LOCK", "STATE_UPDATE", "YIELD", "COMPLETED", "UNLOCK"]
     );
     let patch = &frames[1];
     assert_eq!(
         (
-            &patch["op"],
-            &patch["path"],
-            &patch["value"],
+            &patch["ops"][0]["op"],
+            &patch["ops"][0]["path"],
+            &patch["ops"][0]["value"],
             &patch["global_rev"],
-            &patch["task_id"]
+            &patch["task"]
         ),
         (
             &json!("replace"),
@@ -193,13 +193,14 @@ async fn states_locks_and_pauses_over_the_socket() {
             &json!("t1")
         )
     );
-    assert!(patch["old_value"].is_null());
-    assert_eq!(patch["session_id"], init["session_id"]);
+    assert_eq!(patch["ops"].as_array().map(Vec::len), Some(1));
+    // The session an update belongs to is its frame's own.
+    assert_eq!(patch["journal_session"], init["session_id"]);
 
     send(&mut ws, assign("t2", "add_tag", json!({"tag": "a"}), false)).await;
     let frames = frames_until(&mut ws, "UNLOCK").await;
     assert_eq!(
-        (&frames[1]["op"], &frames[1]["path"]),
+        (&frames[1]["ops"][0]["op"], &frames[1]["ops"][0]["path"]),
         (&json!("add"), &json!("/tags/0"))
     );
     assert_eq!(frames[1]["global_rev"], 2);
