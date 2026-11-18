@@ -78,7 +78,7 @@ pub async fn run() -> Result<Rc<RefCell<FakeServer>>, SessionError> {
                     let declaration =
                         serde_json::from_value(serde_json::json!({"name": "wasm-control"}))
                             .expect("a declaration");
-                    session.connected(now(start), "token".into(), declaration);
+                    session.connected(now(start), "token".into(), declaration, None);
                 }
                 Event::Close => socket = None,
                 Event::Ended(error) => return Err(error),
@@ -178,7 +178,9 @@ pub async fn run_agent() -> Result<Rc<RefCell<FakeServer>>, SessionError> {
                 Some(Event::Connect) => {
                     socket = Some(connect(&server));
                     let declaration = driver.declaration(Some("wasm-control".into()), None);
-                    driver.with_session(|s| s.connected(now(start), "token".into(), declaration));
+                    driver.with_session(|s| {
+                        s.connected(now(start), "token".into(), declaration, None)
+                    });
                 }
                 Some(Event::Close) => socket = None,
                 Some(Event::ReloadJournal) => driver.with_session(|s| s.reloaded(None)),

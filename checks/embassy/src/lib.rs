@@ -52,7 +52,7 @@ pub async fn run(seed: u64) -> Result<FakeServer, SessionError> {
                 Event::Connect => {
                     server.connected();
                     open = true;
-                    session.connected(now(), "token".into(), declaration());
+                    session.connected(now(), "token".into(), declaration(), None);
                 }
                 Event::Close => {
                     open = false;

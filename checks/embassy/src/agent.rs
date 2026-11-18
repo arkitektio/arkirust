@@ -124,7 +124,7 @@ pub async fn run_agent(spawner: SendSpawner, seed: u64) -> Result<FakeServer, Se
                     server.connected();
                     open = true;
                     let declaration = driver.declaration(Some("embassy-control".into()), None);
-                    driver.with_session(|s| s.connected(now(), "token".into(), declaration));
+                    driver.with_session(|s| s.connected(now(), "token".into(), declaration, None));
                 }
                 Some(Event::Close) => {
                     open = false;
