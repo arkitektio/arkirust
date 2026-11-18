@@ -294,6 +294,31 @@
         "agent_ts": 1790000004.6,
         "task_step": 3
       }
+    },
+    {
+      "name": "state_update",
+      "note": "one update of a state: its operations are applied in order and together, and take it to global_rev. Made outside a task here, so it names none and takes no step",
+      "frame": {
+        "type": "STATE_UPDATE",
+        "id": "f-24",
+        "state": "counter",
+        "global_rev": 2,
+        "ops": [
+          {
+            "op": "replace",
+            "path": "/value",
+            "value": 2
+          },
+          {
+            "op": "add",
+            "path": "/history/-",
+            "value": 1
+          }
+        ],
+        "pos": 24,
+        "journal_session": "5f0c1c9e2b8d4d7a9a3e6f1b2c4d8e90",
+        "agent_ts": 1790000009.5
+      }
     }
   ],
   "unnumbered_from_agent": [

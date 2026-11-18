@@ -9,17 +9,25 @@
 //! includes terminal reports and the requests a task makes. Frames of earlier
 //! sessions (read back from the local journal after a restart) go first.
 //! Unnumbered frames (a probe's, the acknowledgements) are sent once and never
-//! retained. A `JOURNAL_NACK` (the server found a gap) has everything retained
-//! sent again, in order.
+//! retained. A `JOURNAL_NACK` (the server found a gap) has what is retained from
+//! the position it names sent again, in order.
+//!
+//! Numbered frames go out through a **window** ([`SEND_WINDOW`]): at most that
+//! many are sent and not yet acknowledged, and the rest wait in the retained
+//! backlog, in order. The acknowledgements are the credit, so what the server
+//! has to hold of this agent is bounded, and a backlog built up while it was
+//! away goes out at the pace the server takes it.
 //!
 //! The retained frames are bounded ([`RETAIN_LIMIT`]) only when the local
 //! journal persists them: beyond it, the newest are dropped from memory (the
 //! lowest positions, which the server needs first, stay) and read back from
-//! the journal before the next resend ([`Outbox::needs_reload`]).
+//! the journal before the next resend ([`Outbox::needs_reload`]), or once the
+//! window has taken everything before them ([`Outbox::starved`]).
 //! Without a local journal nothing is dropped, since a lost frame would
 //! stall the server's watermark for good.
 
 use alloc::collections::{BTreeMap, VecDeque};
+use core::ops::Bound;
 
 use serde_json::Value;
 
@@ -30,13 +38,19 @@ use crate::protocol::messages::{Envelope, FromAgent};
 /// Numbered frames kept in memory for resending at most (with a local journal).
 pub const RETAIN_LIMIT: usize = 65_536;
 
+/// Numbered frames sent and not yet acknowledged at most.
+pub const SEND_WINDOW: usize = 256;
+
+/// Where a retained frame stands: its session's place in the resend order, and its position.
+type Key = (i64, u64);
+
 /// Where an agent's frames wait for a connection and for the server's ack.
 pub struct Outbox {
     attached: bool,
     /// Frames for the current connection, oldest first.
     queue: VecDeque<Envelope>,
     /// Numbered frames not yet covered by a `JOURNAL_ACK`, by `(session order, pos)`.
-    retained: BTreeMap<(i64, u64), Envelope>,
+    retained: BTreeMap<Key, Envelope>,
     /// The order sessions are re-sent in; earlier sessions come first.
     sessions: BTreeMap<String, i64>,
     next_session: i64,
@@ -47,7 +61,15 @@ pub struct Outbox {
     spill: bool,
     /// Some were dropped from memory and must be read back before resending.
     spilled: bool,
+    /// The lowest frame dropped from memory: nothing at or beyond it goes out before the
+    /// journal was read back, or it would go out ahead of what is missing.
+    spilled_from: Option<Key>,
     warned: bool,
+    window: usize,
+    /// The last retained frame handed to the connection: what is beyond it waits.
+    admitted: Option<Key>,
+    /// How many retained frames are handed out and not acknowledged yet.
+    out: usize,
 }
 
 impl Default for Outbox {
@@ -76,19 +98,75 @@ impl Outbox {
             limit: limit.max(1),
             spill,
             spilled: false,
+            spilled_from: None,
             warned: false,
+            window: SEND_WINDOW,
+            admitted: None,
+            out: 0,
         }
+    }
+
+    /// With another send window than [`SEND_WINDOW`].
+    pub fn with_window(mut self, window: usize) -> Self {
+        self.window = window.max(1);
+        self
     }
 
     /// Queue `envelope` on the current connection (if any). Numbered ones
     /// (with `pos` and `journal_session`) are retained until acknowledged.
     pub fn push(&mut self, envelope: Envelope) {
+        let numbered = envelope.pos.is_some() && envelope.journal_session.is_some();
         self.retain(&envelope);
-        if self.attached {
-            self.queue.push_back(envelope);
-        } else {
+        if !self.attached {
             tracing::debug!("disconnected, holding {:?}", envelope.message);
+        } else if numbered {
+            // In its turn, and only while the window has room.
+            self.fill();
+        } else {
+            self.queue.push_back(envelope);
         }
+    }
+
+    /// Hand the connection what waits, in order, for as long as the window has room.
+    fn fill(&mut self) {
+        if !self.attached {
+            return;
+        }
+        while self.out < self.window {
+            let next = match self.admitted {
+                Some(at) => self
+                    .retained
+                    .range((Bound::Excluded(at), Bound::Unbounded))
+                    .next(),
+                None => self.retained.iter().next(),
+            };
+            let Some((key, envelope)) = next else {
+                break;
+            };
+            if self.spilled_from.is_some_and(|from| *key >= from) {
+                break; // what comes before it is in the journal only
+            }
+            let key = *key;
+            self.queue.push_back(envelope.clone());
+            self.admitted = Some(key);
+            self.out += 1;
+        }
+    }
+
+    /// Whether the window has room that only frames dropped from memory can fill: they must
+    /// be [reloaded](Outbox::reload) from the local journal, then [`Outbox::refill`].
+    pub fn starved(&self) -> bool {
+        self.attached && self.spilled && self.out < self.window
+    }
+
+    /// Go on sending after a [reload](Outbox::reload) on a live connection.
+    pub fn refill(&mut self) {
+        self.fill();
+    }
+
+    fn key_of(&self, envelope: &Envelope) -> Option<Key> {
+        let order = self.sessions.get(envelope.journal_session.as_deref()?)?;
+        Some((*order, envelope.pos?))
     }
 
     /// Queue a journaled message: it carries the entry's id and position.
@@ -151,6 +229,7 @@ impl Outbox {
             self.retained.insert((order, entry.pos), envelope);
         }
         self.spilled = false;
+        self.spilled_from = None;
         self.bound();
     }
 
@@ -176,21 +255,49 @@ impl Outbox {
     }
 
     /// The server found a gap in `session` and takes `expected` next (`JOURNAL_NACK`): what
-    /// is queued with a position is taken back and everything retained goes out again, in
-    /// order. If `expected` itself is no longer held, the positions that are gone
-    /// (`first..=last`) are returned, for the `JOURNAL_SKIP` that must go out first.
+    /// is queued from that position on is taken back and what is retained from there goes
+    /// out again, in order. If `expected` itself is no longer held, the positions that are
+    /// gone (`first..=last`) are returned, for the `JOURNAL_SKIP` that must go out first.
     pub fn nack(&mut self, session: &str, expected: u64) -> Option<(u64, u64)> {
-        self.queue.retain(|envelope| envelope.pos.is_none());
-        let lowest = self.sessions.get(session).and_then(|order| {
-            self.retained
-                .keys()
-                .filter(|(o, _)| o == order)
-                .map(|(_, pos)| *pos)
-                .min()
-        });
-        self.resend_unacked();
+        let order = self.sessions.get(session).copied()?;
+        let from: Key = (order, expected);
+        let lowest = self
+            .retained
+            .range(from..)
+            .next()
+            .filter(|((o, _), _)| *o == order)
+            .map(|((_, pos), _)| *pos);
+        // Asked for, not in memory, but in the local journal: nothing from there on goes out
+        // before the journal was read back ([`Outbox::starved`]). It is not gone.
+        let in_journal = self.spilled && lowest != Some(expected);
+        if in_journal {
+            self.spilled_from = Some(self.spilled_from.map_or(from, |spilled| spilled.min(from)));
+        }
+        // Back to just before it; never forward, past what was not handed out yet.
+        let before = self.retained.range(..from).next_back().map(|(key, _)| *key);
+        self.admitted = match (self.admitted, before) {
+            (Some(admitted), Some(before)) => Some(admitted.min(before)),
+            _ => None,
+        };
+        let admitted = self.admitted;
+        let waiting: Vec<bool> = self
+            .queue
+            .iter()
+            .map(|envelope| match (self.key_of(envelope), admitted) {
+                (Some(key), Some(admitted)) => key <= admitted,
+                (Some(_), None) => false,
+                (None, _) => true,
+            })
+            .collect();
+        let mut keep = waiting.into_iter();
+        self.queue.retain(|_| keep.next().unwrap_or(true));
+        self.out = match admitted {
+            Some(admitted) => self.retained.range(..=admitted).count(),
+            None => 0,
+        };
+        self.fill();
         match lowest {
-            Some(lowest) if lowest > expected => Some((expected, lowest - 1)),
+            Some(lowest) if lowest > expected && !in_journal => Some((expected, lowest - 1)),
             _ => None,
         }
     }
@@ -200,14 +307,17 @@ impl Outbox {
     pub fn detach(&mut self) {
         self.attached = false;
         self.queue.clear();
+        self.admitted = None;
+        self.out = 0;
     }
 
-    /// Re-send what the server has not acknowledged, in `(session, pos)` order.
+    /// Re-send what the server has not acknowledged, in `(session, pos)` order, from the
+    /// start: through the window, like everything else.
     pub fn resend_unacked(&mut self) {
-        let retained: Vec<Envelope> = core::mem::take(&mut self.retained).into_values().collect();
-        for envelope in retained {
-            self.push(envelope);
-        }
+        self.queue.retain(|envelope| envelope.pos.is_none());
+        self.admitted = None;
+        self.out = 0;
+        self.fill();
     }
 
     /// Everything of `session` up to `pos` is projected by the server.
@@ -215,9 +325,28 @@ impl Outbox {
         let acked = self.acked.entry(session.to_owned()).or_default();
         *acked = (*acked).max(pos);
         if let Some(order) = self.sessions.get(session).copied() {
-            self.retained
-                .retain(|(o, p), _| !(*o == order && *p <= pos));
+            let admitted = self.admitted;
+            let mut taken = 0;
+            self.retained.retain(|key, _| {
+                let covered = key.0 == order && key.1 <= pos;
+                if covered && admitted.is_some_and(|admitted| *key <= admitted) {
+                    taken += 1;
+                }
+                !covered
+            });
+            self.out = self.out.saturating_sub(taken);
         }
+        // The window has room again.
+        self.fill();
+    }
+
+    /// The tasks whose end is retained: reported, and not acknowledged yet.
+    pub fn ended_tasks(&self) -> Vec<String> {
+        self.retained
+            .values()
+            .filter(|envelope| envelope.message.is_terminal())
+            .filter_map(|envelope| envelope.message.task().map(str::to_owned))
+            .collect()
     }
 
     /// Numbered frames not yet acknowledged.
@@ -250,7 +379,9 @@ impl Outbox {
         }
         if self.spill {
             while self.retained.len() > self.limit {
-                self.retained.pop_last();
+                if let Some((key, _)) = self.retained.pop_last() {
+                    self.spilled_from = Some(self.spilled_from.map_or(key, |from| from.min(key)));
+                }
             }
             if !self.spilled {
                 tracing::warn!(

@@ -253,10 +253,34 @@ impl Session {
     // ---------------------------------------------------------------- inputs
 
     /// The connection is open: register over it.
-    pub fn connected(&mut self, now: Duration, token: String, declaration: AgentDeclaration) {
+    ///
+    /// `tasks` is every task the app holds, in whatever state (waiting, under way, ended and
+    /// still remembered): the server ends as lost what it had under way for this process and
+    /// does not find among them. The session adds what only it knows of: the assigns it holds
+    /// for an app that is still starting, and the tasks whose end waits to be acknowledged.
+    /// `None` says nothing, and the server asks about each task instead.
+    pub fn connected(
+        &mut self,
+        now: Duration,
+        token: String,
+        declaration: AgentDeclaration,
+        tasks: Option<Vec<String>>,
+    ) {
         if !matches!(self.phase, Phase::Connecting) {
             return;
         }
+        let tasks = tasks.map(|mut tasks| {
+            if let Activation::Running(held) = &self.activation {
+                tasks.extend(held.iter().filter_map(|frame| match &frame.message {
+                    ToAgent::Assign(assign) => Some(assign.task.clone()),
+                    _ => None,
+                }));
+            }
+            tasks.extend(self.outbox.ended_tasks());
+            tasks.sort();
+            tasks.dedup();
+            tasks
+        });
         let nonce = self.mint_id();
         self.nonce = Some(nonce.clone());
         let register = FromAgent::Register {
@@ -267,6 +291,7 @@ impl Session {
             nonce: Some(nonce),
             commands_seen: self.commands_seen,
             sessions: self.outbox.sessions_owed(),
+            tasks,
             declaration,
         };
         let id = self.mint_id();
@@ -412,6 +437,10 @@ impl Session {
         if let Some(entries) = entries {
             self.outbox.reload(entries);
         }
+        if matches!(self.phase, Phase::Live) {
+            // Read back for a window that had run dry.
+            self.outbox.refill();
+        }
         if let Phase::Reloading { .. } = self.phase {
             let Phase::Reloading { early } = core::mem::replace(&mut self.phase, Phase::Live)
             else {
@@ -548,6 +577,10 @@ impl Session {
                     session: journal_session,
                     pos: through,
                 });
+                // The window has room that only the local journal can fill.
+                if matches!(self.phase, Phase::Live) && self.outbox.starved() {
+                    self.events.push_back(Event::ReloadJournal);
+                }
             }
             ToAgent::JournalNack {
                 journal_session,
@@ -570,6 +603,10 @@ impl Session {
                             last,
                         },
                     ));
+                }
+                // What was asked for is in the local journal only: read it back first.
+                if matches!(self.phase, Phase::Live) && self.outbox.starved() {
+                    self.events.push_back(Event::ReloadJournal);
                 }
             }
             // An assign still held for the app to start is known, and waiting: said here,

@@ -538,6 +538,12 @@ pub enum FromAgent<D = AgentDeclaration> {
         /// The journal sessions this agent still holds unacknowledged frames of.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         sessions: Vec<String>,
+        /// Every task this process holds, in whatever state: waiting, under way, or ended
+        /// with its report still to come. A server that had one of the process's tasks
+        /// under way and does not find it here ends it as lost, at once. Left out by an
+        /// agent that does not say: the server asks about each (`INQUIRE`) instead.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tasks: Option<Vec<String>>,
         #[serde(flatten)]
         declaration: D,
     },
@@ -651,7 +657,31 @@ pub enum FromAgent<D = AgentDeclaration> {
         message: Option<String>,
         blok: TaskBlok,
     },
-    /// One RFC 6902 operation on a state.
+    /// One update of a state: what takes it from one revision to the next.
+    ///
+    /// An update is the unit a state changes by. However many operations describe it, they
+    /// are applied in order and seen together or not at all: nobody who follows the state is
+    /// shown it between two of them. `global_rev` is the agent's state revision once the
+    /// update is applied. The session it belongs to and when it was made are the frame's own
+    /// (`journal_session`, `agent_ts`).
+    StateUpdate {
+        state: String,
+        global_rev: u64,
+        ops: Vec<StateOp>,
+        /// The task that made the update, if one did.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        task: Option<String>,
+        /// Where in a task's or the agent's life the update was made, when not in its
+        /// ordinary course: `cleanup` (a task being stopped, on its way out) or `shutdown`
+        /// (the agent's shutdown hooks). Said by the agent's runtime, never by the app.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        lifecycle: Option<String>,
+        /// What the app says the update was for: its own names.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        qualifiers: Option<Vec<String>>,
+    },
+    /// One RFC 6902 operation on a state, as agents said it before [`FromAgent::StateUpdate`]:
+    /// an update of one operation.
     StatePatch {
         session_id: String,
         global_rev: u64,
@@ -821,6 +851,15 @@ pub enum FromAgent<D = AgentDeclaration> {
     },
 }
 
+/// One RFC 6902 operation of a [`FromAgent::StateUpdate`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StateOp {
+    pub op: String,
+    pub path: String,
+    #[serde(default)]
+    pub value: Value,
+}
+
 /// What an [`FromAgent::Effect`] recorded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -875,7 +914,7 @@ impl<D> FromAgent<D> {
         )
     }
 
-    /// The task a frame belongs to: for `STATE_PATCH` the changing task, for
+    /// The task a frame belongs to: for `STATE_UPDATE` and `STATE_PATCH` the changing task, for
     /// `LOCK`/`UNLOCK` the holder, for `SHELVE` the task that shelved.
     pub fn task(&self) -> Option<&str> {
         match self {
@@ -896,6 +935,7 @@ impl<D> FromAgent<D> {
             | FromAgent::Lock { task, .. } => Some(task),
             FromAgent::Unlock { task, .. } => task.as_deref(),
             FromAgent::StatePatch { task_id, .. } => task_id.as_deref(),
+            FromAgent::StateUpdate { task, .. } => task.as_deref(),
             FromAgent::Shelve { task, .. } => task.as_deref(),
             _ => None,
         }
@@ -1088,6 +1128,7 @@ mod tests {
             nonce: None,
             commands_seen: 0,
             sessions: vec![],
+            tasks: None,
             declaration: decl,
         }))
         .unwrap();

@@ -336,6 +336,19 @@ impl Executor {
         self.inner.tasks.lock().managed.contains_key(task)
     }
 
+    /// Every task this executor would not call unknown: taken (waiting or under way), or
+    /// ended and still remembered. Kept beside [`Executor::is_running`] and
+    /// [`Executor::has_finished`]: a task one of them knows must be here.
+    pub fn known_tasks(&self) -> Vec<String> {
+        let tasks = self.inner.tasks.lock();
+        tasks
+            .managed
+            .keys()
+            .cloned()
+            .chain(tasks.finished.iter().cloned())
+            .collect()
+    }
+
     pub fn has_finished(&self, task: &str) -> bool {
         self.inner.tasks.lock().finished_set.contains(task)
     }

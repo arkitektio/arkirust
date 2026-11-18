@@ -139,7 +139,12 @@ pub async fn run<D: Dial, N: Fn() -> Duration>(
                 Ok(socket) => {
                     let declaration =
                         driver.declaration(link.name.clone(), link.description.clone());
-                    driver.with_session(|session| session.connected(now(), token, declaration));
+                    // What this process holds: the server ends what it had under way for it
+                    // and does not find here.
+                    let tasks = driver.known_tasks();
+                    driver.with_session(|session| {
+                        session.connected(now(), token, declaration, Some(tasks))
+                    });
                     serve(link, socket, now).await?;
                 }
                 Err(e) => driver.with_session(|session| {

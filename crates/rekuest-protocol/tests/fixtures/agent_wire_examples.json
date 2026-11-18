@@ -386,6 +386,29 @@
       "value": "B1",
       "task_id": "task_id-1"
     },
+    "STATE_UPDATE": {
+      "id": "id-1",
+      "pos": 7,
+      "journal_session": "journal_session-1",
+      "agent_ts": 1.5,
+      "task_step": 7,
+      "type": "STATE_UPDATE",
+      "state": "state-1",
+      "global_rev": 7,
+      "ops": [
+        {
+          "op": "replace",
+          "path": "/barcode",
+          "value": "B1"
+        },
+        {
+          "op": "remove",
+          "path": "/pending/0",
+          "value": null
+        }
+      ],
+      "task": "task-1"
+    },
     "STATE_REVISION_REQUEST": {
       "id": "id-1",
       "type": "STATE_REVISION_REQUEST",

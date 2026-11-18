@@ -112,6 +112,12 @@ impl Driver {
         &self.journal
     }
 
+    /// Every task this process holds, for `REGISTER`'s `tasks` (see
+    /// [`Session::connected`]).
+    pub fn known_tasks(&self) -> Vec<String> {
+        self.executor.known_tasks()
+    }
+
     /// What this agent registers.
     pub fn declaration(
         &self,
@@ -251,6 +257,7 @@ mod tests {
                 Duration::ZERO,
                 "t".into(),
                 serde_json::from_value(serde_json::json!({})).unwrap(),
+                None,
             );
             session.handle_text(
                 Duration::ZERO,

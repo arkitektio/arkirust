@@ -49,7 +49,7 @@ fn registering(session: &mut Session, now: Duration) {
     events(session);
     session.handle_timeout(now);
     assert_eq!(events(session), [Event::Connect]);
-    session.connected(now, "token".into(), declaration());
+    session.connected(now, "token".into(), declaration(), None);
     assert_eq!(types(&sent(session)), ["REGISTER"]);
 }
 
@@ -96,7 +96,7 @@ fn registers_with_the_session_and_declaration() {
     );
     session.handle_timeout(Duration::ZERO);
     assert_eq!(events(&mut session), [Event::Connect]);
-    session.connected(Duration::ZERO, "tok".into(), declaration());
+    session.connected(Duration::ZERO, "tok".into(), declaration(), None);
     let register = &sent(&mut session)[0];
     assert_eq!(
         (
@@ -426,7 +426,7 @@ fn a_numbered_bounce_is_seen_and_not_obeyed_on_every_connection() {
     let again = session.poll_timeout().unwrap();
     events(&mut session);
     session.handle_timeout(again);
-    session.connected(again, "token".into(), declaration());
+    session.connected(again, "token".into(), declaration(), None);
     let register = sent(&mut session)
         .into_iter()
         .find(|frame| frame["type"] == "REGISTER")
@@ -524,7 +524,7 @@ fn the_scripted_scenario() {
                 Event::Connect => {
                     server.connected();
                     open = true;
-                    session.connected(now, "token".into(), declaration());
+                    session.connected(now, "token".into(), declaration(), None);
                 }
                 Event::Close => open = false,
                 Event::Ended(e) => panic!("ended: {e}"),
