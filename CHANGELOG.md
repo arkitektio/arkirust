@@ -1,6 +1,23 @@
 # CHANGELOG
 
 
+## v0.24.0 (2026-11-18)
+
+### Features
+
+- **blok**: An app declares bloks as their BSX source
+  ([`308f0f6`](https://github.com/arkitektio/arkirust/commit/308f0f619d75250e348441abfa97a21ad7ce6381))
+
+`App::blok(key, source)` and `App::blok_with(Blok)`: a blok travels as its source alone (`{key,
+  source, vocab}` and what was set beside it), and the server reads the context, the catalog and
+  what it reads of the agent off it. There is no parser or checker here: a blok the server refuses
+  fails the registration with the server's message.
+
+Served locally, `GET /schemas/bloks` lists the declared bloks as they were written.
+
+Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+
+
 ## v0.23.0 (2026-11-18)
 
 ### Features
