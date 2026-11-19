@@ -580,6 +580,7 @@ fn build_assign(
         action: "api_call".into(),
         implementation: implementation.unwrap_or_else(|| "fastapi".into()),
         token: None,
+        traceparent: None,
         resume: None,
         state_requires: vec![],
     })

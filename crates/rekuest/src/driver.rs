@@ -336,6 +336,7 @@ mod tests {
                 state_requires: vec![],
                 on_lost: None,
                 max_resumes: None,
+                traceparent: None,
             },
             None,
         );

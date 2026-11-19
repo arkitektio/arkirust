@@ -205,6 +205,11 @@ pub struct Assign {
     pub implementation: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token: Option<String>,
+    /// The trace the task is part of, as a W3C `traceparent`: what the agent does for the
+    /// task, and what it asks of others on its behalf, belongs to that trace. None where
+    /// nobody traces.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub traceparent: Option<String>,
     /// Set when the server sends a workflow again after its agent died: what the
     /// previous run recorded, for the resumed run to replay.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -806,6 +811,10 @@ pub enum FromAgent<D = AgentDeclaration> {
         /// after all. Left out, the server's own limit applies.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         max_resumes: Option<u32>,
+        /// Where in the parent's trace the call was made, as a W3C `traceparent`: the child
+        /// continues from there. Left out, the child continues the parent task's own.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        traceparent: Option<String>,
     },
     /// Ask the server to run an action as a probe (not a task; nothing is recorded).
     ProbeRequest {

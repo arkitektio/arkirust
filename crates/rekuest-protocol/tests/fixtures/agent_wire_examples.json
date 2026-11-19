@@ -47,7 +47,8 @@
       "journal_session": "journal_session-1",
       "agent_ts": 1.5,
       "on_lost": "FAIL",
-      "max_resumes": 7
+      "max_resumes": 7,
+      "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
     },
     "CANCELLED": {
       "id": "id-1",
@@ -631,7 +632,8 @@
           "value": "value-1"
         }
       ],
-      "pos": 7
+      "pos": 7,
+      "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
     },
     "ASSIGN_RESPONSE": {
       "id": "id-1",
