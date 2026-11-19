@@ -1,6 +1,20 @@
 # CHANGELOG
 
 
+## v0.25.0 (2026-11-19)
+
+### Features
+
+- Follow the hub owner's alias ranking, with FAKTS_ALIAS_* policy
+  ([`cea0194`](https://github.com/arkitektio/arkirust/commit/cea01947f2b2a9e1f64816d950a24c649249a580))
+
+Alias gains reach and priority. resolve_alias walks the aliases ranked like Python fakts: client
+  policy (FAKTS_ALIAS_PREFER_REACH / _EXCLUDE_REACH / _EXCLUDE, or FaktsBuilder::alias_policy), then
+  the server's priority, then its order. FaktsError::AliasesExcluded when the policy leaves none.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+
 ## v0.24.0 (2026-11-18)
 
 ### Features
