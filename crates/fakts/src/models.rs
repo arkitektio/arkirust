@@ -245,6 +245,8 @@ mod tests {
             challenge: String::new(),
             public: false,
             kind: kind.map(Into::into),
+            reach: None,
+            priority: None,
             proxy: None,
         };
         assert!(alias("meshhub.org.mesh.example", Some("mesh")).is_mesh());
@@ -266,6 +268,8 @@ mod tests {
             challenge: "ht".into(),
             public: false,
             kind: None,
+            reach: None,
+            priority: None,
             proxy: None,
         };
         assert_eq!(

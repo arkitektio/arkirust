@@ -44,6 +44,7 @@ pub(crate) mod collections {
     pub use std::collections::HashMap;
 }
 
+pub mod aliases;
 pub mod cache;
 #[cfg(feature = "std")]
 mod cache_file;
@@ -58,6 +59,7 @@ pub mod mesh;
 pub mod mesh_join;
 mod models;
 
+pub use crate::aliases::{ranked_aliases, AliasPolicy};
 pub use crate::cache::FaktsStore;
 #[cfg(feature = "std")]
 pub use crate::cache::FileStore;

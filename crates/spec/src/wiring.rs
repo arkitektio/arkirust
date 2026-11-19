@@ -26,6 +26,14 @@ pub struct Alias {
     /// `"mesh"` (only reachable over the deployment's tailnet).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
+    /// Where this alias's address works: `"loopback"`, `"internal"`,
+    /// `"lan"`, `"mesh"` or `"public"`. Older servers do not send it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reach: Option<String>,
+    /// The server's ranking among the instance's aliases: lower is tried
+    /// first. Older servers do not send it (their order stands).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub priority: Option<i32>,
     /// The HTTP proxy this alias is reached through (the mesh sidecar), set
     /// when the alias is resolved. Never sent or cached.
     #[serde(skip)]

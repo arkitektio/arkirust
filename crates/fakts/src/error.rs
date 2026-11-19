@@ -37,6 +37,8 @@ pub enum FaktsError {
     MissingInstance { key: String, status: String },
     #[error("no alias of '{0}' answered its challenge")]
     NoReachableAlias(String),
+    #[error("every alias of '{0}' is excluded by this client's alias policy")]
+    AliasesExcluded(String),
     #[error("refusing plain http to non-loopback host {0}; set FAKTS_ALLOW_INSECURE_TRANSPORT=1 to allow")]
     InsecureTransport(String),
     #[error("mesh: {0}")]

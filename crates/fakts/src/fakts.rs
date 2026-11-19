@@ -11,6 +11,7 @@ use base64::Engine;
 #[cfg(feature = "std")]
 use reqwest::Client;
 
+use crate::aliases::{ranked_aliases, AliasPolicy};
 #[cfg(feature = "std")]
 use crate::cache::FileStore;
 use crate::cache::{self, FaktsStore};
@@ -65,6 +66,7 @@ pub struct FaktsBuilder {
     store: Option<Arc<dyn FaktsStore>>,
     use_cache: bool,
     allow_insecure_transport: bool,
+    alias_policy: AliasPolicy,
     host: Option<Arc<dyn Host>>,
     #[cfg(feature = "std")]
     http: Option<Client>,
@@ -105,6 +107,10 @@ impl FaktsBuilder {
             store: None,
             use_cache: true,
             allow_insecure_transport: false,
+            #[cfg(feature = "std")]
+            alias_policy: AliasPolicy::from_env(),
+            #[cfg(not(feature = "std"))]
+            alias_policy: AliasPolicy::default(),
             host: None,
             #[cfg(feature = "std")]
             http: None,
@@ -141,6 +147,14 @@ impl FaktsBuilder {
 
     pub fn allow_insecure_transport(mut self, allow: bool) -> Self {
         self.allow_insecure_transport = allow;
+        self
+    }
+
+    /// Narrow or reorder the server's alias ranking (with std the default
+    /// comes from `FAKTS_ALIAS_PREFER_REACH`, `FAKTS_ALIAS_EXCLUDE_REACH`
+    /// and `FAKTS_ALIAS_EXCLUDE`, see [`AliasPolicy::from_env`]).
+    pub fn alias_policy(mut self, policy: AliasPolicy) -> Self {
+        self.alias_policy = policy;
         self
     }
 
@@ -322,6 +336,7 @@ impl FaktsBuilder {
                 active: Mutex::new(active),
                 refresh_lock: Mutex::new(()),
                 aliases: Mutex::new(HashMap::default()),
+                alias_policy: self.alias_policy,
                 mesh_proxy,
                 #[cfg(feature = "mesh")]
                 mesh_node: mesh_node.map(Mutex::new),
@@ -515,6 +530,8 @@ struct Inner {
     active: Mutex<ActiveFakts>,
     refresh_lock: Mutex<()>,
     aliases: Mutex<HashMap<String, Alias>>,
+    /// This client's own say over the server's alias ranking.
+    alias_policy: AliasPolicy,
     /// The HTTP proxy mesh aliases are reached through.
     mesh_proxy: Option<String>,
     /// Kept alive for as long as the handle; stops the node when dropped.
@@ -657,9 +674,15 @@ impl Fakts {
             .ok_or_else(|| FaktsError::Protocol("the server sent no self alias".into()))
     }
 
+    /// The first alias, in the order the server ranks them (after this
+    /// client's [`AliasPolicy`]), that answers its challenge.
     async fn resolve_alias(&self, key: &str, instance: &Instance) -> Result<Alias> {
+        let ranked = ranked_aliases(&instance.aliases, &self.inner.alias_policy);
+        if ranked.is_empty() && !instance.aliases.is_empty() {
+            return Err(FaktsError::AliasesExcluded(key.to_owned()));
+        }
         let mut skipped_mesh = false;
-        for alias in &instance.aliases {
+        for alias in &ranked {
             // The first request to a mesh peer sets up its tunnel (a WireGuard
             // handshake, through a DERP relay at first): seconds, on a board.
             let (host, proxy, timeout) = if alias.is_mesh() {
