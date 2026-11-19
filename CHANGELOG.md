@@ -1,6 +1,20 @@
 # CHANGELOG
 
 
+## v0.26.0 (2026-11-19)
+
+### Features
+
+- **protocol**: An assignment carries the trace it is part of
+  ([`ef2604d`](https://github.com/arkitektio/arkirust/commit/ef2604db8ea99a81a655256325edb62f7ac2d986))
+
+`Assign.traceparent` and `AssignRequest.traceparent` (W3C Trace Context, optional and left out when
+  unset): the server hands an agent the trace a task belongs to, and an agent says where in it a
+  child call was made. An agent that does not trace ignores the field.
+
+Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+
+
 ## v0.25.0 (2026-11-19)
 
 ### Features
