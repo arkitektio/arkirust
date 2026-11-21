@@ -1,6 +1,20 @@
 # CHANGELOG
 
 
+## v0.27.0 (2026-11-21)
+
+### Features
+
+- **protocol**: A resume journal lists the calls the workflow made
+  ([`58b29c1`](https://github.com/arkitektio/arkirust/commit/58b29c1686ef4ad3ed6a66ef6a35d549918115ac))
+
+A resumed workflow's journal carries the call keys of the children it has (calls) and whether its
+  code changed since the run started (code_changed). Both default when absent, so a journal from an
+  older server still parses.
+
+Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+
+
 ## v0.26.0 (2026-11-19)
 
 ### Features
