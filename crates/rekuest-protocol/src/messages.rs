@@ -228,13 +228,22 @@ pub struct RecordedEffect {
     pub value: Value,
 }
 
-/// What a resumed workflow replays: its recorded effects, and the step to continue after.
+/// What a resumed workflow replays: its recorded effects, the keys of the calls it made, and
+/// the step to continue after.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Journal {
     #[serde(default)]
     pub last_step: u64,
     #[serde(default)]
     pub effects: Vec<RecordedEffect>,
+    /// The call keys of the children it has, in the order of their steps. The resumed run
+    /// must make these calls again before it makes any other.
+    #[serde(default)]
+    pub calls: Vec<String>,
+    /// Whether the workflow's code differs from the code this run started on. Information
+    /// for the error of a run that takes another path; it does not stop the resume.
+    #[serde(default)]
+    pub code_changed: bool,
 }
 
 /// The fields every `…_EVENT` mirror carries: the server tells a caller what

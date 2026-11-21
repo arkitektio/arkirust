@@ -622,7 +622,11 @@
             "effect": "effect-1",
             "value": null
           }
-        ]
+        ],
+        "calls": [
+          "calls-1"
+        ],
+        "code_changed": true
       },
       "state_requires": [
         {
